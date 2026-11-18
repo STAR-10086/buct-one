@@ -1,7 +1,6 @@
 package com.buct.course.ui.screen
 
 import android.content.Context
-import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,8 +20,7 @@ import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.SystemDialog
 import com.buct.course.ui.system.SystemPrimaryButton
 import com.buct.course.ui.system.SystemSecondaryButton
-import com.buct.course.widget.ScheduleDayWidget
-import com.buct.course.widget.ScheduleWidget
+import com.buct.course.widget.WidgetProviders
 
 private const val MAX_WIDGET_TITLE_LENGTH = 12
 
@@ -97,16 +95,7 @@ fun WidgetTitleDialog(onDismiss: () -> Unit) {
     }
 }
 
-/** 两种小组件都重建一次（不重置今日课表已翻的日期）。 */
+/** 两种小组件都重建一次（同时覆盖新旧兼容壳组件）。 */
 private fun refreshWidgetTitles(context: Context) {
-    runCatching {
-        context.sendBroadcast(
-            Intent(context, ScheduleWidget::class.java)
-                .setAction("com.buct.course.widget.REFRESH_WIDGET")
-        )
-        context.sendBroadcast(
-            Intent(context, ScheduleDayWidget::class.java)
-                .setAction("com.buct.course.widget.REFRESH_WIDGET")
-        )
-    }
+    WidgetProviders.refreshAll(context)
 }

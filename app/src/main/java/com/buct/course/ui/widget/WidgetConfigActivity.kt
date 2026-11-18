@@ -148,6 +148,7 @@ class WidgetConfigActivity : ComponentActivity() {
         runCatching {
             if (isDay) {
                 ScheduleDayWidget.updateAppWidget(ctx, manager, appWidgetId)
+                manager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_day_list)
             } else {
                 ScheduleWidget.updateAppWidget(ctx, manager, appWidgetId)
                 manager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_list)

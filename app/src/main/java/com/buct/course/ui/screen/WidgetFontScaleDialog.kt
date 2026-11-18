@@ -36,8 +36,7 @@ import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.SystemDialog
 import com.buct.course.ui.system.SystemPrimaryButton
 import com.buct.course.ui.system.SystemSecondaryButton
-import com.buct.course.widget.ScheduleDayWidget
-import com.buct.course.widget.ScheduleWidget
+import com.buct.course.widget.WidgetProviders
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -234,18 +233,9 @@ fun WidgetFontScaleDialog(onDismiss: () -> Unit) {
 
 private fun percentOf(scale: Float): Int = (scale * 100f).roundToInt()
 
-/** 两种小组件都重绘：周视图走 REFRESH 广播，日视图走「回到今天」重置（顺带重建）。 */
+/** 两种小组件都重绘（同时刷新新旧兼容壳组件）。 */
 private fun refreshWidgets(context: android.content.Context) {
-    runCatching {
-        context.sendBroadcast(
-            android.content.Intent(context, ScheduleWidget::class.java)
-                .setAction("com.buct.course.widget.REFRESH_WIDGET")
-        )
-        context.sendBroadcast(
-            android.content.Intent(context, ScheduleDayWidget::class.java)
-                .setAction(ScheduleDayWidget.ACTION_DAY_TODAY)
-        )
-    }
+    WidgetProviders.refreshAll(context)
 }
 
 /** 五档吸附按钮，与「字体大小」弹窗同款。 */

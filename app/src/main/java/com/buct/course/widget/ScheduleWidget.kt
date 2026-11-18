@@ -43,7 +43,7 @@ open class ScheduleWidget : AppWidgetProvider() {
             // 增量刷新：标题用 partialUpdate 局部更新，列表用 notify 让 Service 重读周数，
             // 不再整卡重建（避免切换缓慢 + 按钮 PendingIntent 被重置导致点击不稳定）
             val appWidgetManager = AppWidgetManager.getInstance(context)
-            val ids = appWidgetManager.getAppWidgetIds(intent.component)
+            val ids = WidgetProviders.weekIds(context, appWidgetManager)
             for (id in ids) {
                 val views = RemoteViews(context.packageName, R.layout.widget_schedule)
                 views.setTextViewText(R.id.widget_week_info, weekInfoText(currentWeek))
@@ -217,8 +217,10 @@ open class ScheduleWidget : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.widget_next_week, nextPendingIntent)
 
             // 设置 ListView 的 RemoteViewsService
-            val serviceIntent = Intent(context, ScheduleWidgetService::class.java)
-            serviceIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            val serviceIntent = Intent(context, ScheduleWidgetService::class.java).apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                data = android.net.Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+            }
             views.setRemoteAdapter(R.id.widget_list, serviceIntent)
 
             // 点击标题进「小组件配置」，点击列表项跳转到 app
