@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">北化课表</string>
-    <string name="login_title">登录教务系统</string>
+    <string name="app_name">BUCT One</string>
+    <string name="login_title">登录北化统一身份认证</string>
     <string name="username">学号</string>
     <string name="password">密码</string>
     <string name="captcha">验证码</string>

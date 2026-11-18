@@ -74,7 +74,7 @@ android {
     compileSdkVersion 'android-37.0'
 
     defaultConfig {
-        applicationId "com.buct.course"
+        applicationId "com.buct.one"
         minSdk 24
         targetSdk 34
         versionCode code
