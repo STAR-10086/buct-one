@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.buct.one.ui.dashboard.DashboardScreen
+import com.buct.one.ui.AppRoot
 import com.buct.one.ui.theme.BuctTheme
 
 class MainActivity : ComponentActivity() {
@@ -13,7 +13,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             BuctTheme {
-                DashboardScreen()
+                AppRoot()
             }
         }
     }

@@ -64,17 +64,8 @@ private data class TodoItem(val title: String, val due: String, val urgent: Bool
  */
 @Composable
 fun DashboardScreen() {
-    var selected by remember { mutableIntStateOf(2) }  // 默认停在工作台
-    // 五栏：课表 · 成绩 · [工作台] · 作业 · 我的
-    val tabs = listOf(
-        NavTab("课表", Icons.Filled.DateRange),
-        NavTab("成绩", Icons.Filled.List),
-        NavTab("工作台", icon = null, center = true),
-        NavTab("作业", Icons.Filled.CheckCircle),
-        NavTab("我的", Icons.Filled.Person),
-    )
 
-    Box(Modifier.fillMaxSize().background(WallpaperBrush)) {
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Column(
                 Modifier
@@ -99,27 +90,10 @@ fun DashboardScreen() {
                 WeekCard(current = 12, total = 20, note = "期末还有 5 周 · 寒假 1月12日")
                 EntryGrid()
             }
-            BuctNavBar(
-                tabs = tabs,
-                selected = selected,
-                onSelect = { selected = it },
-                modifier = Modifier.navigationBarsPadding(),
-            )
         }
     }
 }
 
-/**
- * 壁纸：截图里是蓝→紫→青的高亮渐变，四角压低、中间提亮。
- * 用四段线性渐变近似，避免引入图片资源。
- */
-private val WallpaperBrush: Brush
-    get() = Brush.linearGradient(
-        0f to BuctColors.CanvasTop,
-        0.34f to BuctColors.CanvasMid,
-        0.62f to BuctColors.CanvasWarm,
-        1f to BuctColors.CanvasBottom,
-    )
 
 @Composable
 private fun Header() {
