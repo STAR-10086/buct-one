@@ -311,7 +311,7 @@ class JwglxtScheduleSource(
 
 - **抓什么**：GET /meol/jkc_list.do（我的课程）→ 每门课的课程页与作业/通知列表页（THEOL 是 JSP 页面，无公开 API——规划风险 #3）。
 - **分页**：THEOL 列表多为 offset/每页 20，解析 <a> 与表格行；分页上限 5 页，超出记 complete=false。
-- **解析入口**：自写轻量 HTML 解析（Regex + 手写游标，不引入 Jsoup——**省体积**，Jsoup 约 500KB；THEOL 页面结构简单，正则够用。若后期复杂度失控再评估）。
+- **解析入口**：Jsoup 选择器解析（约 500KB，体积不是瓶颈）。THEOL 页面结构简单，但选择器比正则更耐页面改版，出错时也更容易定位是哪一格没匹配上。
 - **complete=false**：列表页出现「系统繁忙」、课程数 > 上次快照 ×3（改版嫌疑）、或分页中断。
 
 ---
@@ -491,10 +491,10 @@ class SyncEngine(
   - 冷启动若快照 capturedAt 超过 7 天 → Dashboard 顶部黄条。
 - **网络条件**：默认「任意网络」；设置项「仅 WiFi 同步大流量域（theol/mail/venue）」，schedule/grades 恒允许（体积极小）。用 ConnectivityManager 的 NET_CAPABILITY_NOT_METERED 判定。
 
-### 5.3 与 WorkManager 的关系
+### 5.3 与系统调度的关系
 
 - **WorkManager 只做两件事**：(a) 每 6 小时一次的 PeriodicWorkRequest（SyncWorker，约束 NetworkType.CONNECTED），(b) 小组件刷新的 expedited work。**SyncEngine 是纯 Kotlin 类**（无 Android 依赖，Context 由调用方注入），Worker 只是薄壳调用 syncOnce(Trigger.BACKGROUND)。这保证 SyncEngine 可在 JVM 单测里直接跑（云端 CI 跑单测，配套约束 #1）。
-- WorkManager 依赖已在基线（widget 侧使用），无新增体积。
+- **调度用 AlarmManager，不引 WorkManager**：WorkManager 的周期任务在 Doze 下最坏可延迟数小时，而课表刷新与小组件需要时机可预期。体积已不是理由（WorkManager 约 400KB，在 100MB 上限下可忽略），这里的取舍纯粹是调度精度。WorkManager 只在「粗粒度兜底同步」时可选引入。
 
 ---
 
@@ -508,7 +508,7 @@ class SyncEngine(
 | 自写最小 IMAP 客户端 | 0 | 协议坑多（字面量、续行、charset、IDLE），单人维护不值 |
 | com.sun.mail:android-mail | 同上 | 停更，是 angus 的前身，不选 |
 
-**决策：angus-mail，M3 引入并在 CI 体积门禁观察；若 R8 后增量 >400KB 则降级为「只保留 mail.buct.edu.cn 的 webmail 页面跳转」并在文档记录。**
+**决策：angus-mail，M3 引入。** 体积不再是约束条件；若后期觉得 IMAP 的维护成本高于收益，可退回「只跳转 webmail」并在此记录。
 
 ### 6.2 实现要点
 
