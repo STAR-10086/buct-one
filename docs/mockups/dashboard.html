@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+  *{box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  html,body{margin:0;padding:0;background:#14161c;
+    font-family:-apple-system,"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;}
+  .stage{display:flex;gap:28px;padding:28px;}
+
+  .phone{position:relative;width:390px;height:844px;border-radius:44px;overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.6);}
+  .wall{position:absolute;inset:-18%;filter:blur(44px) saturate(150%);}
+  .scrim{position:absolute;inset:0;}
+  .screen{position:relative;height:100%;display:flex;flex-direction:column;}
+
+  /* ---- 深色 ---- */
+  .dark{background:#070b14;color:#fff;}
+  .dark .wall{background:
+      radial-gradient(46% 32% at 24% 12%, #2f6bff 0%, transparent 60%),
+      radial-gradient(42% 28% at 78% 6%, #8b5cf6 0%, transparent 58%),
+      radial-gradient(58% 34% at 10% 64%, #06b6d4 0%, transparent 60%),
+      radial-gradient(48% 36% at 92% 56%, #2563eb 0%, transparent 58%),
+      radial-gradient(72% 48% at 50% 104%, #0e7490 0%, transparent 62%),
+      linear-gradient(165deg,#070b14,#0e1730 52%,#070b14);}
+  .dark .scrim{background:linear-gradient(180deg,rgba(4,7,14,.42),rgba(4,7,14,.12) 42%,rgba(4,7,14,.5));}
+  .dark .card{background:rgba(255,255,255,.13);border:.5px solid rgba(255,255,255,.26);
+    box-shadow:0 12px 34px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.2);}
+  .dark .card.soft{background:rgba(255,255,255,.10);}
+  .dark .ink2{color:rgba(255,255,255,.82)} .dark .ink3{color:rgba(255,255,255,.58)}
+  .dark .tabbar{background:rgba(255,255,255,.11);border-top:.5px solid rgba(255,255,255,.2);}
+  .dark .tab{color:rgba(255,255,255,.52)} .dark .tab.active{color:#fff}
+
+  /* ---- 浅色 ---- */
+  .light{background:#eef3fb;color:#0a1628;}
+  .light .wall{background:
+      radial-gradient(46% 32% at 24% 12%, #7db2ff 0%, transparent 62%),
+      radial-gradient(42% 28% at 78% 6%, #b79cff 0%, transparent 58%),
+      radial-gradient(58% 34% at 10% 64%, #7fe0ee 0%, transparent 60%),
+      radial-gradient(48% 36% at 92% 56%, #9dc0ff 0%, transparent 58%),
+      radial-gradient(72% 48% at 50% 104%, #a7d9e8 0%, transparent 62%),
+      linear-gradient(165deg,#eef3fb,#e6edfa 52%,#eef3fb);}
+  .light .scrim{background:linear-gradient(180deg,rgba(255,255,255,.42),rgba(255,255,255,.14) 42%,rgba(255,255,255,.5));}
+  .light .card{background:rgba(255,255,255,.66);border:.5px solid rgba(255,255,255,.92);
+    box-shadow:0 10px 28px rgba(24,50,90,.12), inset 0 1px 0 rgba(255,255,255,.9);}
+  .light .card.soft{background:rgba(255,255,255,.54);}
+  .light .ink2{color:rgba(10,22,40,.78)} .light .ink3{color:rgba(10,22,40,.52)}
+  .light .tabbar{background:rgba(255,255,255,.62);border-top:.5px solid rgba(255,255,255,.9);}
+  .light .tab{color:rgba(10,22,40,.45)} .light .tab.active{color:#0A84FF}
+
+  /* 共用 */
+  .sb{display:flex;justify-content:space-between;align-items:center;padding:14px 24px 0;
+      font-size:12.5px;font-weight:600;opacity:.6;letter-spacing:.2px}
+  .pill{width:40px;height:8px;border-radius:5px;background:currentColor;opacity:.35}
+  .scroll{flex:1;overflow:hidden;padding:0 20px}
+  .eyebrow{font-size:12px;font-weight:500;opacity:.56;letter-spacing:.3px;margin-top:12px}
+  h1{margin:2px 0 18px;font-size:32px;line-height:1.12;font-weight:700;letter-spacing:-.8px}
+  .card{border-radius:24px;padding:16px;margin-bottom:14px;
+    -webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%);}
+  .card.soft{border-radius:20px;padding:14px 16px}
+  .hero{border-radius:26px;padding:18px}
+  .lbl{font-size:11.5px;font-weight:600;opacity:.58;letter-spacing:.4px}
+  .h{font-size:21px;font-weight:700;letter-spacing:-.3px;margin:3px 0 4px}
+  .b{font-size:13.5px;opacity:.82;line-height:1.45}
+  .s{font-size:12px;opacity:.58}
+  .heroRow{display:flex;align-items:center;gap:12px}
+  .bar{width:3px;height:60px;border-radius:2px;background:#0A84FF;flex:0 0 auto;
+       box-shadow:0 0 16px rgba(10,132,255,.75)}
+  .chip{margin-left:auto;background:#0A84FF;color:#fff;font-size:12px;font-weight:600;
+        padding:7px 13px;border-radius:14px;box-shadow:0 6px 18px rgba(10,132,255,.5)}
+  .row{display:flex;align-items:center;gap:10px}
+  .row+.row{margin-top:10px}
+  .dot{width:6px;height:6px;border-radius:50%;flex:0 0 auto}
+  .grow{flex:1}
+  .big{font-variant-numeric:tabular-nums;font-size:34px;font-weight:700;letter-spacing:-1px;line-height:1}
+  .track{height:4px;border-radius:2px;margin:12px 0 8px;overflow:hidden}
+  .dark .track{background:rgba(255,255,255,.18)} .light .track{background:rgba(10,22,40,.14)}
+  .fill{height:100%;width:60%;border-radius:2px;background:#0A84FF;box-shadow:0 0 12px rgba(10,132,255,.6)}
+  .badge{background:#FF453A;color:#fff;font-size:12px;font-weight:700;padding:3px 8px;border-radius:10px}
+  .red{color:#FF453A}
+
+  .tabbar{position:relative;height:74px;flex:0 0 auto;display:flex;align-items:flex-start;
+    padding:8px 6px 0;-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);}
+  .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+       font-size:10.5px;font-weight:500;padding-top:5px}
+  .tab svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;
+           stroke-linecap:round;stroke-linejoin:round}
+  .center{flex:1;display:flex;flex-direction:column;align-items:center;position:relative}
+  .fab{position:absolute;top:-19px;width:54px;height:54px;border-radius:17px;padding:14px;
+    background:linear-gradient(160deg,#37a8ff,#0A6BFF 58%,#0057DB);
+    box-shadow:0 12px 30px rgba(10,110,255,.6), inset 0 1px 0 rgba(255,255,255,.5);
+    display:grid;grid-template-columns:1fr 1fr;gap:3.5px;}
+  .fab i{background:#fff;border-radius:1.5px}
+  .center span{position:absolute;top:39px;font-size:10.5px;font-weight:700;color:#0A84FF}
+  .dark .center span{color:#fff}
+</style></head>
+<body><div class="stage">
+
+  <div class="phone dark">
+    <div class="wall"></div><div class="scrim"></div>
+    <div class="screen">
+      <div class="sb"><span>8:04</span><span class="pill"></span></div>
+      <div class="scroll">
+        <div class="eyebrow">周三 · 第 12 教学周 · 11月19日</div>
+        <h1>今天</h1>
+        <div class="card hero"><div class="heroRow">
+          <div class="bar"></div>
+          <div><div class="lbl">下一节课</div><div class="h">高等数学 A(2)</div>
+               <div class="b">10:10 – 11:45</div><div class="s">主教 402</div></div>
+          <div class="chip">12 分后</div>
+        </div></div>
+        <div class="card soft">
+          <div class="row" style="margin-bottom:10px"><span class="lbl grow">今日待办</span><span class="lbl">2</span></div>
+          <div class="row"><span class="dot" style="background:#FF453A"></span>
+            <span class="grow" style="font-size:14px">数据结构作业</span><span class="s red">今天 23:59</span></div>
+          <div class="row"><span class="dot" style="background:rgba(255,255,255,.45)"></span>
+            <span class="grow ink2" style="font-size:14px">选课确认</span><span class="s">周五</span></div>
+        </div>
+        <div class="card soft"><div class="row">
+          <div class="grow"><div class="lbl">最近考试</div>
+            <div style="font-size:15.5px;font-weight:600;margin:3px 0 2px">高等数学 A(2)</div>
+            <div class="s">12月20日 09:00 · 主教 402</div></div>
+          <div style="text-align:right"><div class="big">31</div><div class="s" style="margin-top:2px">天后</div></div>
+        </div></div>
+        <div class="card soft"><div class="row">
+          <div class="grow"><div class="lbl">未读</div>
+            <div class="ink2" style="font-size:14px;margin-top:2px">3 通知 · 5 邮件</div></div>
+          <span class="badge">8</span>
+        </div></div>
+        <div class="card soft">
+          <div class="row"><span class="grow" style="font-size:15px;font-weight:600">第 12 周</span>
+            <span class="s">共 20 周</span></div>
+          <div class="track"><div class="fill"></div></div>
+          <div class="s">期末还有 5 周 · 寒假 1月12日</div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <div class="tab"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M9 4.5v15"/></svg><span>课表</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><path d="M5 19V11M12 19V5M19 19v-5"/></svg><span>成绩</span></div>
+        <div class="center"><div class="fab"><i></i><i></i><i></i><i></i></div><span>工作台</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M8.5 12.5l2.2 2.2 4.8-4.8"/></svg><span>作业</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M4.8 20c1.4-3.6 4-5.4 7.2-5.4S17.8 16.4 19.2 20"/></svg><span>我的</span></div>
+      </nav>
+    </div>
+  </div>
+
+  <div class="phone light">
+    <div class="wall"></div><div class="scrim"></div>
+    <div class="screen">
+      <div class="sb"><span>8:04</span><span class="pill"></span></div>
+      <div class="scroll">
+        <div class="eyebrow">周三 · 第 12 教学周 · 11月19日</div>
+        <h1>今天</h1>
+        <div class="card hero"><div class="heroRow">
+          <div class="bar"></div>
+          <div><div class="lbl">下一节课</div><div class="h">高等数学 A(2)</div>
+               <div class="b">10:10 – 11:45</div><div class="s">主教 402</div></div>
+          <div class="chip">12 分后</div>
+        </div></div>
+        <div class="card soft">
+          <div class="row" style="margin-bottom:10px"><span class="lbl grow">今日待办</span><span class="lbl">2</span></div>
+          <div class="row"><span class="dot" style="background:#FF453A"></span>
+            <span class="grow" style="font-size:14px">数据结构作业</span><span class="s red">今天 23:59</span></div>
+          <div class="row"><span class="dot" style="background:rgba(10,22,40,.35)"></span>
+            <span class="grow ink2" style="font-size:14px">选课确认</span><span class="s">周五</span></div>
+        </div>
+        <div class="card soft"><div class="row">
+          <div class="grow"><div class="lbl">最近考试</div>
+            <div style="font-size:15.5px;font-weight:600;margin:3px 0 2px">高等数学 A(2)</div>
+            <div class="s">12月20日 09:00 · 主教 402</div></div>
+          <div style="text-align:right"><div class="big">31</div><div class="s" style="margin-top:2px">天后</div></div>
+        </div></div>
+        <div class="card soft"><div class="row">
+          <div class="grow"><div class="lbl">未读</div>
+            <div class="ink2" style="font-size:14px;margin-top:2px">3 通知 · 5 邮件</div></div>
+          <span class="badge">8</span>
+        </div></div>
+        <div class="card soft">
+          <div class="row"><span class="grow" style="font-size:15px;font-weight:600">第 12 周</span>
+            <span class="s">共 20 周</span></div>
+          <div class="track"><div class="fill"></div></div>
+          <div class="s">期末还有 5 周 · 寒假 1月12日</div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <div class="tab"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M9 4.5v15"/></svg><span>课表</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><path d="M5 19V11M12 19V5M19 19v-5"/></svg><span>成绩</span></div>
+        <div class="center"><div class="fab"><i></i><i></i><i></i><i></i></div><span>工作台</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M8.5 12.5l2.2 2.2 4.8-4.8"/></svg><span>作业</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M4.8 20c1.4-3.6 4-5.4 7.2-5.4S17.8 16.4 19.2 20"/></svg><span>我的</span></div>
+      </nav>
+    </div>
+  </div>
+
+</div></body></html>
