@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <!-- 凭据库不进云备份：密钥在 Keystore，异机解不开只会制造「数据在但读不出」 -->
-    <exclude domain="sharedpref" path="campus_sso_vault.xml" />
-    <exclude domain="sharedpref" path="campus_mail_vault.xml" />
-    <exclude domain="sharedpref" path="campus_wecom_vault.xml" />
+    <include domain="sharedpref" path="."/>
+    <include domain="database" path="."/>
 </full-backup-content>

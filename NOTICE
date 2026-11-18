@@ -2,27 +2,25 @@
 
 ## 许可
 
-本仓库以 MIT 许可发布，全文见 LICENSE。
+本项目基于下列 GPL-3.0 上游工程衍生并改造，整体以 **GNU General Public License v3.0 (GPL-3.0)** 发布，全文见 [LICENSE](LICENSE)。
 
-## 参考实现
+## 上游与参考来源
 
-应用代码为独立实现，不包含下列项目的源码副本。设计上有以下参考：
+1. **教务助手（zhengfang-apk）** — https://github.com/znjhahaha/zhengfang-apk （GPL-3.0）
+   - 原始版权归 znjhahaha 所有。
+   - 沿用其液态玻璃渲染体系（基于 Kyant0/backdrop）、胶囊导航栏、正方教务解析、课表与桌面小组件基础框架。
 
-**THEIA** — https://github.com/bakahuiii/THEIA
-北京化工大学同校 Electron 桌面工作台，MIT 许可，已停更。
-本项目的校园工作台形态、来源与时间标注、五种刷新状态语义、单域失败隔离策略来自它。
+2. **北化课表（beihua-kebiao）** — https://github.com/lioanchijian/beihua-kebiao （GPL-3.0）
+   - 基于 zhengfang-apk 的北京化工大学适配分支。
+   - 沿用其北化原生统一身份认证（sidportal AES/SM2、短信二次验证、WebAuthn/通行密钥、校方 TLS 信任链）与北化教务适配代码。
 
-**zhengfang-apk 一系** — GPL-3.0
-金智统一身份认证（linkid 协议、SM2／AES 加解密流程）与正方教务 Web 接口的调用方式参考其实现。
-本项目重写协议实现，不复制其源码；如后续引入其代码片段，该部分将按 GPL-3.0 单独标注。
+3. **go-buct-course / BUCT-course-remind** — https://github.com/Ling0727-ai/go-buct-course & https://github.com/Ling0727-ai/BUCT-course-remind （MIT）
+   - 北化在线（THEOL/MEOL）原生登录协议、待办课程/作业/测验解析逻辑及 DDL 三档提醒模型参考其实现。
 
-## 未引入的组件
-
-- GeckoView 内嵌浏览器引擎
-- 高德 3D 地图 / MapLibre
-- ONNX Runtime 与推理模型
+4. **THEIA** — https://github.com/bakahuiii/THEIA （MIT）
+   - 校园工作台形态、Provenance 溯源、五种刷新状态语义与单域失败隔离设计参考其实现。
 
 ## 隐私
 
-应用无后端服务，不上传用户数据，不集成遥测或崩溃上报 SDK。
-校园数据仅保存在本机，凭据加密存储于 Android Keystore。
+应用无自建业务后端，不上传学号密码，不集成第三方统计或崩溃上报 SDK。
+校园数据仅保存在本机，会话凭据通过 Android Keystore 加密存储。
