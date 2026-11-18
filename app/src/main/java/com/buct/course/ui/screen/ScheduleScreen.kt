@@ -182,7 +182,7 @@ private val ScheduleGridPaddingTight = 10.dp
 // 行程和高度差一旦脱钩，网格顶端就会与收缩中的顶栏彼此追赶——所以 travel
 // 定义成差值而不是另一个常量（与成绩页的 GradesHeaderMetrics 同一套写法）。
 private val HeaderTopPadExpanded = 10.dp
-private val HeaderTopPadCollapsed = 6.dp
+private val HeaderTopPadCollapsed = 12.dp
 /** 标题 + 分段控件 + 芯片同一行：34(标题) + 6 + 36(分段) = 76。 */
 private val HeaderActionRowExpanded = 76.dp
 private val HeaderActionRowCollapsed = 48.dp
@@ -780,7 +780,7 @@ fun WeekHeaderCompact(
                         .height(
                             lerpDp(headerMetrics.actionRowExpanded, headerMetrics.actionRowCollapsed, collapse)
                         )
-                        .padding(horizontal = PagePadding)
+                        .padding(horizontal = lerpDp(PagePadding, HeaderSlabInset + 14.dp, collapse))
                 ) {
                     // 标题与分段控件同属一个纵列、芯片在右侧垂直居中——这是改动前
                     // 的构图。把芯片单独提到标题行会在分段控件右边空出一大块。
@@ -812,7 +812,9 @@ fun WeekHeaderCompact(
                                 fontWeight = FontWeight.Bold,
                                 color = titleColor,
                                 letterSpacing = 0.sp,
-                                maxLines = 1
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
@@ -1876,7 +1878,7 @@ fun CourseCard(course: ScheduleCourseUi, onClick: () -> Unit, large: Boolean = f
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                if (large && course.teacher.isNotBlank()) {
+                if (course.teacher.isNotBlank()) {
                     Text(
                         text = course.teacher,
                         modifier = Modifier.fillMaxWidth().testTag("schedule-teacher-${course.id}"),
