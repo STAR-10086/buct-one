@@ -224,6 +224,8 @@ sealed class BottomNavItem(
     val route: String get() = page.route
     val label: String get() = page.label
     val icon: ImageVector get() = symbol.outline
+    object Dashboard : BottomNavItem(StartupPage.Dashboard, AppSymbolSpec.Dashboard)
+    object Homework : BottomNavItem(StartupPage.Homework, AppSymbolSpec.Homework)
     object Courses : BottomNavItem(StartupPage.Courses, AppSymbolSpec.Courses)
     object Schedule : BottomNavItem(StartupPage.Schedule, AppSymbolSpec.Schedule)
     object Grab : BottomNavItem(StartupPage.Grab, AppSymbolSpec.Grab)
@@ -232,13 +234,14 @@ sealed class BottomNavItem(
     object Settings : BottomNavItem(StartupPage.Settings, AppSymbolSpec.Settings)
 
     companion object {
-        // 导航顺序：课表放正中间（主要使用课表功能）；抢课已并入课程页的二级目录
-        val entries: List<BottomNavItem> get() = listOf(Courses, Friends, Schedule, Grades, Settings)
+        // 五栏默认顺序：课表、成绩、工作台（居中）、作业、我的
+        val entries: List<BottomNavItem> get() = listOf(Schedule, Grades, Dashboard, Homework, Settings)
 
         fun of(page: StartupPage): BottomNavItem = when (page) {
+            StartupPage.Dashboard -> Dashboard
+            StartupPage.Homework -> Homework
             StartupPage.Courses -> Courses
             StartupPage.Schedule -> Schedule
-            // 抢课合并进课程页，老配置指向抢课时落到课程
             StartupPage.Grab -> Courses
             StartupPage.Friends -> Friends
             StartupPage.Grades -> Grades
@@ -577,6 +580,13 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
                               if (navItem != null) {
                                   savedPages.SaveableStateProvider(navItem.route) {
                                       when (navItem.page) {
+                                          StartupPage.Dashboard -> com.buct.course.ui.route.DashboardRoute(
+                                              onSwitchPage = { target ->
+                                                  val idx = items.indexOfFirst { it.page == target }
+                                                  if (idx >= 0) selectedTab = idx
+                                              }
+                                          )
+                                          StartupPage.Homework -> com.buct.course.ui.route.HomeworkRoute()
                                           StartupPage.Courses -> com.buct.course.ui.route.CourseSectionRoute()
                                           StartupPage.Grab -> com.buct.course.ui.route.CourseSectionRoute()
                                           StartupPage.Friends -> com.buct.course.ui.route.FriendsRoute()

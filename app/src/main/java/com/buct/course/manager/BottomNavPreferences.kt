@@ -21,12 +21,12 @@ object BottomNavPreferences {
     private const val KEY_ORDER = "order"
     private const val KEY_HIDDEN = "hidden"
 
-    /** 默认顺序：课程（含抢课二级页）、好友、课表、成绩、设置（课表在中间，主要功能更顺手）。 */
+    /** 默认五栏顺序：课表、成绩、工作台（居中）、作业、我的。 */
     val defaultOrder: List<StartupPage> = listOf(
-        StartupPage.Courses,
-        StartupPage.Friends,
         StartupPage.Schedule,
         StartupPage.Grades,
+        StartupPage.Dashboard,
+        StartupPage.Homework,
         StartupPage.Settings
     )
 
@@ -41,20 +41,15 @@ object BottomNavPreferences {
         prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    /** 完整顺序（含已隐藏项），保证包含全部页面；抢课已并入课程，不再出现在底栏。 */
+    /** 完整顺序（含已隐藏项），默认仅暴露五栏核心页面。 */
     fun order(): List<StartupPage> {
         val raw = prefs?.getString(KEY_ORDER, null)
+        val allowed = defaultOrder.toSet()
         val saved = raw?.split(',')?.mapNotNull { name ->
             StartupPage.entries.firstOrNull { it.name == name.trim() }
-        }.orEmpty()
-        val cleaned = saved.distinct().filter { it != StartupPage.Grab }.toMutableList()
+        }?.filter { it in allowed }.orEmpty()
+        val cleaned = saved.distinct().toMutableList()
         defaultOrder.forEach { if (it !in cleaned) cleaned.add(it) }
-        // 老用户的顺序里没有「好友」：放到「课程」后面，正好接替原来抢课的位置
-        if (saved.isNotEmpty() && StartupPage.Friends !in saved) {
-            cleaned.remove(StartupPage.Friends)
-            val index = cleaned.indexOf(StartupPage.Courses).let { if (it >= 0) it + 1 else 0 }
-            cleaned.add(index.coerceIn(0, cleaned.size), StartupPage.Friends)
-        }
         return cleaned
     }
 
