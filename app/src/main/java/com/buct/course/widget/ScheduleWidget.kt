@@ -148,7 +148,9 @@ open class ScheduleWidget : AppWidgetProvider() {
                 else -> systemDark // system 模式
             }
 
-            // 设置标题：实例自定义 → 全局默认 → 「我的课表」
+            // 设置标题：实例自定义 → 全局默认 → 「我的课表」（支持隐藏）
+            val hideTitle = WidgetConfigStore.hideTitle(context, appWidgetId)
+            views.setViewVisibility(R.id.widget_title, if (hideTitle) android.view.View.GONE else android.view.View.VISIBLE)
             views.setTextViewText(
                 R.id.widget_title,
                 WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = false)
@@ -194,8 +196,8 @@ open class ScheduleWidget : AppWidgetProvider() {
             // 星期表头带上月份和日期，跨月时每一天仍然能看懂属于哪个月。
             bindWeekHeader(views, currentWeek)
 
-            // 设置一周按钮点击事件
-            val prevIntent = Intent(context, ScheduleWidget::class.java).apply {
+            // 设置上一周按钮点击事件：指向 AndroidManifest 实际注册的 receiver
+            val prevIntent = Intent(context, com.tyust.course.widget.ScheduleWidget::class.java).apply {
                 action = ACTION_PREV_WEEK
             }
             val prevPendingIntent = PendingIntent.getBroadcast(
@@ -205,7 +207,7 @@ open class ScheduleWidget : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.widget_prev_week, prevPendingIntent)
 
             // 设置下一周按钮点击事件
-            val nextIntent = Intent(context, ScheduleWidget::class.java).apply {
+            val nextIntent = Intent(context, com.tyust.course.widget.ScheduleWidget::class.java).apply {
                 action = ACTION_NEXT_WEEK
             }
             val nextPendingIntent = PendingIntent.getBroadcast(
@@ -229,6 +231,7 @@ open class ScheduleWidget : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             views.setOnClickPendingIntent(R.id.widget_title, titleClickPendingIntent)
+            views.setOnClickPendingIntent(R.id.widget_week_info, titleClickPendingIntent)
 
             // 点击列表项跳转到 app
             val clickIntent = Intent(context, com.buct.course.MainActivity::class.java)

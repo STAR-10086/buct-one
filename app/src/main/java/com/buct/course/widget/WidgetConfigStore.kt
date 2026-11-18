@@ -48,9 +48,17 @@ object WidgetConfigStore {
         }.apply()
     }
 
+    fun hideTitle(context: Context, appWidgetId: Int): Boolean =
+        prefs(context).getBoolean("hide_title_$appWidgetId", false)
+
+    fun setHideTitle(context: Context, appWidgetId: Int, hide: Boolean) {
+        prefs(context).edit().putBoolean("hide_title_$appWidgetId", hide).apply()
+    }
+
     fun clear(context: Context, appWidgetId: Int) {
         prefs(context).edit()
             .remove("title_$appWidgetId")
+            .remove("hide_title_$appWidgetId")
             .remove("account_$appWidgetId")
             .remove("source_$appWidgetId")
             .apply()

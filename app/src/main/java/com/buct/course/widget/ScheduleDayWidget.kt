@@ -60,6 +60,8 @@ open class ScheduleDayWidget : AppWidgetProvider() {
             }
 
             UserManager.getInstance().init(context)
+            val hideTitle = WidgetConfigStore.hideTitle(context, appWidgetId)
+            views.setViewVisibility(R.id.widget_title, if (hideTitle) View.GONE else View.VISIBLE)
             views.setTextViewText(
                 R.id.widget_title,
                 WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = true)
@@ -89,9 +91,9 @@ open class ScheduleDayWidget : AppWidgetProvider() {
             // 回到今天按钮高亮（非今天时显示）
             views.setTextViewText(R.id.widget_back_today, if (offset == 0) "今天" else "回到今天")
 
-            // 导航按钮
+            // 导航按钮：指向 AndroidManifest 实际注册的 receiver（com.tyust.course.widget.ScheduleDayWidget）
             fun pending(action: String, requestCode: Int): PendingIntent {
-                val intent = Intent(context, ScheduleDayWidget::class.java).setAction(action)
+                val intent = Intent(context, com.tyust.course.widget.ScheduleDayWidget::class.java).setAction(action)
                 return PendingIntent.getBroadcast(
                     context, requestCode, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -161,6 +163,7 @@ open class ScheduleDayWidget : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             views.setOnClickPendingIntent(R.id.widget_title, configPendingIntent)
+            views.setOnClickPendingIntent(R.id.widget_day_info, configPendingIntent)
             for (g in 1..6) {
                 for (k in 1..g) {
                     views.setOnClickPendingIntent(rid(context, "dc${g}_card${k}_root"), clickPendingIntent)

@@ -113,32 +113,39 @@
             </intent-filter>
         </receiver>
 
-        <!-- 妗岄潰璇捐〃灏忕粍浠?-->
+        <!-- 桌面课表小组件 -->
         <receiver
             android:name="com.tyust.course.widget.ScheduleWidget"
             android:exported="true"
             android:label="课表小组件">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.buct.course.widget.PREV_WEEK" />
+                <action android:name="com.buct.course.widget.NEXT_WEEK" />
+                <action android:name="com.buct.course.widget.REFRESH_WIDGET" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_schedule_info" />
         </receiver>
 
-        <!-- 璇捐〃灏忕粍浠?Service -->
+        <!-- 课表小组件 Service -->
         <service
             android:name=".widget.ScheduleWidgetService"
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 
-        <!-- 浠婃棩璇捐〃灏忕粍浠?-->
+        <!-- 今日课表小组件 -->
         <receiver
             android:name="com.tyust.course.widget.ScheduleDayWidget"
             android:exported="true"
             android:label="今日课表小组件">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.buct.course.widget.DAY_PREV" />
+                <action android:name="com.buct.course.widget.DAY_NEXT" />
+                <action android:name="com.buct.course.widget.DAY_TODAY" />
+                <action android:name="com.buct.course.widget.REFRESH_WIDGET" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

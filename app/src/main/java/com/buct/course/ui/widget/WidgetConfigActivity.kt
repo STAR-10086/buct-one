@@ -128,8 +128,8 @@ class WidgetConfigActivity : ComponentActivity() {
                     appWidgetId = appWidgetId,
                     isDay = isDay,
                     onCancel = { finish() },
-                    onSave = { rawTitle, accountKey, source ->
-                        save(rawTitle.trim(), accountKey, source)
+                    onSave = { rawTitle, hideTitle, accountKey, source ->
+                        save(rawTitle.trim(), hideTitle, accountKey, source)
                         finish()
                     }
                 )
@@ -137,9 +137,10 @@ class WidgetConfigActivity : ComponentActivity() {
         }
     }
 
-    private fun save(title: String, accountKey: String?, source: String?) {
+    private fun save(title: String, hideTitle: Boolean, accountKey: String?, source: String?) {
         val ctx = applicationContext
         WidgetConfigStore.setTitle(ctx, appWidgetId, title)
+        WidgetConfigStore.setHideTitle(ctx, appWidgetId, hideTitle)
         WidgetConfigStore.setAccount(ctx, appWidgetId, accountKey)
         WidgetConfigStore.setSource(ctx, appWidgetId, source)
 
@@ -165,7 +166,7 @@ private fun WidgetConfigPage(
     appWidgetId: Int,
     isDay: Boolean,
     onCancel: () -> Unit,
-    onSave: (String, String?, String?) -> Unit
+    onSave: (String, Boolean, String?, String?) -> Unit
 ) {
     val context = LocalContext.current
     val effectiveDefault = remember(appWidgetId, isDay) {
@@ -173,6 +174,9 @@ private fun WidgetConfigPage(
     }
     var title by remember(appWidgetId) {
         mutableStateOf(WidgetConfigStore.title(context, appWidgetId) ?: "")
+    }
+    var hideTitle by remember(appWidgetId) {
+        mutableStateOf(WidgetConfigStore.hideTitle(context, appWidgetId))
     }
     val accounts = remember(appWidgetId) {
         runCatching {
@@ -240,6 +244,17 @@ private fun WidgetConfigPage(
                             singleLine = true
                         )
                     }
+                    com.buct.course.ui.system.InsetGroupedRow(
+                        title = "隐藏顶部标题（${if (isDay) "今日课表" else "课表"}）",
+                        subtitle = "开启后释放顶部空间，点日期/周次栏仍可回到本配置页",
+                        showDivider = false,
+                        trailing = {
+                            com.buct.course.ui.system.LiquidSwitch(
+                                checked = hideTitle,
+                                onCheckedChange = { hideTitle = it }
+                            )
+                        }
+                    )
                 }
 
                 // 课表来源：本机账号 / 好友传来的课表
@@ -350,7 +365,7 @@ private fun WidgetConfigPage(
                     text = "保存",
                     onClick = {
                         val source = friendId?.let { WidgetScheduleSource.encodeFriend(it) }
-                        onSave(title, accountKey, source)
+                        onSave(title, hideTitle, accountKey, source)
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
