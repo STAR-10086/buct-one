@@ -40,9 +40,7 @@ import com.buct.one.ui.theme.MotionDuration
 import com.buct.one.ui.theme.MotionEasing
 
 /**
- * 一栏。
- * [center] = true 的那一项是工作台：凸起、方块底、图标自绘（四格），不参与常规排布。
- * 中心项 [icon] 可为 null——它用 [Win11Mark] 而不是图标字体。
+ * 一栏。[center] = true 的那一项是工作台：凸起、方块底、图标自绘（四格）。
  */
 data class NavTab(
     val label: String,
@@ -50,7 +48,7 @@ data class NavTab(
     val center: Boolean = false,
 )
 
-/** Win11 风格的四格标记：2×2 方块，缝隙 2dp，圆角 1dp。 */
+/** Win11 风格的四格标记：2×2 方块。 */
 @Composable
 fun Win11Mark(
     modifier: Modifier = Modifier,
@@ -77,10 +75,11 @@ fun Win11Mark(
 }
 
 /**
- * 底部导航：五栏，中心为凸起的工作台。
+ * 底部悬浮胶囊坞，五栏，中心为凸起的工作台。
  *
- * 凸起用 offset + 阴影色块实现，不用真阴影（API 24-30 的 elevation 渲染差异大）。
- * 中心项始终处于选中态外观——它是「回到工作台」的锚点，不跟随其它 tab 变化。
+ * 结构要点：**坞体与中心钮是兄弟节点**，不是父子。
+ * 早期把中心钮放在坞内的 Row 里，被坞的 clip(34dp) 裁掉了下半截——
+ * 现在坞只负责玻璃与四项，中心钮在 Box 层绝对定位、向上浮出坞外。
  */
 @Composable
 fun BuctNavBar(
@@ -90,44 +89,48 @@ fun BuctNavBar(
     modifier: Modifier = Modifier,
 ) {
     val glass = LocalGlass.current
-    // 悬浮胶囊坞：不贴边、不贴底，与背景之间留 18/16dp，让玻璃有东西可透
+    val centerIndex = tabs.indexOfFirst { it.center }
+
     Box(
         modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp)
             .padding(bottom = 12.dp),
-        contentAlignment = Alignment.Center,
     ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(68.dp)
-            .clip(RoundedCornerShape(34.dp))
-            .background(glass.fillStrong)
-            .border(0.5.dp, glass.border, RoundedCornerShape(34.dp))
-            .padding(horizontal = 6.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        tabs.forEachIndexed { index, tab ->
-            if (tab.center) {
-                CenterTab(
-                    label = tab.label,
-                    selected = index == selected,
-                    onClick = { onSelect(index) },
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                SideTab(
-                    tab = tab,
-                    selected = index == selected,
-                    onClick = { onSelect(index) },
-                    modifier = Modifier.weight(1f),
-                )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(68.dp)
+                .clip(RoundedCornerShape(34.dp))
+                .background(glass.fillStrong)
+                .border(0.5.dp, glass.border, RoundedCornerShape(34.dp))
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                if (tab.center) {
+                    Spacer(Modifier.weight(1f))
+                } else {
+                    SideTab(
+                        tab = tab,
+                        selected = index == selected,
+                        onClick = { onSelect(index) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
-    }
+
+        if (centerIndex >= 0) {
+            CenterTab(
+                label = tabs[centerIndex].label,
+                selected = centerIndex == selected,
+                onClick = { onSelect(centerIndex) },
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = (-16).dp),
+            )
+        }
     }
 }
 
@@ -187,7 +190,7 @@ private fun CenterTab(
     modifier: Modifier = Modifier,
 ) {
     val lift by animateDpAsState(
-        targetValue = if (selected) (-18).dp else (-12).dp,
+        targetValue = if (selected) (-2).dp else 2.dp,
         animationSpec = tween(MotionDuration.NavIndicator, easing = MotionEasing.Emphasized),
         label = "centerLift",
     )
@@ -199,8 +202,8 @@ private fun CenterTab(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .size(54.dp)
+                .clip(RoundedCornerShape(17.dp))
                 .background(BuctColors.BrandPrimary)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -210,11 +213,11 @@ private fun CenterTab(
         ) {
             Win11Mark(color = Color.White, cell = 7, gap = 3)
         }
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(1.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
+            color = MaterialTheme.colorScheme.primary,
         )
     }
 }
