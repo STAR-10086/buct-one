@@ -30,9 +30,8 @@ import java.util.concurrent.TimeUnit
  * 北化在线（THEOL / MEOL）原生 HTTP 客户端。
  * 协议移植自 Ling0727-ai/go-buct-course (MIT)，零 WebView，强制走 BuctTlsTrustManager。
  */
-class TheolClient(
+class TheolClient {
     private val cookieJar: MatchingMemoryCookieJar = MatchingMemoryCookieJar()
-) {
     companion object {
         const val SID_PORTAL_BASE = "https://sidportal.buct.edu.cn"
         const val MEOL_BASE = "https://course.buct.edu.cn"

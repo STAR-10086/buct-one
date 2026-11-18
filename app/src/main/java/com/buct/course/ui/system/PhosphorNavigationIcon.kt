@@ -35,6 +35,8 @@ fun PhosphorNavigationIcon(
         val fill = tint.copy(alpha = tint.alpha * (0.08f + 0.16f * weight))
         scale(size.width / 256f, size.height / 256f, Offset.Zero) {
             when (spec) {
+                AppSymbolSpec.Dashboard -> drawDashboardGrid(t, tint, fill)
+                AppSymbolSpec.Homework -> drawHomeworkBoard(t, tint, fill)
                 AppSymbolSpec.Courses -> drawBooks(t, tint, fill)
                 AppSymbolSpec.Schedule -> drawCalendar(t, tint, fill)
                 AppSymbolSpec.Grab -> drawLightning(t, tint, fill)
@@ -47,6 +49,36 @@ fun PhosphorNavigationIcon(
 }
 
 private val outlineStroke = Stroke(16f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+/** 「工作台」四格图标（与 Phosphor 16f 线宽统一，选中时柔和填充）。 */
+private fun DrawScope.drawDashboardGrid(t: Float, tint: Color, fill: Color) {
+    val pulse = sin(t * PI).toFloat() * 4f
+    val r = CornerRadius(18f, 18f)
+    val cells = listOf(
+        Offset(44f - pulse * 0.5f, 44f - pulse * 0.5f),
+        Offset(140f + pulse * 0.5f, 44f - pulse * 0.5f),
+        Offset(44f - pulse * 0.5f, 140f + pulse * 0.5f),
+        Offset(140f + pulse * 0.5f, 140f + pulse * 0.5f)
+    )
+    cells.forEachIndexed { idx, topLeft ->
+        val cellSize = Size(72f, 72f)
+        if (idx == 0 || idx == 3) {
+            drawRoundRect(color = fill, topLeft = topLeft, size = cellSize, cornerRadius = r)
+        }
+        drawRoundRect(color = tint, topLeft = topLeft, size = cellSize, cornerRadius = r, style = outlineStroke)
+    }
+}
+
+/** 「作业」任务清单板图标。 */
+private fun DrawScope.drawHomeworkBoard(t: Float, tint: Color, fill: Color) {
+    val lift = sin(t * PI).toFloat() * 4f
+    val r = CornerRadius(18f, 18f)
+    drawRoundRect(color = fill, topLeft = Offset(48f, 48f - lift * 0.5f), size = Size(160f, 168f), cornerRadius = r)
+    drawRoundRect(color = tint, topLeft = Offset(48f, 48f - lift * 0.5f), size = Size(160f, 168f), cornerRadius = r, style = outlineStroke)
+    drawRoundRect(color = tint, topLeft = Offset(92f, 32f - lift * 0.5f), size = Size(72f, 32f), cornerRadius = CornerRadius(12f, 12f), style = outlineStroke)
+    drawLine(color = tint, start = Offset(88f, 112f), end = Offset(168f, 112f), strokeWidth = 16f, cap = StrokeCap.Round)
+    drawLine(color = tint, start = Offset(88f, 152f), end = Offset(152f, 152f), strokeWidth = 16f, cap = StrokeCap.Round)
+}
 
 /**
  * 「好友」图标：两个头 + 两段肩线，笔画体系与其它 Phosphor 图标一致（16f 线宽）。
