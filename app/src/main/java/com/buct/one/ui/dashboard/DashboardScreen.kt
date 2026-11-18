@@ -18,11 +18,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,10 +46,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.buct.one.ui.system.BuctNavBar
+import com.buct.one.ui.system.Capsules
+import com.buct.one.ui.system.GlassCapsule
+import com.buct.one.ui.system.GlassCapsuleRow
 import com.buct.one.ui.system.GlassPanel
 import com.buct.one.ui.system.NavTab
 import com.buct.one.ui.system.StatNumber
 import com.buct.one.ui.theme.BuctColors
+import com.buct.one.ui.theme.LocalGlass
 
 private data class TodoItem(val title: String, val due: String, val urgent: Boolean)
 
@@ -73,7 +86,7 @@ fun DashboardScreen() {
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 Header()
-                Spacer(Modifier.height(2.dp))
+                TopCapsuleRow()
                 NextClassCard()
                 TodoCard(
                     listOf(
@@ -84,6 +97,7 @@ fun DashboardScreen() {
                 ExamCard()
                 UnreadCard(unreadTotal = 8, noticeCount = 3, mailCount = 5)
                 WeekCard(current = 12, total = 20, note = "期末还有 5 周 · 寒假 1月12日")
+                EntryGrid()
             }
             BuctNavBar(
                 tabs = tabs,
@@ -332,3 +346,120 @@ private fun WeekCard(current: Int, total: Int, note: String) {
         )
     }
 }
+
+/** 顶部悬浮胶囊组：搜索胶囊 + 两个圆形图标钮。 */
+@Composable
+private fun TopCapsuleRow() {
+    val glass = LocalGlass.current
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        GlassCapsuleRow(spec = Capsules.Field, modifier = Modifier.weight(1f)) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                tint = glass.inkTertiary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "搜索课程、成绩、通知",
+                style = MaterialTheme.typography.bodyMedium,
+                color = glass.inkTertiary,
+            )
+        }
+        RoundIconButton(Icons.Filled.Notifications, badge = 8)
+        RoundIconButton(Icons.Filled.Settings)
+    }
+}
+
+/** 44dp 圆形玻璃图标钮，可带角标。 */
+@Composable
+private fun RoundIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    badge: Int = 0,
+) {
+    val glass = LocalGlass.current
+    Box(contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(glass.fill)
+                .border(0.5.dp, glass.border, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = glass.inkSecondary, modifier = Modifier.size(20.dp))
+        }
+        if (badge > 0) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .clip(CircleShape)
+                    .background(BuctColors.Danger)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            ) {
+                Text(
+                    badge.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                )
+            }
+        }
+    }
+}
+
+private data class EntryItem(
+    val label: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+)
+
+private val WorkbenchEntries = listOf(
+    EntryItem("空闲教室", Icons.Filled.DateRange),
+    EntryItem("场馆", Icons.Filled.Place),
+    EntryItem("体测", Icons.Filled.Star),
+    EntryItem("创新学分", Icons.Filled.Star),
+    EntryItem("第二课堂", Icons.Filled.List),
+    EntryItem("校历", Icons.Filled.DateRange),
+    EntryItem("邮箱", Icons.Filled.Email),
+    EntryItem("更多", Icons.Filled.Menu),
+)
+
+/** 入口网格：两行四列的小胶囊。低频功能全部收在这里，不占底部坞。 */
+@Composable
+private fun EntryGrid() {
+    val glass = LocalGlass.current
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        WorkbenchEntries.chunked(4).forEach { rowItems ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                rowItems.forEach { item ->
+                    GlassCapsule(
+                        modifier = Modifier.weight(1f),
+                        spec = Capsules.Card.copy(radius = 24.dp, padH = 8.dp, padV = 12.dp),
+                    ) {
+                        Icon(
+                            item.icon,
+                            contentDescription = null,
+                            tint = BuctColors.BrandPrimary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            item.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = glass.inkSecondary,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
