@@ -67,6 +67,7 @@ fun DashboardRoute(
     val theolService = remember(context) { TheolSyncService.getInstance(context) }
     val theolSlice by theolService.theolState.collectAsState()
     val localTodos by theolService.todosState.collectAsState()
+    val filterPrefs by theolService.filterPrefs.collectAsState()
     val syncing by theolService.syncing.collectAsState()
 
     val now = remember { Date() }
@@ -82,11 +83,15 @@ fun DashboardRoute(
         SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(now)
     }
 
-    val pendingHomeworks = remember(theolSlice) {
-        theolSlice.data?.homeworks?.filter { it.canSubmit }.orEmpty()
+    val pendingHomeworks = remember(theolSlice, filterPrefs) {
+        theolSlice.data?.homeworks
+            ?.filter { it.canSubmit && filterPrefs.isHomeworkVisible(it) }
+            .orEmpty()
     }
-    val pendingTests = remember(theolSlice) {
-        theolSlice.data?.tests?.filter { it.canStart }.orEmpty()
+    val pendingTests = remember(theolSlice, filterPrefs) {
+        theolSlice.data?.tests
+            ?.filter { it.canStart && filterPrefs.isTestVisible(it) }
+            .orEmpty()
     }
     val activeLocalTodos = remember(localTodos) {
         localTodos.filter { !it.deleted && !it.completed }

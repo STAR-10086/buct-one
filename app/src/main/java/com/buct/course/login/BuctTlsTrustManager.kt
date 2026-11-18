@@ -1,5 +1,7 @@
 package com.buct.course.login
 
+import android.net.http.SslCertificate
+import android.os.Build
 import android.util.Base64
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -101,5 +103,29 @@ class BuctTlsTrustManager : X509TrustManager {
         val context = javax.net.ssl.SSLContext.getInstance("TLS")
         context.init(null, arrayOf<javax.net.ssl.TrustManager>(this), null)
         return context.socketFactory
+    }
+
+    /**
+     * 校验 WebView SslError 中的服务器证书是否匹配系统信任库或北化内置双链。
+     * 仅校验通过时返回 true，绝不做无条件信任。
+     */
+    fun isTrustedWebViewCertificate(cert: SslCertificate?): Boolean {
+        if (cert == null) return false
+        val x509: X509Certificate? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            cert.x509Certificate
+        } else {
+            val bundle = SslCertificate.saveState(cert)
+            val bytes = bundle.getByteArray("x509-certificate")
+            if (bytes != null) {
+                runCatching {
+                    CertificateFactory.getInstance("X.509")
+                        .generateCertificate(bytes.inputStream()) as? X509Certificate
+                }.getOrNull()
+            } else null
+        } ?: return false
+        return runCatching {
+            checkServerTrusted(arrayOf(x509), "RSA")
+            true
+        }.getOrDefault(false)
     }
 }

@@ -49,6 +49,32 @@ data class TheolSnapshot(
     val failedCourseCount: Int = 0
 )
 
+/** 被用户拉黑的北化在线课程（例如已退课但系统仍残留在待办列表中） */
+data class BlacklistedCourse(
+    val key: String,
+    val lid: String,
+    val courseName: String
+)
+
+/** 用户在作业页的本地过滤配置：手动删除的作业/测验与课程黑名单（刷新时持久化保持过滤） */
+data class TheolFilterPrefs(
+    val hiddenHomeworkIds: Set<String> = emptySet(),
+    val hiddenTestKeys: Set<String> = emptySet(),
+    val blacklistedCourses: List<BlacklistedCourse> = emptyList()
+) {
+    fun isCourseBlacklisted(lid: String, courseName: String): Boolean =
+        blacklistedCourses.any { bc ->
+            (lid.isNotBlank() && bc.lid == lid) ||
+                (courseName.isNotBlank() && bc.courseName == courseName)
+        }
+
+    fun isHomeworkVisible(item: TheolHomeworkItem): Boolean =
+        item.hwtid !in hiddenHomeworkIds && !isCourseBlacklisted(item.lid, item.courseName)
+
+    fun isTestVisible(item: TheolTestItem): Boolean =
+        "${item.lid}:${item.testId}" !in hiddenTestKeys && !isCourseBlacklisted(item.lid, item.courseName)
+}
+
 /**
  * 用户本地自定义待办 / 作业提醒（参考 BUCT-course-remind 模型）。
  * 支持三档提醒：DDL 前 24h / 12h / 1h，软删除进回收站。

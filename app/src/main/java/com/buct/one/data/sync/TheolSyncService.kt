@@ -1,8 +1,10 @@
 package com.buct.one.data.sync
 
 import android.content.Context
+import com.buct.one.data.model.BlacklistedCourse
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
+import com.buct.one.data.model.TheolFilterPrefs
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.one.data.source.theol.TheolClient
@@ -34,6 +36,9 @@ class TheolSyncService private constructor(
 
     private val _todosState = MutableStateFlow(store.readLocalTodos())
     val todosState: StateFlow<List<LocalTodoItem>> = _todosState.asStateFlow()
+
+    private val _filterPrefs = MutableStateFlow(store.readFilterPrefs())
+    val filterPrefs: StateFlow<TheolFilterPrefs> = _filterPrefs.asStateFlow()
 
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
@@ -156,6 +161,63 @@ class TheolSyncService private constructor(
         }
         store.writeLocalTodos(updated)
         _todosState.value = updated
+    }
+
+    @Synchronized
+    private fun updateFilterPrefs(transform: (TheolFilterPrefs) -> TheolFilterPrefs) {
+        val updated = transform(_filterPrefs.value)
+        store.writeFilterPrefs(updated)
+        _filterPrefs.value = updated
+    }
+
+    fun hideHomework(hwtid: String) {
+        if (hwtid.isBlank()) return
+        updateFilterPrefs { it.copy(hiddenHomeworkIds = it.hiddenHomeworkIds + hwtid) }
+    }
+
+    fun restoreHomework(hwtid: String) {
+        updateFilterPrefs { it.copy(hiddenHomeworkIds = it.hiddenHomeworkIds - hwtid) }
+    }
+
+    fun restoreAllHiddenHomeworks() {
+        updateFilterPrefs { it.copy(hiddenHomeworkIds = emptySet()) }
+    }
+
+    fun hideTest(lid: String, testId: String) {
+        val key = "$lid:$testId"
+        updateFilterPrefs { it.copy(hiddenTestKeys = it.hiddenTestKeys + key) }
+    }
+
+    fun restoreAllHiddenTests() {
+        updateFilterPrefs { it.copy(hiddenTestKeys = emptySet()) }
+    }
+
+    fun blacklistCourse(lid: String, courseName: String) {
+        val trimmedName = courseName.trim()
+        val trimmedLid = lid.trim()
+        val key = trimmedLid.ifBlank { "name:$trimmedName" }
+        if (key == "name:") return
+        updateFilterPrefs { prefs ->
+            val exists = prefs.blacklistedCourses.any {
+                it.key == key ||
+                    (trimmedLid.isNotBlank() && it.lid == trimmedLid) ||
+                    (trimmedName.isNotBlank() && it.courseName == trimmedName)
+            }
+            if (exists) prefs
+            else prefs.copy(
+                blacklistedCourses = prefs.blacklistedCourses + BlacklistedCourse(
+                    key = key,
+                    lid = trimmedLid,
+                    courseName = trimmedName
+                )
+            )
+        }
+    }
+
+    fun unblacklistCourse(key: String) {
+        updateFilterPrefs { prefs ->
+            prefs.copy(blacklistedCourses = prefs.blacklistedCourses.filterNot { it.key == key })
+        }
     }
 
     private fun persistEncryptedSession() {

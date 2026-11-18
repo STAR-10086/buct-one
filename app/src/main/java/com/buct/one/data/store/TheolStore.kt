@@ -1,10 +1,12 @@
 package com.buct.one.data.store
 
 import android.content.Context
+import com.buct.one.data.model.BlacklistedCourse
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.Provenance
 import com.buct.one.data.model.RefreshState
+import com.buct.one.data.model.TheolFilterPrefs
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.model.TheolTestItem
@@ -29,6 +31,7 @@ class TheolStore(private val rootDir: File) {
 
     private val theolFile: File get() = File(rootDir, "theol.snapshot.v1.json")
     private val todoFile: File get() = File(rootDir, "local.todos.v1.json")
+    private val filterFile: File get() = File(rootDir, "theol.filters.v1.json")
 
     @Synchronized
     fun readTheol(defaultParserVersion: Int): DomainSlice<TheolSnapshot> {
@@ -155,6 +158,72 @@ class TheolStore(private val rootDir: File) {
             )
         }
         atomicWrite(todoFile, arr.toString())
+    }
+
+    @Synchronized
+    fun readFilterPrefs(): TheolFilterPrefs {
+        if (!filterFile.exists()) return TheolFilterPrefs()
+        return runCatching {
+            val root = JSONObject(filterFile.readText(Charsets.UTF_8))
+            val hwArr = root.optJSONArray("hiddenHomeworkIds") ?: JSONArray()
+            val hiddenHw = buildSet {
+                for (i in 0 until hwArr.length()) {
+                    val v = hwArr.optString(i, "")
+                    if (v.isNotEmpty()) add(v)
+                }
+            }
+            val testArr = root.optJSONArray("hiddenTestKeys") ?: JSONArray()
+            val hiddenTests = buildSet {
+                for (i in 0 until testArr.length()) {
+                    val v = testArr.optString(i, "")
+                    if (v.isNotEmpty()) add(v)
+                }
+            }
+            val blArr = root.optJSONArray("blacklistedCourses") ?: JSONArray()
+            val blacklisted = buildList(blArr.length()) {
+                for (i in 0 until blArr.length()) {
+                    val o = blArr.getJSONObject(i)
+                    val key = o.optString("key", "")
+                    if (key.isNotEmpty()) {
+                        add(
+                            BlacklistedCourse(
+                                key = key,
+                                lid = o.optString("lid", ""),
+                                courseName = o.optString("courseName", "")
+                            )
+                        )
+                    }
+                }
+            }
+            TheolFilterPrefs(
+                hiddenHomeworkIds = hiddenHw,
+                hiddenTestKeys = hiddenTests,
+                blacklistedCourses = blacklisted
+            )
+        }.getOrDefault(TheolFilterPrefs())
+    }
+
+    @Synchronized
+    fun writeFilterPrefs(prefs: TheolFilterPrefs) {
+        val root = JSONObject().apply {
+            put("hiddenHomeworkIds", JSONArray(prefs.hiddenHomeworkIds.toList()))
+            put("hiddenTestKeys", JSONArray(prefs.hiddenTestKeys.toList()))
+            put(
+                "blacklistedCourses",
+                JSONArray().apply {
+                    for (bc in prefs.blacklistedCourses) {
+                        put(
+                            JSONObject().apply {
+                                put("key", bc.key)
+                                put("lid", bc.lid)
+                                put("courseName", bc.courseName)
+                            }
+                        )
+                    }
+                }
+            )
+        }
+        atomicWrite(filterFile, root.toString())
     }
 
     private fun writeTheolSlice(slice: DomainSlice<TheolSnapshot>) {

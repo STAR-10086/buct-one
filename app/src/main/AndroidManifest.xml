@@ -79,6 +79,12 @@
             android:configChanges="uiMode"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".TheolSubmitWebViewActivity"
+            android:exported="false"
+            android:configChanges="uiMode"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
         
         <!-- Background grab service -->
         <service
