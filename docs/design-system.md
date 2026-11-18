@@ -259,7 +259,7 @@ val skeletonSpec   = infiniteRepeatable(tween<Float>(MotionDuration.EmphasisPuls
 | GlassChip | `ui/system/GlassChip.kt` | 玻璃胶囊（筛选/入口），选中态实心胶囊 | backdrop | 120 |
 | SectionHeader | `ui/system/SectionHeader.kt` | 标题 + 「更多」行 | Compose | 50 |
 | StatNumber | `ui/system/StatNumber.kt` | 数字滚动（tnum，逐位），0 值支持 | Motion | 130 |
-| NavBar | `ui/navigation/NavBar.kt` | 底部玻璃导航 + 指示器 + 标签动画 | backdrop、shapes | 220 |
+| BuctNavBar | `ui/system/BuctNavBar.kt` | 五栏玻璃导航；中心项（工作台）凸起 12–18dp，Win11 四格自绘图标，不参与常规排布；两侧项选中态变色 + 缩放 0.94 | backdrop、shapes | 260 |
 | WorkbenchCard 基类 | `ui/workbench/WorkbenchCard.kt` | 统一玻璃卡壳（22dp 圆角、色条槽） | GlassPanel | 90 |
 | NextClassCard | `ui/workbench/NextClassCard.kt` | 下一节课（课程名/时间/教室，Block 色条） | WorkbenchCard | 140 |
 | TodoCard | `ui/workbench/TodoCard.kt` | 待办（数量 StatNumber + 前两条预览） | 同上 | 110 |
@@ -280,9 +280,9 @@ DashboardScreen(state: DashboardUiState, onNavigate: (Route) -> Unit)
 ├─ Box(modifier = Modifier.fillMaxSize())                       // 壁纸层
 │   └─ WallpaperLayer(dim = 0.15f)                              // 背景壁纸 + 15% 压暗 scrim
 ├─ Scaffold(containerColor = Color.Transparent,
-│   bottomBar = { NavBar(selected = state.tab, items = WorkbenchTabs,
-│                        spec = GlassSpecs.Navigation, height = 64.dp,
-│                        indicatorSpec = spring(dampingRatio = 0.6f, stiffness = 310f)) })
+│   bottomBar = { BuctNavBar(selected = state.tab, tabs = 五栏定义,
+│                          spec = GlassSpecs.Navigation, height = 64.dp) })
+│   // 五栏：课表 · 成绩 · [工作台(center=true)] · 作业 · 我的
 │   └─ LazyColumn(
 │        contentPadding = PaddingValues(horizontal = 20.dp, top = 24.dp, bottom = 96.dp),
 │        verticalArrangement = Arrangement.spacedBy(24.dp))
