@@ -69,7 +69,7 @@ fun DashboardScreen() {
                     .verticalScroll(rememberScrollState())
                     .statusBarsPadding()
                     .padding(horizontal = 20.dp)
-                    .padding(top = 8.dp, bottom = 24.dp),
+                    .padding(top = 8.dp, bottom = 96.dp),  // 悬浮坞会盖住底部约 98dp
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 Header()

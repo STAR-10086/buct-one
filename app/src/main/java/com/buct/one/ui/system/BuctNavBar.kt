@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -88,11 +90,21 @@ fun BuctNavBar(
     modifier: Modifier = Modifier,
 ) {
     val glass = LocalGlass.current
-    Row(
+    // 悬浮胶囊坞：不贴边、不贴底，与背景之间留 18/16dp，让玻璃有东西可透
+    Box(
         modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(66.dp)
+            .clip(RoundedCornerShape(33.dp))
             .background(glass.fillStrong)
-            .height(64.dp)
+            .border(0.5.dp, glass.border, RoundedCornerShape(33.dp))
             .padding(horizontal = 6.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
@@ -114,6 +126,7 @@ fun BuctNavBar(
                 )
             }
         }
+    }
     }
 }
 
