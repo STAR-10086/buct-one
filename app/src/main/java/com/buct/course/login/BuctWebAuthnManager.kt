@@ -543,6 +543,17 @@ class BuctWebAuthnManager private constructor() {
 
     private fun succeed(attempt: WaaAttempt, cookie: String) {
         if (!attempt.completed.compareAndSet(false, true)) return
+        runCatching {
+            val portalUrl = BuctSsoEndpoints.authPortal.newBuilder().encodedPath("/login").query(null).build()
+            val sidCookie = attempt.cookieJar.cookieHeaderFor(portalUrl, setByHost = BuctSsoEndpoints.authPortal.host)
+                .split("; ").filter { it.isNotBlank() && !it.startsWith("rememberMe=") }.joinToString("; ")
+            if (sidCookie.isNotBlank()) {
+                com.buct.one.data.session.SidPortalSessionVault.saveSidPortalCookies(
+                    com.buct.course.CourseApplication.appContext,
+                    sidCookie
+                )
+            }
+        }
         detach(attempt)
         attempt.callback.onSuccess(cookie)
     }

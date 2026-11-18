@@ -7,8 +7,15 @@ import com.buct.course.manager.FontScaleManager
 import com.buct.course.ui.system.GlassRuntimeGuard
 
 class CourseApplication : Application() {
+    companion object {
+        @Volatile
+        lateinit var appContext: android.content.Context
+            private set
+    }
+
     override fun onCreate() {
         super.onCreate()
+        appContext = applicationContext
         GlassRuntimeGuard.initialize(this)
         AppearanceSettingsManager.initialize(this)
         FontScaleManager.initialize(this)
@@ -19,7 +26,6 @@ class CourseApplication : Application() {
                 ?.firstOrNull { it.pid == android.os.Process.myPid() }?.processName
         }
         if (processName == packageName) {
-            com.buct.course.analytics.UsageStatsReporter.reportLaunch(this)
             com.buct.course.schedule.ScheduleReminderScheduler.get(this).start(this)
             // 自建考试的提醒：每次冷启动重排一遍，代价很小，能兜住漏掉的闹钟
             runCatching { com.buct.course.schedule.ExamReminderScheduler.reschedule(this) }

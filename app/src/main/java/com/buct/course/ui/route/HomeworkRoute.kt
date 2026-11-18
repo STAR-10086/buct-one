@@ -34,6 +34,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -83,6 +84,15 @@ fun HomeworkRoute() {
     var showLoginDialog by rememberSaveable { mutableStateOf(false) }
     var showAddTodoDialog by rememberSaveable { mutableStateOf(false) }
     var feedbackMsg by remember { mutableStateOf<String?>(null) }
+    var autoTried by rememberSaveable { mutableStateOf(false) }
+
+    // 首次进入作业页且本地已有教务统一认证凭证时，自动静默复用凭证同步北化在线
+    LaunchedEffect(Unit) {
+        if (!autoTried && theolSlice.provenance.refreshState == RefreshState.NEVER && service.hasSavedSsoSession()) {
+            autoTried = true
+            service.refreshIfSessionValid()
+        }
+    }
 
     val homeworks = theolSlice.data?.homeworks.orEmpty()
     val pendingHomeworks = remember(homeworks) { homeworks.filter { it.canSubmit } }

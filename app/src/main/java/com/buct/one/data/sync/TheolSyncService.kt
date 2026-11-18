@@ -4,7 +4,7 @@ import android.content.Context
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.TheolSnapshot
-import com.buct.one.data.session.KeystoreCipher
+import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.one.data.source.theol.TheolClient
 import com.buct.one.data.source.theol.TheolParser
 import com.buct.one.data.store.TheolStore
@@ -15,22 +15,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.util.UUID
 
 /**
  * 北化在线（THEOL）与本地待办同步服务。
- * 串行执行同步（并发度 = 1），通过 KeystoreCipher 加密持久化 MEOL 会话 Cookie，
+ * 串行执行同步（并发度 = 1），自动复用教务统一身份认证（sidportal）根凭证实现免二次登录，
  * 并在失败时严格保留旧快照。
  */
 class TheolSyncService private constructor(
     private val appContext: Context,
     private val store: TheolStore,
-    private val client: TheolClient,
-    private val cipher: KeystoreCipher
+    private val client: TheolClient
 ) {
     private val syncMutex = Mutex()
-    private val vaultFile: File get() = File(File(appContext.filesDir, "vault"), "sso_vault.enc")
 
     private val _theolState = MutableStateFlow(store.readTheol(TheolParser.PARSER_VERSION))
     val theolState: StateFlow<DomainSlice<TheolSnapshot>> = _theolState.asStateFlow()
@@ -45,13 +42,17 @@ class TheolSyncService private constructor(
         restoreEncryptedSession()
     }
 
-    /** 尝试复用已存会话静默同步北化在线作业 */
+    fun hasSavedSsoSession(): Boolean = SidPortalSessionVault.hasAnyCookie(appContext)
+
+    /** 尝试复用已存统一身份认证（sidportal）或 MEOL 会话静默同步北化在线作业 */
     suspend fun refreshIfSessionValid(): Result<DomainSlice<TheolSnapshot>> = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             _syncing.value = true
             try {
+                // 每次同步前从加密库加载最新的 sidportal 凭证（可能刚刚在教务登录页刷新过）
+                restoreEncryptedSession()
                 if (!client.ensureSessionActive()) {
-                    val failed = store.commitFailure("北化在线尚未登录或会话已过期", TheolParser.PARSER_VERSION)
+                    val failed = store.commitFailure("北化在线会话未建立，请重新登录教务系统或点击右上角登录", TheolParser.PARSER_VERSION)
                     _theolState.value = failed
                     return@withContext Result.failure(IllegalStateException(failed.lastError))
                 }
@@ -158,28 +159,18 @@ class TheolSyncService private constructor(
     }
 
     private fun persistEncryptedSession() {
-        runCatching {
-            val sidCookies = client.exportCookieHeader("sidportal.buct.edu.cn")
-            val meolCookies = client.exportCookieHeader("course.buct.edu.cn")
-            val payload = "$sidCookies\n$meolCookies"
-            if (payload.isBlank()) return
-            val dir = vaultFile.parentFile
-            if (dir != null && !dir.exists()) dir.mkdirs()
-            vaultFile.writeText(cipher.encrypt(payload), Charsets.UTF_8)
-        }
+        val sidCookies = client.exportCookieHeader("sidportal.buct.edu.cn")
+        val meolCookies = client.exportCookieHeader("course.buct.edu.cn")
+        SidPortalSessionVault.saveAll(appContext, sidCookies, meolCookies)
     }
 
     private fun restoreEncryptedSession() {
-        runCatching {
-            if (!vaultFile.exists()) return
-            val decrypted = cipher.decrypt(vaultFile.readText(Charsets.UTF_8)) ?: return
-            val lines = decrypted.split('\n')
-            lines.getOrNull(0)?.takeIf { it.isNotBlank() }?.let {
-                client.importCookies("sidportal.buct.edu.cn", it)
-            }
-            lines.getOrNull(1)?.takeIf { it.isNotBlank() }?.let {
-                client.importCookies("course.buct.edu.cn", it)
-            }
+        val (sidCookies, meolCookies) = SidPortalSessionVault.readCookies(appContext)
+        if (sidCookies.isNotBlank()) {
+            client.importCookies("sidportal.buct.edu.cn", sidCookies)
+        }
+        if (meolCookies.isNotBlank()) {
+            client.importCookies("course.buct.edu.cn", meolCookies)
         }
     }
 
@@ -192,8 +183,7 @@ class TheolSyncService private constructor(
                 instance ?: TheolSyncService(
                     appContext = context.applicationContext,
                     store = TheolStore(context.applicationContext),
-                    client = TheolClient(),
-                    cipher = KeystoreCipher(KeystoreCipher.ALIAS_SSO)
+                    client = TheolClient()
                 ).also { instance = it }
             }
         }

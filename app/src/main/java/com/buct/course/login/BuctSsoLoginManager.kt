@@ -924,15 +924,34 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
         if (sidCookie.isBlank()) {
             fail(attempt, "统一认证未返回有效会话")
         } else {
-            try {
-                java.io.File("/sdcard/Download/sid_cookie.txt").writeText(sidCookie)
-            } catch (_: Exception) {}
+            runCatching {
+                com.buct.one.data.session.SidPortalSessionVault.saveSidPortalCookies(
+                    com.buct.course.CourseApplication.appContext,
+                    sidCookie
+                )
+            }
             succeed(attempt, sidCookie)
         }
     }
 
     private fun succeed(attempt: LoginAttempt, cookie: String) {
         if (!attempt.completed.compareAndSet(false, true)) return
+        // 登录教务成功后顺手保存 sidportal.buct.edu.cn 的根凭证，供北化在线（THEOL）直接免登复用
+        runCatching {
+            val portalCookieUrl = attempt.portalUrl.newBuilder().encodedPath("/login").query(null).build()
+            val sidCookie = attempt.cookieJar.cookieHeaderFor(
+                portalCookieUrl,
+                setByHost = attempt.portalUrl.host
+            ).split("; ")
+                .filter { p -> p.isNotBlank() && !p.startsWith("rememberMe=") }
+                .joinToString("; ")
+            if (sidCookie.isNotBlank()) {
+                com.buct.one.data.session.SidPortalSessionVault.saveSidPortalCookies(
+                    com.buct.course.CourseApplication.appContext,
+                    sidCookie
+                )
+            }
+        }
         detach(attempt)
         attempt.eraseSensitiveState(clearCookies = true)
         attempt.callback.onSuccess(cookie)

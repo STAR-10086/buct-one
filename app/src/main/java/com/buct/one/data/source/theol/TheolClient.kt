@@ -160,35 +160,25 @@ class TheolClient {
             if (page.execution.isEmpty() || page.croypto.isEmpty()) {
                 return Result.failure(IOException("认证页面缺少 execution 或 croypto 参数"))
             }
-            if ((page.vendor.isNotEmpty() && page.vendor != "system") ||
-                (page.risk.isNotEmpty() && page.risk != "default") ||
-                (page.rule.isNotEmpty() && page.rule != "normal") ||
-                page.second.isNotEmpty() ||
-                page.captchaUrl.isNotEmpty()
-            ) {
-                return Result.failure(IOException("当前认证触发验证码或二次验证，请先在教务登录页完成认证"))
-            }
-
-            checkCaptchaPreflight(username, loginEntry)
 
             val pwdString = String(passwordChars)
             val encryptedPassword = BuctAesCrypto.encrypt(page.croypto, pwdString)
             val encryptedCaptchaPayload = BuctAesCrypto.encrypt(page.croypto, "{}")
 
             val form = FormBody.Builder()
-                .add("username", username)
                 .add("type", "UsernamePassword")
                 .add("_eventId", "submit")
-                .add("geolocation", "")
+                .add("username", username)
+                .add("password", encryptedPassword)
+                .add("croypto", page.croypto)
                 .add("execution", page.execution)
                 .add("captcha_code", "")
-                .add("croypto", page.croypto)
-                .add("password", encryptedPassword)
                 .add("captcha_payload", encryptedCaptchaPayload)
+                .add("geolocation", "")
                 .build()
 
             val postReq = Request.Builder()
-                .url("$SID_PORTAL_BASE/login")
+                .url(loginEntry)
                 .header("User-Agent", UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Origin", SID_PORTAL_BASE)
@@ -208,8 +198,14 @@ class TheolClient {
                 val finalUrl = resp.request.url
                 val body = decodeResponseBody(resp)
                 val parsed = TheolParser.parseSidPortalPage(body)
+                if (parsed.second.equals("true", ignoreCase = true)) {
+                    return Result.failure(IOException("账号触发了短信二次验证，请先在「我的 → 重新登录」完成教务登录，北化在线会自动复用凭证"))
+                }
                 if (parsed.errorCode.isNotEmpty()) {
                     return Result.failure(IOException(mapSidError(parsed.errorCode)))
+                }
+                if (parsed.captchaUrl.isNotEmpty()) {
+                    return Result.failure(IOException("需要图形验证码，请先在教务登录页完成登录，北化在线会自动复用凭证"))
                 }
                 val landedInMeol = finalUrl.host.equals("course.buct.edu.cn", ignoreCase = true) &&
                     finalUrl.encodedPath.startsWith("/meol/") &&
@@ -219,7 +215,7 @@ class TheolClient {
                     (!finalUrl.encodedPath.contains("login", ignoreCase = true) || finalUrl.encodedPath == "/meol/homepage/common/sso_login.jsp")
 
                 if (!landedInMeol) {
-                    return Result.failure(IOException("认证未完成，请检查学号密码或是否触发二次验证"))
+                    return Result.failure(IOException("认证未完成，请检查学号密码或在教务登录页重新登录后点击刷新"))
                 }
             }
             Result.success(Unit)
@@ -428,11 +424,19 @@ class TheolClient {
             }
             val resolved = currentReq.url.resolve(location)
                 ?: throw IOException("非法的重定向地址")
-            if (!resolved.isHttps || resolved.host.lowercase() !in allowedHosts) {
+            val hostLower = resolved.host.lowercase()
+            if (hostLower !in allowedHosts) {
                 throw IOException("拒绝跳转到非信任域名: ${resolved.host}")
             }
+            val safeUrl = if (!resolved.isHttps && hostLower == "course.buct.edu.cn") {
+                resolved.newBuilder().scheme("https").build()
+            } else if (!resolved.isHttps) {
+                throw IOException("拒绝非 HTTPS 重定向: ${resolved.host}")
+            } else {
+                resolved
+            }
             currentReq = Request.Builder()
-                .url(resolved)
+                .url(safeUrl)
                 .header("User-Agent", UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .get()
