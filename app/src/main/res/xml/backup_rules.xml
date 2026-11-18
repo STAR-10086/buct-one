@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <include domain="sharedpref" path="." />
+    <include domain="file" path="." />
     <exclude domain="file" path="vault/sso_vault.enc" />
     <exclude domain="file" path="vault/mail_vault.enc" />
     <exclude domain="file" path="vault/wecom_vault.enc" />
