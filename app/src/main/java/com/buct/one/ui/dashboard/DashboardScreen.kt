@@ -18,9 +18,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -51,11 +51,13 @@ private data class TodoItem(val title: String, val due: String, val urgent: Bool
  */
 @Composable
 fun DashboardScreen() {
-    var selected by remember { mutableIntStateOf(0) }
+    var selected by remember { mutableIntStateOf(2) }  // 默认停在工作台
+    // 五栏：课表 · 成绩 · [工作台] · 作业 · 我的
     val tabs = listOf(
-        NavTab("工作台", Icons.Filled.Home),
         NavTab("课表", Icons.Filled.DateRange),
-        NavTab("消息", Icons.Filled.Notifications),
+        NavTab("成绩", Icons.Filled.List),
+        NavTab("工作台", icon = null, center = true),
+        NavTab("作业", Icons.Filled.CheckCircle),
         NavTab("我的", Icons.Filled.Person),
     )
 
