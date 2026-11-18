@@ -106,7 +106,9 @@ jobs:
           if [ "$v" = 0 ]; then echo "包依赖检查通过"; else exit 1; fi
 
       - name: assembleRelease
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: APK size gate (100MB)
         run: |
