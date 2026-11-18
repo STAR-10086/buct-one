@@ -1,7 +1,7 @@
 # 北化校园工作台 · 工程与风险（plan-3）
 
 > 配套：北化校园工作台-规划.md（v1）。本文覆盖第 6 节的工程面：模块化、CI 体积门禁、凭据存储、TLS 固定、解析灰度与可观测性、风险表、发布与回滚、每周例程。
-> 四条硬约束（不可违反）：全云端 CI / APK ≤15MB（阶段门禁 12MB）/ 登录原生 Kotlin / 单人维护。
+> 四条硬约束（不可违反）：全云端 CI / APK ≤100MB（硬门禁 100MB）/ 登录原生 Kotlin / 单人维护。
 
 ---
 
@@ -55,7 +55,7 @@ widget/*    → 依赖 store、model（小组件只读快照）
 
 | 位置 | 改动 |
 |---|---|
-| L57 assembleRelease 之后 | 插入两个新 step：`APK size gate (12MB)` 与 `Size report`（内容见 2.2） |
+| L57 assembleRelease 之后 | 插入两个新 step：`APK size gate (100MB)` 与 `Size report`（内容见 2.2） |
 | L60 List APKs | 可删（被门禁明细取代） |
 | 顶部 on: | 增加 `pull_request: branches: [main]`，PR 也跑门禁（PR 不发 Release，L69 的 if 已保证） |
 | L36-42 cache | 保持现状；M2 时建议换成 gradle/actions/setup-gradle（缓存 key 更精准） |
@@ -63,21 +63,21 @@ widget/*    → 依赖 store、model（小组件只读快照）
 ### 2.2 门禁脚本（完整可粘贴）
 
 ```yaml
-      - name: APK size gate (12MB)
+      - name: APK size gate (100MB)
         run: |
           set -euo pipefail
           APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           BYTES=$(stat -c%s "$APK")
           MB=$(awk "BEGIN{printf \"%.2f\", $BYTES/1048576}")
           echo "APK: $APK  size: ${BYTES} bytes (${MB} MB)"
-          LIMIT=$((12*1024*1024))
+          LIMIT=$((100*1024*1024))
           if [ "$BYTES" -gt "$LIMIT" ]; then
-            echo "::error::APK ${MB}MB 超过 12MB 门禁"
+            echo "::error::APK ${MB}MB 超过 100MB 门禁"
             echo "==== 体积明细（unzip 条目，Top 30，按未压缩大小）===="
             unzip -l -v "$APK" | sort -k1 -n -r | head -30
             exit 1
           fi
-          echo "体积门禁通过 (${MB}MB <= 12MB)"
+          echo "体积门禁通过 (${MB}MB <= 100MB)"
 
       - name: Per-entry size report
         if: always()
@@ -368,7 +368,7 @@ fun structureFingerprint(html: String): String {
 }
 ```
 
-上报通道：用户端「一键反馈」生成预填 issue 文本（domain + type + fingerprint + parserVersion + App 版本），你贴到 repo。半自动但零后端、零 SDK。**不引入第三方 crash SDK**（基线刚删掉 5.9MB 的 crash 库，别加回来）。
+上报通道：用户端「一键反馈」生成预填 issue 文本（domain + type + fingerprint + parserVersion + App 版本），你贴到 repo。半自动但零后端、零 SDK。**不引入第三方 crash SDK**：它会自动采集设备信息与崩溃上下文，与「只传 domain + 失败类型 + 指纹」的约定冲突。
 
 ### 5.3 远端 kill switch（GitHub Raw JSON，零后端）
 

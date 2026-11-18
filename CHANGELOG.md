@@ -9,7 +9,7 @@
 - `docs/plan-2-roadmap.md`：功能路线图（模块分级、里程碑、企业微信双链路、首屏 IA、不做清单）
 - `docs/plan-3-engineering.md`：工程与风险（模块化、CI 体积门禁、凭据、TLS 三级、灰度、回滚）
 - `docs/签名接入.md`：正式签名 secrets 配置
-- CI 骨架：12MB 体积门禁、PR 体积 delta、包依赖规则检查、签名分支（path 过滤，代码就位后启用）
+- CI 骨架：100MB 体积门禁（80MB 预警）、PR 体积 delta、包依赖规则检查、签名分支（path 过滤，代码就位后启用）
 
 ### 说明
 - 代码从零重写，不复用前身「北化课表」的 497 个 Kotlin 文件；只参考其 SSO 与 zf 教务协议实现

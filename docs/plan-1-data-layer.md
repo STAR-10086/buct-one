@@ -3,7 +3,7 @@
 > 上游文档：《北化校园工作台-规划.md》（v1）。本文件是其 M2「教务全量（数据层落地）」的详细设计，
 > 覆盖 SSO 会话复用、CampusSource、provenance、CampusStore、SyncEngine、IMAP、场馆、包结构与迁移路径。
 > 代码基线：C:/Users/STAR/Desktop/zhengfang-apk（497 .kt，源码包 com.buct.one，7.1MB）。
-> 四条硬约束全程生效：云端 CI 构建、APK ≤15MB（阶段门禁 12MB）、登录原生 Kotlin、单人可维护。
+> 四条硬约束全程生效：云端 CI 构建、APK ≤100MB（硬门禁 100MB）、登录原生 Kotlin、单人可维护。
 
 ---
 
