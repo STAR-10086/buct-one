@@ -66,9 +66,9 @@ fun DashboardScreen() {
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp)
+                    .padding(horizontal = 20.dp)
                     .padding(top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 Header()
                 Spacer(Modifier.height(2.dp))
@@ -120,7 +120,7 @@ private fun Header() {
 
 @Composable
 private fun NextClassCard() {
-    GlassPanel(radius = 22.dp, strong = true) {
+    GlassPanel(radius = 24.dp, strong = true) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
@@ -215,7 +215,7 @@ private fun TodoCard(items: List<TodoItem>) {
 
 @Composable
 private fun ExamCard() {
-    GlassPanel {
+    GlassPanel(radius = 22.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
@@ -253,7 +253,7 @@ private fun ExamCard() {
 
 @Composable
 private fun UnreadCard(unreadTotal: Int, noticeCount: Int, mailCount: Int) {
-    GlassPanel(contentPadding = 14.dp) {
+    GlassPanel {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(

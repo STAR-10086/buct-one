@@ -27,7 +27,7 @@ fun GlassPanel(
     modifier: Modifier = Modifier,
     radius: Dp = 20.dp,
     strong: Boolean = false,
-    contentPadding: Dp = 14.dp,
+    contentPadding: Dp = 16.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val glass = LocalGlass.current
@@ -35,7 +35,7 @@ fun GlassPanel(
         modifier
             .clip(RoundedCornerShape(radius))
             .background(if (strong) glass.fillStrong else glass.fill)
-            .border(0.7.dp, glass.border, RoundedCornerShape(radius))
+            .border(0.5.dp, glass.border, RoundedCornerShape(radius))
             .padding(contentPadding),
         content = content,
     )
