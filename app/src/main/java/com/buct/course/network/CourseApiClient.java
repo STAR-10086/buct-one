@@ -50,26 +50,6 @@ public class CourseApiClient {
         private CourseApiClient() {
                 cookieJar = new CookieJarImpl();
 
-                // 创建信任所有证书的 TrustManager (解决部分学校证书问题)
-                javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[] {
-                                new javax.net.ssl.X509TrustManager() {
-                                        @Override
-                                        public void checkClientTrusted(java.security.cert.X509Certificate[] chain,
-                                                        String authType) {
-                                        }
-
-                                        @Override
-                                        public void checkServerTrusted(java.security.cert.X509Certificate[] chain,
-                                                        String authType) {
-                                        }
-
-                                        @Override
-                                        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-                                                return new java.security.cert.X509Certificate[] {};
-                                        }
-                                }
-                };
-
                 OkHttpClient.Builder builder = new OkHttpClient.Builder()
                                 .cookieJar(cookieJar)
                                 .followRedirects(true)
@@ -205,13 +185,11 @@ public class CourseApiClient {
                                 });
 
                 try {
-                        javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
-                        sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
-                        builder.sslSocketFactory(sslContext.getSocketFactory(),
-                                        (javax.net.ssl.X509TrustManager) trustAllCerts[0]);
-                        builder.hostnameVerifier((hostname, session) -> true);
+                        com.buct.course.login.BuctTlsTrustManager trustManager =
+                                        new com.buct.course.login.BuctTlsTrustManager();
+                        builder.sslSocketFactory(trustManager.sslSocketFactory(), trustManager);
                 } catch (Exception e) {
-                        Log.e(TAG, "Failed to setup SSL bypass: " + e.getMessage());
+                        Log.e(TAG, "Failed to setup BuctTlsTrustManager: " + e.getMessage());
                 }
 
                 client = builder.build();
