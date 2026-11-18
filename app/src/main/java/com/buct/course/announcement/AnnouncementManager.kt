@@ -58,6 +58,11 @@ object AnnouncementManager {
      * 获取所有公告（包括已读和未读）
      */
     suspend fun fetchAllAnnouncements(): List<Announcement> {
+        return emptyList()
+    }
+
+    @Suppress("unused")
+    private suspend fun fetchAllAnnouncementsDisabled(): List<Announcement> {
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()

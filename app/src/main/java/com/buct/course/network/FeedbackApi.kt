@@ -41,8 +41,8 @@ data class FeedbackMessage(
  * token 存在 [CredentialStore]（Keystore 加密），不落明文 prefs。
  */
 object FeedbackApi {
-    private const val PRIMARY_BASE = "https://buctkb.cn"
-    private const val FALLBACK_BASE = "http://47.243.237.7"
+    private const val PRIMARY_BASE = ""
+    private const val FALLBACK_BASE = ""
     private const val TOKEN_KEY = "feedback_token"
     private const val PREFS = "feedback_identity"
     private const val KEY_DISPLAY_ID = "display_id"

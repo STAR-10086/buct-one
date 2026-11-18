@@ -151,12 +151,7 @@ fun SettingsRoute(
         widgetCount = com.buct.course.ui.screen.listWidgetInstances(context).size
     }
 
-    // 未读数：只有已经开通过反馈通道（本地有 token）才拉，避免给没用过的人凭空注册
-    LaunchedEffect(Unit) {
-        if (com.buct.course.network.FeedbackApi.token(context) != null) {
-            feedbackUnread = com.buct.course.network.FeedbackApi.unread(context) ?: 0
-        }
-    }
+    // 已移除意见反馈通道，不再向第三方服务器轮询未读数
     val relogin = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
     
     val currentVersion = remember {
@@ -491,15 +486,13 @@ fun SettingsRoute(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = "北化课表",
+                    text = "BUCT One · 北化一站",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "这是一个 Fork（衍生版），不是原创项目。\n" +
-                            "本应用 fork 自开源项目 zhengfang-apk，针对北京化工大学（北化）做了教务适配与功能扩展，" +
-                            "按 GPL-3.0 继续开源，源码全部公开。",
+                    text = "由 STAR-10086 维护的北京化工大学本地优先校园工作台，集成教务课表、成绩考试与北化在线作业，按 GPL-3.0 开源发布，无任何后台信息上报。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 20.sp
@@ -508,23 +501,21 @@ fun SettingsRoute(
                 com.buct.course.ui.system.SystemDivider()
 
                 Text(
-                    text = "特别致谢",
+                    text = "开源致谢",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "感谢原作者 znjhahaha 的开源项目 zhengfang-apk：\n" +
-                            "• 上游项目：https://github.com/znjhahaha/zhengfang-apk\n" +
-                            "• 本仓库（Fork）：https://github.com/lioanchijian/beihua-kebiao\n" +
-                            "• 许可证：GPL-3.0\n" +
-                            "• 官网：https://buctkb.cn\n\n" +
-                            "本应用基于多项优秀的开源技术构建：\n" +
-                            "• Jetpack Compose & Kotlin\n" +
-                            "• OkHttp3 & Gson\n" +
-                            "• Jsoup (HTML 解析库)\n" +
-                            "• Material Design 3\n" +
-                            "• AndroidLiquidGlass 动效库",
+                    text = "• 本项目仓库：https://github.com/STAR-10086/buct-one\n" +
+                            "• 维护者：STAR-10086\n" +
+                            "• 许可证：GPL-3.0\n\n" +
+                            "感谢以下开源项目提供的基线与参考实现：\n" +
+                            "• znjhahaha/zhengfang-apk（液态玻璃与教务课表基线，GPL-3.0）\n" +
+                            "• lioanchijian/beihua-kebiao（北化统一认证与教务适配，GPL-3.0）\n" +
+                            "• Ling0727-ai/go-buct-course & BUCT-course-remind（北化在线协议与提醒模型，MIT）\n" +
+                            "• bakahuiii/THEIA（校园工作台与数据溯源设计，MIT）\n" +
+                            "• Kyant0/AndroidLiquidGlass（Backdrop 液态玻璃折射，Apache-2.0）",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 20.sp
@@ -533,9 +524,7 @@ fun SettingsRoute(
                 com.buct.course.ui.system.SystemDivider()
 
                 Text(
-                    text = "本软件为开源免费项目（GPL-3.0），仅供个人学习与技术交流使用，禁止任何商业售卖。" +
-                            "上游代码版权归原作者所有，本项目新增与修改部分的版权归本项目作者所有。" +
-                            "支持作者：https://ifdian.net/a/buctkb（自愿赞助，不解锁任何功能）。",
+                    text = "本软件为开源免费项目（GPL-3.0），仅供个人学习与技术交流使用。所有校园数据仅保存在本机，不上传学号密码，不集成第三方统计或上报服务。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     lineHeight = 16.sp

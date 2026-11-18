@@ -66,8 +66,8 @@ data class FriendActionResult(val error: String? = null, val status: String = ""
  * 用户只需把短号给同学就能互加，不用注册账号、不涉及学号密码。
  */
 object FriendApi {
-    private const val PRIMARY_BASE = "https://buctkb.cn"
-    private const val FALLBACK_BASE = "http://47.243.237.7"
+    private const val PRIMARY_BASE = ""
+    private const val FALLBACK_BASE = ""
 
     private val client by lazy {
         OkHttpClient.Builder()

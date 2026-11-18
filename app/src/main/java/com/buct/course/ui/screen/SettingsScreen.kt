@@ -277,40 +277,6 @@ fun SettingsScreen(
             }
 
             InsetGroupedSection(Modifier.moduleEntrance(3), header = "应用与支持") {
-                InsetGroupedRow(
-                    icon = Icons.Outlined.People,
-                    iconTint = Color(0xFF34C759),
-                    title = "好友",
-                    subtitle = "用短号互加，互发消息和课表",
-                    onClick = onFriendsClick
-                )
-                InsetGroupedRow(
-                    icon = Icons.Outlined.ChatBubbleOutline,
-                    iconTint = Color(0xFF0A84FF),
-                    title = "意见反馈",
-                    subtitle = "匿名，直接和柳岸说",
-                    onClick = onFeedbackClick,
-                    trailing = {
-                        if (feedbackUnread > 0) {
-                            Text(
-                                text = if (feedbackUnread > 99) "99+" else feedbackUnread.toString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onError,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.error, RoundedCornerShape(9.dp))
-                                    .padding(horizontal = 6.dp, vertical = 1.dp)
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                )
                 SettingsRow(
                     icon = Icons.Outlined.Home,
                     iconTint = Color(0xFF5E5CE6),
@@ -319,36 +285,16 @@ fun SettingsScreen(
                     onClick = onStartupPageSelect
                 )
                 SettingsRow(
-                    icon = Icons.Outlined.SystemUpdate,
-                    iconTint = Color(0xFF34C759),
-                    title = "检查更新",
-                    subtitle = "v$currentVersion",
-                    onClick = onCheckUpdate
-                )
-                SettingsRow(
                     icon = Icons.Outlined.FavoriteBorder,
                     iconTint = Color(0xFFFF375F),
                     title = "致谢与关于",
-                    subtitle = "开源项目致谢与作者声明",
+                    subtitle = "v$currentVersion · 开源项目致谢与作者声明",
                     onClick = onCredits,
                     showDivider = false
                 )
             }
 
             InsetGroupedSection(Modifier.moduleEntrance(3), header = "数据与安全") {
-                InsetGroupedRow(
-                    title = "匿名使用统计",
-                    subtitle = "仅上报随机安装 ID、版本和日期，可随时关闭",
-                    icon = Icons.Outlined.Info,
-                    iconTint = Color(0xFF32ADE6),
-                    showDivider = true,
-                    trailing = {
-                        LiquidSwitch(
-                            checked = analyticsEnabled,
-                            onCheckedChange = onAnalyticsChange
-                        )
-                    }
-                )
                 SettingsRow(
                     icon = Icons.Outlined.Delete,
                     iconTint = Color(0xFFFF9F0A),

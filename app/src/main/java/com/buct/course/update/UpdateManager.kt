@@ -29,21 +29,9 @@ class UpdateManager(private val context: Context) {
     companion object {
         private const val TAG = "UpdateManager"
         
-        // 更新清单：域名优先，IP 作为备用（新旧服务器都保留）
-        // 只保留 HTTPS 源：明文 HTTP 会被中间人替换成恶意 version.json，
-        // 一旦配合自动下载安装就是远程代码执行。IP 直连源已移除。
-        // downloadUrlIp（明文 HTTP）已移除，只保留 HTTPS 源
-        private val VERSION_URLS = listOf(
-            "https://buctkb.cn/version.json",
-            "https://www.buctkb.cn/version.json"
-        )
+        private val VERSION_URLS: List<String> = emptyList()
 
-        // version.json 尚未下发 downloadSources 时的内置兜底（过渡期兼容旧清单）。
-        // 清单一旦带 downloadSources，一律以清单为准；这里只保证「选择下载源」功能不被旧清单卡住。
-        // 镜像通道当前未启用，兜底只保留官网，避免带出版本号写死的旧包。
-        private val DEFAULT_DOWNLOAD_SOURCES = listOf(
-            DownloadSource("官网", "https://buctkb.cn/download/beihua-kebiao-latest.apk")
-        )
+        private val DEFAULT_DOWNLOAD_SOURCES: List<DownloadSource> = emptyList()
         
         // 下载文件名
         private const val APK_FILE_NAME = "zhengfang_update.apk"
