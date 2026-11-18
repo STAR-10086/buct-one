@@ -13,53 +13,58 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * 玻璃材质在当前主题下的取值。组件不要直接写 Color.White.copy(alpha=…)，
- * 一律从这里取，才能在深浅主题间保持对比度。
+ * 玻璃材质在当前主题下的取值。
+ * 组件里不要直接写 Color.White.copy(alpha = …)，一律从这里取。
  */
 data class GlassTokens(
     val fill: Color,
     val fillStrong: Color,
     val border: Color,
     val divider: Color,
+    val ink: Color,
+    val inkSecondary: Color,
+    val inkTertiary: Color,
 )
 
 val LocalGlass = staticCompositionLocalOf {
     GlassTokens(
-        fill = Color.White.copy(alpha = BuctColors.GlassFillDark),
-        fillStrong = Color.White.copy(alpha = BuctColors.GlassFillDarkStrong),
-        border = BuctColors.GlassBorderDark,
-        divider = BuctColors.DividerDark,
+        fill = Color.White.copy(alpha = BuctColors.GlassAlpha),
+        fillStrong = Color.White.copy(alpha = BuctColors.GlassAlphaStrong),
+        border = BuctColors.GlassBorder,
+        divider = BuctColors.GlassDivider,
+        ink = BuctColors.Ink,
+        inkSecondary = BuctColors.InkSecondary,
+        inkTertiary = BuctColors.InkTertiary,
     )
 }
-
-private val DarkScheme = darkColorScheme(
-    primary = BuctColors.BrandPrimary,
-    onPrimary = Color.White,
-    secondary = BuctColors.BrandPrimaryStrong,
-    background = BuctColors.CanvasDark,
-    onBackground = BuctColors.InkDark,
-    surface = BuctColors.SurfaceDark,
-    onSurface = BuctColors.InkDark,
-    error = BuctColors.AccentRed,
-)
 
 private val LightScheme = lightColorScheme(
     primary = BuctColors.BrandPrimary,
     onPrimary = Color.White,
     secondary = BuctColors.BrandPrimaryStrong,
-    background = BuctColors.CanvasLight,
-    onBackground = BuctColors.InkLight,
-    surface = BuctColors.SurfaceLight,
-    onSurface = BuctColors.InkLight,
-    error = BuctColors.AccentRed,
+    background = BuctColors.CanvasTop,
+    onBackground = BuctColors.Ink,
+    surface = Color.White,
+    onSurface = BuctColors.Ink,
+    error = BuctColors.Danger,
+)
+
+private val DarkScheme = darkColorScheme(
+    primary = BuctColors.BrandPrimary,
+    onPrimary = Color.White,
+    background = BuctColors.CanvasDark,
+    onBackground = BuctColors.InkDark,
+    surface = BuctColors.CanvasDark,
+    onSurface = BuctColors.InkDark,
+    error = BuctColors.Danger,
 )
 
 private val BuctShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(24.dp),
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(26.dp),
 )
 
 @Composable
@@ -69,17 +74,23 @@ fun BuctTheme(
 ) {
     val glass = if (darkTheme) {
         GlassTokens(
-            fill = Color.White.copy(alpha = BuctColors.GlassFillDark),
-            fillStrong = Color.White.copy(alpha = BuctColors.GlassFillDarkStrong),
+            fill = Color.White.copy(alpha = BuctColors.GlassAlphaDark),
+            fillStrong = Color.White.copy(alpha = BuctColors.GlassAlphaDark + 0.06f),
             border = BuctColors.GlassBorderDark,
-            divider = BuctColors.DividerDark,
+            divider = Color(0x1FFFFFFF),
+            ink = BuctColors.InkDark,
+            inkSecondary = BuctColors.InkDarkSecondary,
+            inkTertiary = BuctColors.InkDarkTertiary,
         )
     } else {
         GlassTokens(
-            fill = Color.White.copy(alpha = BuctColors.GlassFillLight),
-            fillStrong = Color.White.copy(alpha = BuctColors.GlassFillLightStrong),
-            border = BuctColors.GlassBorderLight,
-            divider = BuctColors.DividerLight,
+            fill = Color.White.copy(alpha = BuctColors.GlassAlpha),
+            fillStrong = Color.White.copy(alpha = BuctColors.GlassAlphaStrong),
+            border = BuctColors.GlassBorder,
+            divider = BuctColors.GlassDivider,
+            ink = BuctColors.Ink,
+            inkSecondary = BuctColors.InkSecondary,
+            inkTertiary = BuctColors.InkTertiary,
         )
     }
 

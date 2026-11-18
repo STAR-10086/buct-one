@@ -95,12 +95,16 @@ fun DashboardScreen() {
     }
 }
 
+/**
+ * 壁纸：截图里是蓝→紫→青的高亮渐变，四角压低、中间提亮。
+ * 用四段线性渐变近似，避免引入图片资源。
+ */
 private val WallpaperBrush: Brush
     get() = Brush.linearGradient(
-        0f to Color(0xFF0B1220),
-        0.45f to Color(0xFF1B2B4D),
-        0.78f to Color(0xFF2A1B4D),
-        1f to Color(0xFF101828),
+        0f to BuctColors.CanvasTop,
+        0.34f to BuctColors.CanvasMid,
+        0.62f to BuctColors.CanvasWarm,
+        1f to BuctColors.CanvasBottom,
     )
 
 @Composable
@@ -195,7 +199,7 @@ private fun TodoCard(items: List<TodoItem>) {
                     Modifier
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(if (item.urgent) BuctColors.AccentRed else Color.Gray)
+                        .background(if (item.urgent) BuctColors.Danger else Color.Gray)
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -207,7 +211,7 @@ private fun TodoCard(items: List<TodoItem>) {
                 Text(
                     item.due,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (item.urgent) BuctColors.AccentRed
+                    color = if (item.urgent) BuctColors.Danger
                     else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
                 )
             }
@@ -273,7 +277,7 @@ private fun UnreadCard(unreadTotal: Int, noticeCount: Int, mailCount: Int) {
                 Box(
                     Modifier
                         .clip(CircleShape)
-                        .background(BuctColors.AccentRed)
+                        .background(BuctColors.Danger)
                         .padding(horizontal = 9.dp, vertical = 3.dp)
                 ) {
                     Text(
