@@ -95,16 +95,17 @@ fun BuctNavBar(
         modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
     Row(
         Modifier
             .fillMaxWidth()
-            .height(66.dp)
-            .clip(RoundedCornerShape(33.dp))
+            .height(68.dp)
+            .clip(RoundedCornerShape(34.dp))
             .background(glass.fillStrong)
-            .border(0.5.dp, glass.border, RoundedCornerShape(33.dp))
+            .border(0.5.dp, glass.border, RoundedCornerShape(34.dp))
             .padding(horizontal = 6.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
