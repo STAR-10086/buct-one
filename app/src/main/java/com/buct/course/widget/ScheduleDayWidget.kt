@@ -1,5 +1,6 @@
 package com.buct.course.widget
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -7,11 +8,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 import com.buct.course.R
+import com.buct.course.manager.ScheduleSettingsManager
 import com.buct.course.manager.UserManager
+import com.buct.course.schedule.ScheduleJson
 import java.util.Calendar
 
 /**
@@ -25,6 +29,8 @@ open class ScheduleDayWidget : AppWidgetProvider() {
         const val ACTION_DAY_PREV = "com.buct.course.widget.DAY_PREV"
         const val ACTION_DAY_NEXT = "com.buct.course.widget.DAY_NEXT"
         const val ACTION_DAY_TODAY = "com.buct.course.widget.DAY_TODAY"
+        private const val ACTION_REFRESH_WIDGET = "com.buct.course.widget.REFRESH_WIDGET"
+        private const val ALARM_REQUEST_CODE = 4102
         private const val PREFS = "day_widget_prefs"
         private const val KEY_OFFSET = "day_offset"
 
@@ -169,6 +175,93 @@ open class ScheduleDayWidget : AppWidgetProvider() {
             val views = buildViews(context, appWidgetManager, appWidgetId)
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }
+
+        private fun refreshAlarmPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, com.tyust.course.widget.ScheduleDayWidget::class.java)
+                .setAction(ACTION_REFRESH_WIDGET)
+            return PendingIntent.getBroadcast(
+                context,
+                ALARM_REQUEST_CODE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        fun cancelScheduledRefresh(context: Context) {
+            val appContext = context.applicationContext
+            runCatching {
+                val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                alarmManager?.cancel(refreshAlarmPendingIntent(appContext))
+            }
+        }
+
+        /** 预约今日最近一节待结束课程的下课时间自动刷新小组件（若今日已无后续课程则预约次日 00:01）。 */
+        fun scheduleNextClassEndRefresh(context: Context) {
+            val appContext = context.applicationContext
+            val manager = runCatching { AppWidgetManager.getInstance(appContext) }.getOrNull() ?: return
+            val dayIds = WidgetProviders.dayIds(appContext, manager)
+            if (dayIds.isEmpty()) {
+                cancelScheduledRefresh(appContext)
+                return
+            }
+            val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+
+            val nowCal = Calendar.getInstance()
+            val nowMillis = nowCal.timeInMillis
+            val nowMinutes = nowCal.get(Calendar.HOUR_OF_DAY) * 60 + nowCal.get(Calendar.MINUTE)
+            val todayDay = ((nowCal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
+            val settingsManager = ScheduleSettingsManager.getInstance().apply { init(appContext) }
+            val periodTimes = settingsManager.getPeriodTimes()
+            val defaultPeriodTimes = settingsManager.getDefaultPeriodTimes()
+
+            var earliestEndMin: Int? = null
+            for (appWidgetId in dayIds) {
+                val json = WidgetScheduleSource.loadFriendJson(appContext, appWidgetId)
+                    ?: WidgetScheduleSource.loadOwnScheduleJson(appContext, appWidgetId)
+                    ?: continue
+                val courses = runCatching { ScheduleJson.parse(json) }.getOrNull().orEmpty()
+                if (courses.isEmpty()) continue
+                val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(appContext, appWidgetId)
+                val week = WidgetScheduleSource.weekForDate(startMillis, nowCal)
+                val merged = resolveMergedCoursesForDay(courses, todayDay, week)
+                for (c in merged) {
+                    val endMin = resolvePeriodTime(c.endPeriod, periodTimes, defaultPeriodTimes)
+                        ?.endTime
+                        ?.let(::parseClockMinutes)
+                        ?: continue
+                    if (endMin > nowMinutes && (earliestEndMin == null || endMin < earliestEndMin)) {
+                        earliestEndMin = endMin
+                    }
+                }
+            }
+
+            val nextEndMin = earliestEndMin
+            val triggerCal = (nowCal.clone() as Calendar).apply {
+                if (nextEndMin != null) {
+                    set(Calendar.HOUR_OF_DAY, nextEndMin / 60)
+                    set(Calendar.MINUTE, nextEndMin % 60)
+                    set(Calendar.SECOND, 2)
+                    set(Calendar.MILLISECOND, 0)
+                } else {
+                    add(Calendar.DAY_OF_YEAR, 1)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 1)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+            }
+            val triggerAt = maxOf(triggerCal.timeInMillis, nowMillis + 5_000L)
+            val pi = refreshAlarmPendingIntent(appContext)
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pi)
+                } else {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pi)
+                }
+            }.onFailure {
+                runCatching { alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pi) }
+            }
+        }
     }
 
     override fun onUpdate(
@@ -181,6 +274,9 @@ open class ScheduleDayWidget : AppWidgetProvider() {
         }
         if (appWidgetIds.isNotEmpty()) {
             appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.widget_day_list)
+            scheduleNextClassEndRefresh(context)
+        } else {
+            cancelScheduledRefresh(context)
         }
     }
 
@@ -216,8 +312,11 @@ open class ScheduleDayWidget : AppWidgetProvider() {
                 if (ids.isNotEmpty()) {
                     appWidgetManager.notifyAppWidgetViewDataChanged(ids, R.id.widget_day_list)
                 }
+                if (next == 0) {
+                    scheduleNextClassEndRefresh(context)
+                }
             }
-            "com.buct.course.widget.REFRESH_WIDGET" -> {
+            ACTION_REFRESH_WIDGET -> {
                 val appWidgetManager = AppWidgetManager.getInstance(context)
                 val ids = WidgetProviders.dayIds(context, appWidgetManager)
                 onUpdate(context, appWidgetManager, ids)
@@ -230,5 +329,10 @@ open class ScheduleDayWidget : AppWidgetProvider() {
         for (id in appWidgetIds) {
             WidgetConfigStore.clear(context, id)
         }
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        cancelScheduledRefresh(context)
     }
 }

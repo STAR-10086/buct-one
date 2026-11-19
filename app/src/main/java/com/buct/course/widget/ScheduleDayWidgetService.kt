@@ -18,10 +18,72 @@ import com.buct.course.schedule.ScheduleWeeks
 import org.json.JSONArray
 import java.util.Calendar
 
+internal data class MergedDayCourse(
+    val name: String,
+    val location: String,
+    val teacher: String,
+    val startPeriod: Int,
+    val endPeriod: Int
+)
+
+private val EXAM_TIME_RANGE_REGEX = Regex("""(\d{1,2}):(\d{2})\s*[-~–至]\s*(\d{1,2}):(\d{2})""")
+
+internal fun parseClockMinutes(rawTime: String): Int? {
+    val parts = rawTime.trim().split(':')
+    if (parts.size < 2) return null
+    val h = parts[0].trim().toIntOrNull() ?: return null
+    val m = parts[1].trim().toIntOrNull() ?: return null
+    if (h !in 0..23 || m !in 0..59) return null
+    return h * 60 + m
+}
+
+internal fun resolvePeriodTime(
+    period: Int,
+    periodTimes: List<ScheduleSettingsManager.PeriodTime>,
+    defaultPeriodTimes: List<ScheduleSettingsManager.PeriodTime>
+): ScheduleSettingsManager.PeriodTime? =
+    periodTimes.firstOrNull { it.period == period }
+        ?: defaultPeriodTimes.firstOrNull { it.period == period }
+
+internal fun parseExamEndMinutes(rawExamTime: String): Int? {
+    val match = EXAM_TIME_RANGE_REGEX.find(rawExamTime) ?: return null
+    val h = match.groupValues[3].toIntOrNull() ?: return null
+    val m = match.groupValues[4].toIntOrNull() ?: return null
+    if (h !in 0..23 || m !in 0..59) return null
+    return h * 60 + m
+}
+
+internal fun resolveMergedCoursesForDay(
+    courses: List<NetworkScheduleCourse>,
+    day: Int,
+    week: Int
+): List<MergedDayCourse> {
+    val dayCourses = courses
+        .filter {
+            it.course.day == day &&
+                ScheduleWeeks.parse(it.course.weeks).visibleIn(week)
+        }
+        .map { it.course }
+        .sortedBy { it.startPeriod }
+
+    return buildList {
+        for (c in dayCourses) {
+            val last = lastOrNull()
+            if (last != null && last.name == c.name && last.location == c.location &&
+                last.teacher == c.teacher && c.startPeriod == last.endPeriod + 1
+            ) {
+                this[lastIndex] = last.copy(endPeriod = c.endPeriod)
+            } else {
+                add(MergedDayCourse(c.name, c.location, c.teacher, c.startPeriod, c.endPeriod))
+            }
+        }
+    }
+}
+
 /**
  * 桌面「今日课表」小组件的 RemoteViewsService。
  * 按实例当前的桌面高度（行数）动态固定每张卡片高度（2 行最多每屏 2 节，3 行最多 3 节…），
- * 当日课程超出时可通过 ListView 手动上下滑动查看。
+ * 查看当天时自动隐藏已过下课时间的课程，当日未结束课程超出视图时可手动上下滑动查看。
  */
 class ScheduleDayWidgetService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory {
@@ -43,23 +105,20 @@ class ScheduleDayRemoteViewsFactory(
     private var courseColorMap = mutableMapOf<String, Int>()
     private var selectedDay = 1
     private var selectedDate = ""
+    private var dayOffset = 0
+    private var hadScheduledItems = false
     private var dayExams: List<ExamRow> = emptyList()
-    private var merged: List<MergedCourse> = emptyList()
+    private var merged: List<MergedDayCourse> = emptyList()
+    private var periodTimes: List<ScheduleSettingsManager.PeriodTime> = emptyList()
+    private var defaultPeriodTimes: List<ScheduleSettingsManager.PeriodTime> = emptyList()
     private var cardHeightDp: Int = 56
     private var isCompact: Boolean = true
-
-    private data class MergedCourse(
-        val name: String,
-        val location: String,
-        val teacher: String,
-        val startPeriod: Int,
-        val endPeriod: Int
-    )
 
     private data class ExamRow(
         val name: String,
         val time: String,
-        val loc: String
+        val loc: String,
+        val endMinutes: Int? = null
     )
 
     override fun onCreate() {}
@@ -76,6 +135,10 @@ class ScheduleDayRemoteViewsFactory(
 
         try {
             UserManager.getInstance().init(context)
+            val settingsManager = ScheduleSettingsManager.getInstance().apply { init(context) }
+            periodTimes = settingsManager.getPeriodTimes()
+            defaultPeriodTimes = settingsManager.getDefaultPeriodTimes()
+
             val friendJson = WidgetScheduleSource.loadFriendJson(context, appWidgetId)
             val scheduleJson = friendJson ?: WidgetScheduleSource.loadOwnScheduleJson(context, appWidgetId)
 
@@ -90,45 +153,25 @@ class ScheduleDayRemoteViewsFactory(
                 courses = emptyList()
             }
 
-            val dayOffset = ScheduleDayWidget.getDayOffset(context)
+            dayOffset = ScheduleDayWidget.getDayOffset(context)
             val cal = Calendar.getInstance()
             cal.add(Calendar.DAY_OF_YEAR, dayOffset)
             selectedDay = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
             selectedDate = String.format(
                 java.util.Locale.US, "%04d-%02d-%02d",
-                cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH)
+                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)
             )
 
             val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
             val currentWeek = WidgetScheduleSource.weekForDate(startMillis, cal)
+            val allMerged = resolveMergedCoursesForDay(courses, selectedDay, currentWeek)
 
-            val todayCourses = courses
-                .filter {
-                    it.course.day == selectedDay &&
-                        ScheduleWeeks.parse(it.course.weeks).visibleIn(currentWeek)
-                }
-                .map { it.course }
-                .sortedBy { it.startPeriod }
-
-            merged = buildList {
-                for (c in todayCourses) {
-                    val last = lastOrNull()
-                    if (last != null && last.name == c.name && last.location == c.location &&
-                        last.teacher == c.teacher && c.startPeriod == last.endPeriod + 1
-                    ) {
-                        this[lastIndex] = last.copy(endPeriod = c.endPeriod)
-                    } else {
-                        add(MergedCourse(c.name, c.location, c.teacher, c.startPeriod, c.endPeriod))
-                    }
-                }
-            }
-
-            dayExams = emptyList()
+            var allExams: List<ExamRow> = emptyList()
             val examPrefs = context.getSharedPreferences("exam_cache", Context.MODE_PRIVATE)
             val examJson = if (friendJson == null) examPrefs.getString("exams", null) else null
             if (examJson != null) {
                 val arr = JSONArray(examJson)
-                dayExams = buildList {
+                allExams = buildList {
                     for (i in 0 until arr.length()) {
                         val o = arr.getJSONObject(i)
                         val time = o.optString("examTime", "")
@@ -146,15 +189,34 @@ class ScheduleDayRemoteViewsFactory(
                                 if (location.isNotBlank()) append(location)
                                 if (seat.isNotBlank()) append(" · $seat")
                             }
-                            add(ExamRow(name, timeText, loc))
+                            add(ExamRow(name, timeText, loc, parseExamEndMinutes(timeText)))
                         }
                     }
                 }.sortedBy { it.time }
+            }
+
+            hadScheduledItems = allMerged.isNotEmpty() || allExams.isNotEmpty()
+            if (dayOffset == 0) {
+                val nowCal = Calendar.getInstance()
+                val nowMinutes = nowCal.get(Calendar.HOUR_OF_DAY) * 60 + nowCal.get(Calendar.MINUTE)
+                merged = allMerged.filter { c ->
+                    val endMin = resolvePeriodTime(c.endPeriod, periodTimes, defaultPeriodTimes)
+                        ?.endTime
+                        ?.let(::parseClockMinutes)
+                    endMin == null || endMin > nowMinutes
+                }
+                dayExams = allExams.filter { e ->
+                    e.endMinutes == null || e.endMinutes > nowMinutes
+                }
+            } else {
+                merged = allMerged
+                dayExams = allExams
             }
         } catch (_: Exception) {
             courses = emptyList()
             merged = emptyList()
             dayExams = emptyList()
+            hadScheduledItems = false
         }
     }
 
@@ -184,7 +246,12 @@ class ScheduleDayRemoteViewsFactory(
 
         if (dayExams.isEmpty() && merged.isEmpty()) {
             val views = RemoteViews(context.packageName, R.layout.widget_schedule_day_row)
-            views.setTextViewText(R.id.item_name, "当天没有课程安排")
+            val emptyText = if (dayOffset == 0 && hadScheduledItems) {
+                "今日课程已全部上完"
+            } else {
+                "当天没有课程安排"
+            }
+            views.setTextViewText(R.id.item_name, emptyText)
             views.setTextViewText(R.id.item_time, "")
             views.setTextViewText(R.id.item_loc, "")
             views.setViewVisibility(R.id.item_time, View.GONE)
@@ -211,9 +278,8 @@ class ScheduleDayRemoteViewsFactory(
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_day_row)
         val c = merged[position - dayExams.size]
 
-        val periodTimes = ScheduleSettingsManager.getInstance().apply { init(context) }.getPeriodTimes()
-        val startTime = periodTimes.firstOrNull { it.period == c.startPeriod }?.startTime ?: ""
-        val endTime = periodTimes.firstOrNull { it.period == c.endPeriod }?.endTime ?: ""
+        val startTime = resolvePeriodTime(c.startPeriod, periodTimes, defaultPeriodTimes)?.startTime ?: ""
+        val endTime = resolvePeriodTime(c.endPeriod, periodTimes, defaultPeriodTimes)?.endTime ?: ""
         val span = if (c.endPeriod > c.startPeriod) "第${c.startPeriod}-${c.endPeriod}节" else "第${c.startPeriod}节"
         val timeText = if (startTime.isNotBlank() || endTime.isNotBlank()) "$span  $startTime-$endTime" else span
         val locText = buildString {
