@@ -101,7 +101,10 @@ fun ScheduleSettingsScreen(
     customCourses: List<ScheduleSettingsManager.CustomCourse> = emptyList(),
     onAddCustomCourse: (() -> Unit)? = null,
     onEditCustomCourse: (String) -> Unit = {},
-    onSyncSchedule: (() -> Unit)? = null
+    onSyncSchedule: (() -> Unit)? = null,
+    selectedYear: Int? = null,
+    yearOptions: List<Int> = emptyList(),
+    onSelectYear: ((Int) -> Unit)? = null
 ) {
     var periodCount by remember { mutableStateOf(manager.periodCount) }
     var storedPeriodTimes by remember { mutableStateOf(periodTimesOverride ?: manager.getPeriodTimes()) }
@@ -112,6 +115,7 @@ fun ScheduleSettingsScreen(
     var showOtherWeek by remember { mutableStateOf(manager.showOtherWeekCourses) }
     var showWidgetFontDialog by remember { mutableStateOf(false) }
     var showWidgetTitleDialog by remember { mutableStateOf(false) }
+    var showYearPicker by remember { mutableStateOf(false) }
     var editingPeriod by remember { mutableStateOf<PeriodTime?>(null) }
 
     val dateFormat = remember { SimpleDateFormat("yyyy年M月d日", Locale.CHINA) }
@@ -216,6 +220,23 @@ fun ScheduleSettingsScreen(
                     }
                     StaggerIn(index = 0, settled = entranceSettled) {
                         InsetGroupedSection(header = "基础设置") {
+                            if (selectedYear != null && yearOptions.isNotEmpty() && onSelectYear != null) {
+                                InsetGroupedRow(
+                                    icon = Icons.Filled.DateRange,
+                                    iconTint = Color(0xFF5856D6),
+                                    title = "查看学年",
+                                    subtitle = "切换当前查看与同步的学年课表",
+                                    trailing = {
+                                        Text(
+                                            text = "${selectedYear}-${selectedYear + 1}学年",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = NeuPrimary
+                                        )
+                                    },
+                                    onClick = { showYearPicker = true }
+                                )
+                            }
                             InsetGroupedRow(
                                 icon = Icons.Filled.DateRange,
                                 iconTint = Color(0xFF0A84FF),
@@ -408,6 +429,19 @@ fun ScheduleSettingsScreen(
             if (showWidgetTitleDialog) {
                 WidgetTitleDialog(
                     onDismiss = { showWidgetTitleDialog = false }
+                )
+            }
+
+            if (showYearPicker && selectedYear != null && yearOptions.isNotEmpty() && onSelectYear != null) {
+                GlassOptionWheelDialog(
+                    title = "选择学年",
+                    options = yearOptions.map { "$it-${it + 1}学年" },
+                    selectedIndex = yearOptions.indexOf(selectedYear).coerceAtLeast(0),
+                    onConfirm = { idx ->
+                        onSelectYear(yearOptions[idx])
+                        showYearPicker = false
+                    },
+                    onDismiss = { showYearPicker = false }
                 )
             }
 

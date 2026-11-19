@@ -47,6 +47,21 @@ class ScheduleSettingsManager internal constructor(private var prefs: SharedPref
                 instance ?: ScheduleSettingsManager().also { instance = it }
             }
         }
+
+        /** 按指定（或当前日历）学期推算默认第 1 周周一，避免写死某一年开学日期。 */
+        fun defaultSemesterStartMillis(
+            term: com.buct.course.academic.AcademicTerm = com.buct.course.academic.AcademicStudyReader.calendarTerm()
+        ): Long {
+            val cal = Calendar.getInstance().apply {
+                clear()
+                when (term.semester) {
+                    1 -> set(term.year, Calendar.SEPTEMBER, 1)
+                    2 -> set(term.year + 1, Calendar.MARCH, 1)
+                    else -> set(term.year + 1, Calendar.JULY, 1)
+                }
+            }
+            return com.buct.course.schedule.ScheduleDates.mondayOfWeek(cal.timeInMillis).timeInMillis
+        }
     }
     
     fun init(context: Context) {
@@ -155,9 +170,21 @@ class ScheduleSettingsManager internal constructor(private var prefs: SharedPref
         }
 
     // ============ 第一周日期 ============
-    
+
+    /** 仅当用户在设置中显式保存过开学日期时返回其时间戳，否则返回 null（供小组件判断是否回落按学期推算）。 */
+    fun savedSemesterStartDateFor(accountKey: String): Long? {
+        val p = prefs ?: return null
+        val key = "${KEY_SEMESTER_START}_${accountKey.ifBlank { "default" }}"
+        val raw = when {
+            p.contains(key) -> p.getLong(key, 0L)
+            p.contains(KEY_SEMESTER_START) -> p.getLong(KEY_SEMESTER_START, 0L)
+            else -> 0L
+        }
+        return raw.takeIf { it > 0L }
+    }
+
     var semesterStartDate: Long
-        get() = getScopedLong(KEY_SEMESTER_START, 1788192000000L) // 2026-09-01 北化开学
+        get() = getScopedLong(KEY_SEMESTER_START, defaultSemesterStartMillis())
         set(value) {
             if (semesterStartDate == value) return
             prefs?.edit()?.putLong(scopedKey(KEY_SEMESTER_START), value)?.remove(KEY_SEMESTER_START)?.apply()

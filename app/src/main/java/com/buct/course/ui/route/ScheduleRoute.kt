@@ -82,6 +82,7 @@ private data class ScheduleRouteSnapshot(
     val courses: List<ScheduleCourseUi>,
     val periodTimes: List<PeriodTimeUi>,
     val periodCount: Int,
+    val selectedYear: Int,
     val semesterIndex: Int,
     val termId: String = "",
     val appliedCalendar: String? = null
@@ -131,6 +132,16 @@ fun ScheduleRoute() {
         }
     }
     DisposableEffect(requests) { onDispose { requests.cancelAll() } }
+    val settingsManager = remember { ScheduleSettingsManager.getInstance().apply { init(context) } }
+    val scheduleCache = remember(context) {
+        ScheduleCacheStore(context, context.getSharedPreferences("schedule_cache", android.content.Context.MODE_PRIVATE))
+    }
+    val initialSchoolId = remember(routeAccountKey) {
+        UserManager.getInstance().currentSchool?.id ?: "buct"
+    }
+    val initialCurrentTerm = remember(routeAccountKey, isDemoMode, initialSchoolId) {
+        if (isDemoMode) DemoData.currentTerm else scheduleCache.currentTerm(routeAccountKey, initialSchoolId)
+    }
     val restoredSnapshot = remember(routeAccountKey) {
         ScheduleRouteMemoryCache.get(routeAccountKey)
     }
@@ -159,8 +170,18 @@ fun ScheduleRoute() {
     var periodCount by remember(routeAccountKey) {
         mutableIntStateOf(restoredSnapshot?.periodCount ?: 12)
     }
+    var selectedYear by rememberSaveable(routeAccountKey) {
+        mutableIntStateOf(restoredSnapshot?.selectedYear ?: initialCurrentTerm.year)
+    }
     var semesterIndex by rememberSaveable(routeAccountKey) {
-        mutableIntStateOf(restoredSnapshot?.semesterIndex ?: 0)
+        mutableIntStateOf(restoredSnapshot?.semesterIndex ?: (initialCurrentTerm.semester - 1).coerceIn(0, 2))
+    }
+    var userSelectedTerm by rememberSaveable(routeAccountKey) {
+        mutableStateOf(restoredSnapshot != null)
+    }
+    var showAcademicYearPicker by rememberSaveable(routeAccountKey) { mutableStateOf(false) }
+    val yearOptions = remember(initialCurrentTerm.year) {
+        ((initialCurrentTerm.year + 1) downTo (initialCurrentTerm.year - 4)).toList()
     }
     // 课表视图：日视图（只看当天）/ 周视图（整周）
     var dayView by rememberSaveable(routeAccountKey) { mutableStateOf(false) }
@@ -185,9 +206,9 @@ fun ScheduleRoute() {
     var undoDeadline by rememberSaveable(routeAccountKey) { mutableLongStateOf(0L) }
     
     // Managers
-    val settingsManager = remember { ScheduleSettingsManager.getInstance().apply { init(context) } }
-    val scheduleCache = remember(context) {
-        ScheduleCacheStore(context, context.getSharedPreferences("schedule_cache", android.content.Context.MODE_PRIVATE))
+    val activeCurrentTermId = remember(routeAccountKey, isDemoMode, resolvedTermId, courses) {
+        if (isDemoMode) DemoData.currentTerm.id
+        else scheduleCache.currentTerm(routeAccountKey, UserManager.getInstance().currentSchool?.id ?: "buct").id
     }
     val reminderScheduler = remember(context) { ScheduleReminderScheduler.get(context) }
     val customRevision = settingsManager.revision
@@ -218,6 +239,7 @@ fun ScheduleRoute() {
         courses = courses,
         periodTimes = periodTimes,
         periodCount = periodCount,
+        selectedYear = selectedYear,
         semesterIndex = semesterIndex,
         termId = resolvedTermId,
         appliedCalendar = appliedCalendar
@@ -281,14 +303,11 @@ fun ScheduleRoute() {
     val effectiveAccountLabel = viewingFriendEntry?.let { "${it.label}的课表" } ?: accountLabel
 
     // Load Schedule Function
-    val loadSchedule = remember(semesterIndex, session.token) {
+    val loadSchedule = remember(selectedYear, semesterIndex, session.token) {
         fun(forceRefresh: Boolean) {
+            val targetTerm = com.buct.course.academic.AcademicTerm.of(selectedYear, semesterIndex + 1)
             if (isDemoMode) {
-                resolvedTermId = when (semesterIndex) {
-                1 -> DemoData.currentTerm.next().id
-                2 -> DemoData.currentTerm.next().next().id
-                else -> DemoData.currentTerm.id
-            }
+                resolvedTermId = targetTerm.id
                 courses = reloadCustomCourses(DemoData.scheduleCourses())
                 isLoading = false
                 return
@@ -300,12 +319,9 @@ fun ScheduleRoute() {
             val generation = ++studyGeneration
             val account = UserManager.getInstance().currentAccountStorageKey
             val currentTerm = scheduleCache.currentTerm(account, school.id)
-            val requestedTerm = when (semesterIndex) {
-                1 -> currentTerm.next()
-                2 -> currentTerm.next().next()
-                else -> currentTerm
-            }
-            val cached = scheduleCache.selected(account, school.id, semesterIndex)
+            val followServer = !userSelectedTerm
+            val requestedTerm = targetTerm
+            val cached = scheduleCache.selected(account, school.id, if (followServer) currentTerm else requestedTerm)
             loadError = ""
             val onlineSync = com.buct.course.manager.SyncSettings.enabled(context)
             // 在线同步关闭：手动刷新 → 提示并仅展示本地数据，不联网
@@ -342,15 +358,27 @@ fun ScheduleRoute() {
                 studyLoadJob = scope.launch {
                     try {
                         val loaded = withContext(Dispatchers.IO) {
-                            scheduleCache.load(account, school.id, semesterIndex, forceRefresh) {
+                            scheduleCache.load(
+                                account = account,
+                                school = school.id,
+                                term = requestedTerm,
+                                followServerCurrent = followServer,
+                                forceRefresh = forceRefresh
+                            ) {
                                 AcademicStudyBridge.reader(school, account, ticket.session)
                             }
                         }
                         if (!requests.isCurrent(ticket) || studyGeneration != generation) return@launch
                         scheduleCache.save(account, school.id, loaded)
+                        if (followServer && loaded.term != requestedTerm) {
+                            selectedYear = loaded.term.year
+                            semesterIndex = (loaded.term.semester - 1).coerceIn(0, 2)
+                            userSelectedTerm = true
+                        }
                         courses = reloadCustomCourses(requireNotNull(parseSchedule(loaded.json)))
                         resolvedTermId = loaded.term.id
                         reminderScheduler.updateSnapshot(routeAccountKey, loaded.term.id, courses.map { it.record() })
+                        com.buct.course.widget.WidgetProviders.refreshAll(context)
                         if (forceRefresh) GlassToaster.show("已同步课表")
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) {
@@ -438,6 +466,7 @@ fun ScheduleRoute() {
                             scheduleCache.save(account, school.id, CachedSchedule(currentTerm, requestedTerm, json, false))
                             courses = reloadCustomCourses(parsed)
                             reminderScheduler.updateSnapshot(routeAccountKey, requestTermId, courses.map { it.record() })
+                            com.buct.course.widget.WidgetProviders.refreshAll(context)
                             if (forceRefresh) GlassToaster.show("已刷新")
                         } else {
                             val message = "课表响应无效，请重试"
@@ -460,8 +489,8 @@ fun ScheduleRoute() {
         }
     }
     
-    // 监听学期切换并重新加载
-    LaunchedEffect(semesterIndex, session.token) {
+    // 监听学年与学期切换并重新加载
+    LaunchedEffect(selectedYear, semesterIndex, session.token) {
         if (skipFirstSemesterLoad) {
             skipFirstSemesterLoad = false
             return@LaunchedEffect
@@ -477,8 +506,8 @@ fun ScheduleRoute() {
         courses = reloadCustomCourses(courses)
         periodCount = settingsManager.periodCount
     }
-    LaunchedEffect(resolvedTermId) {
-        if (resolvedTermId.isNotBlank() && semesterIndex == 0) {
+    LaunchedEffect(resolvedTermId, activeCurrentTermId) {
+        if (resolvedTermId.isNotBlank() && resolvedTermId == activeCurrentTermId) {
             reminderScheduler.migrateLegacyTimeBase(routeAccountKey, resolvedTermId, ScheduleTimeBase(
                 ScheduleTimeBase.dateFromMillis(settingsManager.semesterStartDate), periodTimes.associate { it.period to it.startTime },
                 periodTimes.associate { it.period to it.endTime }))
@@ -557,8 +586,13 @@ fun ScheduleRoute() {
                 }
             }
         },
+        academicYearLabel = "$selectedYear-${selectedYear + 1}",
+        onAcademicYearClick = { showAcademicYearPicker = true },
         semesterIndex = semesterIndex,
-        onSelectSemester = { semesterIndex = it },
+        onSelectSemester = {
+            userSelectedTerm = true
+            semesterIndex = it
+        },
         dayView = dayView,
         onDayViewChange = { value ->
             dayView = value
@@ -653,16 +687,26 @@ fun ScheduleRoute() {
                     runCatching { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).parse(it)?.time }.getOrNull()
                 } ?: 0L,
                 onSemesterStartChange = { millis ->
-                    if (semesterIndex == 0 && settingsTermOverride == null) settingsManager.semesterStartDate = millis
+                    if (settingsTerm == activeCurrentTermId) settingsManager.semesterStartDate = millis
                     val times = periodTimesFor(termTimeBase)
                     reminderScheduler.updateTimeBase(routeAccountKey, settingsTerm, ScheduleTimeBase(
                         ScheduleTimeBase.dateFromMillis(millis), times.associate { it.period to it.startTime }, times.associate { it.period to it.endTime }))
+                    context.getSharedPreferences("widget_prefs", android.content.Context.MODE_PRIVATE)
+                        .edit().putLong("last_week_nav", 0L).apply()
+                    com.buct.course.widget.WidgetProviders.refreshAll(context)
                 },
                 onPeriodTimesChange = { times ->
-                    if (semesterIndex == 0 && settingsTermOverride == null) settingsManager.savePeriodTimes(times)
+                    if (settingsTerm == activeCurrentTermId) settingsManager.savePeriodTimes(times)
                     reminderScheduler.updateTimeBase(routeAccountKey, settingsTerm,
                         (reminderScheduler.timeBase(routeAccountKey, settingsTerm) ?: ScheduleTimeBase()).copy(
                             periodStarts = times.associate { it.period to it.startTime }, periodEnds = times.associate { it.period to it.endTime }))
+                    com.buct.course.widget.WidgetProviders.refreshAll(context)
+                },
+                selectedYear = selectedYear,
+                yearOptions = yearOptions,
+                onSelectYear = { year ->
+                    userSelectedTerm = true
+                    selectedYear = year
                 },
                 customCourses = customCourses,
                 onAddCustomCourse = { editingId = java.util.UUID.randomUUID().toString() },
@@ -723,5 +767,19 @@ fun ScheduleRoute() {
                     close()
                 })
         }
+    }
+
+    if (showAcademicYearPicker && yearOptions.isNotEmpty()) {
+        com.buct.course.ui.system.GlassOptionWheelDialog(
+            title = "选择学年",
+            options = yearOptions.map { "$it-${it + 1}学年" },
+            selectedIndex = yearOptions.indexOf(selectedYear).coerceAtLeast(0),
+            onConfirm = { idx ->
+                userSelectedTerm = true
+                selectedYear = yearOptions[idx]
+                showAcademicYearPicker = false
+            },
+            onDismiss = { showAcademicYearPicker = false }
+        )
     }
 }

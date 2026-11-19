@@ -55,34 +55,31 @@ internal class ScheduleCacheStore(
         }
     }
 
-    fun selected(account: String, school: String, semesterIndex: Int): CachedSchedule? {
+    fun selected(account: String, school: String, term: AcademicTerm): CachedSchedule? {
         val current = currentTerm(account, school)
-        val term = when (semesterIndex) {
-            1 -> current.next()
-            2 -> current.next().next()
-            else -> current
-        }
         return read(account, school, term)?.let { CachedSchedule(current, term, it, true) }
     }
 
     suspend fun load(
         account: String,
         school: String,
-        semesterIndex: Int,
+        term: AcademicTerm,
+        followServerCurrent: Boolean,
         forceRefresh: Boolean,
         reader: () -> AcademicStudyAdapter
     ): CachedSchedule {
-        if (!forceRefresh) selected(account, school, semesterIndex)?.let { return it }
+        if (!forceRefresh && !followServerCurrent) {
+            selected(account, school, term)?.let { return it }
+        }
+        if (!forceRefresh && followServerCurrent) {
+            selected(account, school, currentTerm(account, school))?.let { return it }
+        }
         val remote = reader()
         val current = remote.catalog().currentTerm
-        val term = when (semesterIndex) {
-            1 -> current.next()
-            2 -> current.next().next()
-            else -> current
-        }
+        val target = if (followServerCurrent) current else term
         // Existing installations may have data but no persisted current-term metadata yet.
-        if (!forceRefresh) read(account, school, term)?.let { return CachedSchedule(current, term, it, true) }
-        return CachedSchedule(current, term, AcademicStudyBridge.scheduleJson(remote.schedule(term)), false)
+        if (!forceRefresh) read(account, school, target)?.let { return CachedSchedule(current, target, it, true) }
+        return CachedSchedule(current, target, AcademicStudyBridge.scheduleJson(remote.schedule(target)), false)
     }
 
     fun save(account: String, school: String, schedule: CachedSchedule) {

@@ -8,6 +8,14 @@ data class AcademicTerm(val id: String, val name: String = id) {
         2 -> AcademicTerm("$year-${year + 1}-3")
         else -> AcademicTerm("${year + 1}-${year + 2}-1")
     }
+
+    companion object {
+        /** 指定学年内的第 semester 学期（1=第一学期，2=第二学期，3=小学期）。 */
+        fun of(year: Int, semester: Int): AcademicTerm {
+            val clamped = semester.coerceIn(1, 3)
+            return AcademicTerm("$year-${year + 1}-$clamped")
+        }
+    }
 }
 
 data class AcademicStudyCatalog(val terms: List<AcademicTerm>, val currentTerm: AcademicTerm)

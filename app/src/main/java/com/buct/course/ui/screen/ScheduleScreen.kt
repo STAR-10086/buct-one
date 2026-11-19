@@ -51,6 +51,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -361,6 +362,8 @@ fun ScheduleScreen(
     onEmptyCellClick: ((day: Int, period: Int) -> Unit)? = null,
     onSettingsClick: () -> Unit = {},
     onExportClick: () -> Unit = {},
+    academicYearLabel: String = "",
+    onAcademicYearClick: (() -> Unit)? = null,
     semesterIndex: Int = 0,
     onSelectSemester: (Int) -> Unit = {},
     errorMessage: String = "",
@@ -413,8 +416,10 @@ fun ScheduleScreen(
         initialPage = (currentWeek - 1).coerceIn(0, maxWeeks - 1),
         pageCount = { maxWeeks }
     )
-    val semesterStartMillis = remember {
-        com.buct.course.manager.ScheduleSettingsManager.getInstance().semesterStartDate
+    val settingsManager = com.buct.course.manager.ScheduleSettingsManager.getInstance()
+    val semesterStartMillis = remember(firstWeekDate, settingsManager.revision) {
+        com.buct.course.schedule.ScheduleDates.firstMonday(firstWeekDate)?.timeInMillis
+            ?: settingsManager.semesterStartDate
     }
 
     val latestWeekChange by rememberUpdatedState(onWeekChange)
@@ -529,6 +534,8 @@ fun ScheduleScreen(
                     onExportClick = onExportClick,
                     accountLabel = accountLabel,
                     onAccountClick = onAccountClick,
+                    academicYearLabel = academicYearLabel,
+                    onAcademicYearClick = onAcademicYearClick,
                     semesterIndex = semesterIndex,
                     onSelectSemester = { index ->
                         onSelectSemester(index)
@@ -666,6 +673,8 @@ fun WeekHeaderCompact(
     onNextClick: () -> Unit,
     onSettingsClick: () -> Unit = {},
     onExportClick: () -> Unit = {},
+    academicYearLabel: String = "",
+    onAcademicYearClick: (() -> Unit)? = null,
     semesterIndex: Int = 0,
     onSelectSemester: (Int) -> Unit = {},
     accountLabel: String = "",
@@ -804,10 +813,14 @@ fun WeekHeaderCompact(
                             )
                             Text(
                                 text = "第 $currentWeek 周",
-                                modifier = Modifier.focusRequester(headerFocus).focusable().graphicsLayer {
-                                    alpha = (1f - kotlin.math.abs(weekOffset) * 2f).coerceIn(0f, 1f)
-                                    translationX = -weekOffset * 12.dp.toPx()
-                                },
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .focusRequester(headerFocus)
+                                    .focusable()
+                                    .graphicsLayer {
+                                        alpha = (1f - kotlin.math.abs(weekOffset) * 2f).coerceIn(0f, 1f)
+                                        translationX = -weekOffset * 12.dp.toPx()
+                                    },
                                 fontSize = lerpSp(26f, 17f, collapse),
                                 fontWeight = FontWeight.Bold,
                                 color = titleColor,
@@ -816,6 +829,14 @@ fun WeekHeaderCompact(
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            if (academicYearLabel.isNotBlank() && onAcademicYearClick != null && collapse < 0.45f) {
+                                Spacer(Modifier.width(8.dp))
+                                AcademicYearChip(
+                                    label = academicYearLabel,
+                                    onClick = onAcademicYearClick,
+                                    collapse = collapse
+                                )
+                            }
                         }
 
                         // 收拢方式：容器高度与内容缩放【同一个系数】，于是绘制尺寸
@@ -1138,6 +1159,47 @@ private fun SemesterCapsuleToggle(
             ?: com.buct.course.ui.system.LocalControlBackdrop.current
     )
 }
+@Composable
+private fun AcademicYearChip(
+    label: String,
+    onClick: () -> Unit,
+    collapse: Float = 0f
+) {
+    val backdrop = LocalControlBackdrop.current
+    val optics = rememberInteractiveOptics()
+    val alpha = (1f - collapse / 0.45f).coerceIn(0f, 1f)
+
+    Row(
+        modifier = Modifier
+            .height(26.dp)
+            .graphicsLayer { this.alpha = alpha }
+            .adaptiveGlassChip(backdrop, CircleShape, optics, enabled = true, interactive = true)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(start = 10.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false
+        )
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowDown,
+            contentDescription = "切换学年",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp)
+        )
+    }
+}
+
 /** 日/周 视图切换：两个小胶囊，「日」选中 = 日视图（只看当天）。 */
 @Composable
 private fun DayViewToggle(
