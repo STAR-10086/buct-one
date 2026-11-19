@@ -20,6 +20,24 @@ on:
       - 'gradle.properties'
       - '.github/workflows/build-apk.yml'
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: '构建完成后顺便发布 Release'
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: '可选 Release 标签名（如 v0.2.0 或 v0.2.0-beta.2；留空则使用 ci-<run_number>）'
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      release_tag:
+        description: '由发版工作流传入的标签名'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -166,10 +184,11 @@ jobs:
           if-no-files-found: error
 
       - name: Publish to Release
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: (github.event_name == 'workflow_call' && inputs.release_tag != '') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ci-${{ github.run_number }}
-          name: CI build #${{ github.run_number }}
+          tag_name: ${{ inputs.release_tag != '' && inputs.release_tag || format('ci-{0}', github.run_number) }}
+          name: ${{ inputs.release_tag != '' && format('BUCT One {0}', inputs.release_tag) || format('CI build #{0}', github.run_number) }}
+          prerelease: ${{ contains(inputs.release_tag, '-') }}
           files: app/build/outputs/apk/release/*.apk
           fail_on_unmatched_files: true
