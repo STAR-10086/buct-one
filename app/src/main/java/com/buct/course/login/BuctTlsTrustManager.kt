@@ -111,7 +111,7 @@ class BuctTlsTrustManager : X509TrustManager {
      */
     fun isTrustedWebViewCertificate(cert: SslCertificate?): Boolean {
         if (cert == null) return false
-        val x509: X509Certificate? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val parsed: X509Certificate? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             cert.x509Certificate
         } else {
             val bundle = SslCertificate.saveState(cert)
@@ -121,8 +121,11 @@ class BuctTlsTrustManager : X509TrustManager {
                     CertificateFactory.getInstance("X.509")
                         .generateCertificate(bytes.inputStream()) as? X509Certificate
                 }.getOrNull()
-            } else null
-        } ?: return false
+            } else {
+                null
+            }
+        }
+        val x509: X509Certificate = parsed ?: return false
         return runCatching {
             checkServerTrusted(arrayOf(x509), "RSA")
             true

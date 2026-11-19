@@ -167,27 +167,37 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                             title = title,
                             subtitle = courseName.ifBlank { "北化在线" },
                             navigationIcon = {
-                                SystemIconButton(Icons.AutoMirrored.Filled.ArrowBack, "返回") {
-                                    val view = webView
-                                    if (view != null && view.canGoBack()) {
-                                        view.goBack()
-                                    } else {
-                                        finish()
+                                SystemIconButton(
+                                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "返回",
+                                    onClick = {
+                                        val view = webView
+                                        if (view != null && view.canGoBack()) {
+                                            view.goBack()
+                                        } else {
+                                            finish()
+                                        }
                                     }
-                                }
+                                )
                             },
                             actions = {
                                 if (courseLid.isNotBlank()) {
-                                    SystemIconButton(Icons.Outlined.MenuBook, "课程主页") {
-                                        pendingTargetUrl = null
-                                        webView?.loadUrl(
-                                            "https://course.buct.edu.cn/meol/jpk/course/layout/newpage/index.jsp?courseId=$courseLid"
-                                        )
-                                    }
+                                    SystemIconButton(
+                                        icon = Icons.Outlined.MenuBook,
+                                        contentDescription = "课程主页",
+                                        onClick = {
+                                            pendingTargetUrl = null
+                                            webView?.loadUrl(
+                                                "https://course.buct.edu.cn/meol/jpk/course/layout/newpage/index.jsp?courseId=$courseLid"
+                                            )
+                                        }
+                                    )
                                 }
-                                SystemIconButton(Icons.Default.Refresh, "刷新") {
-                                    webView?.reload()
-                                }
+                                SystemIconButton(
+                                    icon = Icons.Default.Refresh,
+                                    contentDescription = "刷新",
+                                    onClick = { webView?.reload() }
+                                )
                             }
                         )
 
@@ -329,6 +339,8 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                                                 return true
                                             }
 
+                                            // 仅针对 *.buct.edu.cn 且经 BuctTlsTrustManager.isTrustedWebViewCertificate 校验通过才放行
+                                            @SuppressLint("WebViewClientOnReceivedSslError")
                                             override fun onReceivedSslError(
                                                 view: WebView?,
                                                 handler: SslErrorHandler?,
