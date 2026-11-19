@@ -576,8 +576,8 @@ class TheolClient {
                 val pagingPageStr = parsedUrl?.queryParameter("pagingPage").orEmpty()
                 val table = doc.selectFirst("table.valuelist")
                 var repeated = false
-                if (table != null && pagingPageStr.isNotEmpty()) {
-                    val seriesUrl = parsedUrl!!.newBuilder().removeAllQueryParameters("pagingPage").build().toString()
+                if (table != null && parsedUrl != null && pagingPageStr.isNotEmpty()) {
+                    val seriesUrl = parsedUrl.newBuilder().removeAllQueryParameters("pagingPage").build().toString()
                     val signature = sha256Hex("$seriesUrl\u0000${table.html()}")
                     repeated = !seenTableSignatures.add(signature)
                 }
@@ -632,7 +632,7 @@ class TheolClient {
                 }
                 val currentPage = pagingPageStr.toIntOrNull() ?: 0
                 val perPage = parsedUrl?.queryParameter("pagingNumberPer")?.toIntOrNull() ?: 0
-                if (!repeated && currentPage > 0 && perPage > 0 && table != null) {
+                if (!repeated && parsedUrl != null && currentPage > 0 && perPage > 0 && table != null) {
                     val dataRows = table.select("tr").count { it.select("> td").isNotEmpty() }
                     if (dataRows >= perPage) {
                         val nextUrl = parsedUrl.newBuilder()
