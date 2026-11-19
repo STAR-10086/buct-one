@@ -15,41 +15,29 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.outlined.Campaign
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.WorkspacePremium
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -65,11 +53,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.buct.course.manager.AppThemeCoordinator
 import com.buct.course.manager.UserManager
+import com.buct.course.ui.system.GlassLoadingIndicator
+import com.buct.course.ui.system.GlassPageScaffold
+import com.buct.course.ui.system.GlassProgressBar
+import com.buct.course.ui.system.GlassTextField
+import com.buct.course.ui.system.GlassToaster
+import com.buct.course.ui.system.SystemCompactSegmentedControl
+import com.buct.course.ui.system.SystemDialog
+import com.buct.course.ui.system.SystemDivider
+import com.buct.course.ui.system.SystemEmptyState
+import com.buct.course.ui.system.SystemIconButton
+import com.buct.course.ui.system.SystemPrimaryButton
+import com.buct.course.ui.system.SystemSecondaryButton
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.course.ui.theme.CourseSelectorTheme
@@ -86,7 +88,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 第二课堂综合素质评价平台（scs.buct.edu.cn）原生界面。
+ * 第二课堂综合素质评价平台（scs.buct.edu.cn）原生液态玻璃界面。
  * 复用 sidportal 统一身份认证换取 JWT，展示德/智/体/美/劳五育得分、历年学期评定明细与校园活动。
  */
 class ScsActivity : ComponentActivity() {
@@ -144,8 +146,8 @@ private fun ScsScreen(
             val res = service.refresh()
             if (res.isFailure) {
                 val msg = res.exceptionOrNull()?.message.orEmpty()
-                if (msg.contains("登录") || msg.contains("过期")) {
-                    val user = UserManager.getInstance()
+                if (msg.contains("登录") || msg.contains("过期") || msg.contains("会话")) {
+                    val user = UserManager.getInstance().apply { init(context) }
                     val pwd = user.accountPassword
                     val uname = user.username.ifBlank { user.studentId.orEmpty() }
                     if (!pwd.isNullOrEmpty() && uname.isNotBlank()) {
@@ -181,274 +183,231 @@ private fun ScsScreen(
         else -> "更新于 ${timeFmt.format(Date(slice.provenance.capturedAt))}"
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-    ) {
-        Spacer(Modifier.height(10.dp))
-
-        // 顶栏
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            ScsCircleIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回",
-                onClick = onBack
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "第二课堂",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = statusText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (slice.provenance.refreshState == RefreshState.FAILED_FALLBACK) {
-                        Color(0xFFFF453A)
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            ScsCircleIconButton(
+    GlassPageScaffold(
+        title = "第二课堂",
+        subtitle = statusText,
+        onBack = onBack,
+        actions = {
+            SystemIconButton(
                 icon = Icons.Outlined.Login,
                 contentDescription = "统一身份登录",
+                enabled = !syncing,
                 onClick = { showLoginDialog = true }
             )
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(glassSurfaceColor())
-                    .border(0.5.dp, glassBorderColor(), CircleShape)
-                    .clickable(enabled = !syncing) {
+            if (syncing) {
+                GlassLoadingIndicator(size = 38.dp)
+            } else {
+                SystemIconButton(
+                    icon = Icons.Outlined.Refresh,
+                    contentDescription = "刷新",
+                    tint = MaterialTheme.colorScheme.primary,
+                    onClick = {
                         scope.launch {
                             feedbackMsg = null
                             val res = service.refresh()
                             if (res.isFailure) {
                                 val err = res.exceptionOrNull()?.message ?: "第二课堂刷新失败"
                                 feedbackMsg = err
-                                if (err.contains("登录") || err.contains("过期")) {
+                                GlassToaster.show(err)
+                                if (err.contains("登录") || err.contains("过期") || err.contains("会话")) {
                                     showLoginDialog = true
                                 }
+                            } else {
+                                GlassToaster.show("第二课堂数据已刷新")
                             }
                         }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                if (syncing) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(
-                        imageVector = Icons.Outlined.Refresh,
-                        contentDescription = "刷新",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        val bannerError = feedbackMsg ?: slice.lastError
-        if (!bannerError.isNullOrBlank()) {
-            Spacer(Modifier.height(10.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFFF453A).copy(alpha = 0.12f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Text(
-                    text = bannerError,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFFF453A)
+                    }
                 )
             }
         }
-
-        Spacer(Modifier.height(10.dp))
-
-        // Tab 切换：五育成绩 / 二课活动
-        Row(
+    ) { padding ->
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(glassSurfaceColor())
-                .border(0.5.dp, glassBorderColor(), RoundedCornerShape(20.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .fillMaxSize()
+                .padding(
+                    top = padding.calculateTopPadding() + 4.dp,
+                    start = 16.dp,
+                    end = 16.dp
+                ),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            listOf(
-                "五育成绩(${terms.count { !it.isFullYear }})",
-                "二课活动(${snapshot?.activities?.size ?: 0})"
-            ).forEachIndexed { idx, label ->
-                val active = selectedTab == idx
+            val bannerError = feedbackMsg ?: slice.lastError
+            if (!bannerError.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
-                        .clickable { selectedTab = idx }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
+                        .background(Color(0xFFFF453A).copy(alpha = 0.12f))
+                        .border(0.5.dp, Color(0xFFFF453A).copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
-                        ),
-                        color = if (active) Color.White else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = bannerError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFF453A)
                     )
                 }
             }
-        }
 
-        Spacer(Modifier.height(12.dp))
+            SystemCompactSegmentedControl(
+                options = listOf(
+                    "五育成绩(${terms.count { !it.isFullYear }})",
+                    "二课活动(${snapshot?.activities?.size ?: 0})"
+                ),
+                selectedIndex = selectedTab,
+                onSelect = { selectedTab = it }
+            )
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (snapshot == null) {
-                item {
-                    ScsEmptyCard(
-                        text = if (syncing) {
-                            "正在通过统一身份认证拉取第二课堂数据…"
-                        } else {
-                            "暂无第二课堂本地快照，请点击右上角刷新或登录统一身份认证。"
-                        }
-                    )
-                }
-            } else if (selectedTab == 0) {
-                item {
-                    ScsSummaryHeroCard(
-                        snapshot = snapshot,
-                        selectedTerm = selectedTerm
-                    )
-                }
-
-                if (terms.isNotEmpty()) {
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (snapshot == null) {
                     item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            terms.forEach { t ->
-                                val key = "${t.yearId}:${t.termId}"
-                                val active = selectedTerm?.let { "${it.yearId}:${it.termId}" == key } == true
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(
-                                            if (active) MaterialTheme.colorScheme.primary else glassSurfaceColor()
-                                        )
-                                        .border(0.5.dp, glassBorderColor(), RoundedCornerShape(14.dp))
-                                        .clickable { selectedTermKey = key }
-                                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                                ) {
-                                    val label = buildString {
-                                        append(t.yearName)
-                                        append(' ')
-                                        append(t.termName)
-                                        t.totalScore?.let { append(" · ${formatScore(it)}") }
-                                    }
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
-                                        ),
-                                        color = if (active) Color.White else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
+                        SystemEmptyState(
+                            title = if (syncing) "正在同步第二课堂" else "暂无第二课堂本地快照",
+                            message = if (syncing) {
+                                "正在通过统一身份认证拉取五育综测与二课活动数据…"
+                            } else {
+                                "校内网或校园 VPN 下点击右上角刷新或登录统一身份认证。"
+                            },
+                            icon = Icons.Outlined.School
+                        )
                     }
-                }
-
-                selectedTerm?.let { term ->
+                } else if (selectedTab == 0) {
                     item {
-                        ScsFiveDimensionsCard(
-                            term = term,
-                            snapshot = snapshot
+                        ScsSummaryHeroCard(
+                            snapshot = snapshot,
+                            selectedTerm = selectedTerm
                         )
                     }
 
-                    if (term.details.isNotEmpty()) {
+                    if (terms.isNotEmpty()) {
                         item {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = "${term.yearName} ${term.termName} 评分细则",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(glassSurfaceColor())
-                                        .border(0.5.dp, glassBorderColor(), RoundedCornerShape(12.dp))
-                                        .clickable { showOnlyScored = !showOnlyScored }
-                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = if (showOnlyScored) "仅看得分项" else "显示全部细则",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
+                                terms.forEach { t ->
+                                    val key = "${t.yearId}:${t.termId}"
+                                    val active = selectedTerm?.let { "${it.yearId}:${it.termId}" == key } == true
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(
+                                                if (active) MaterialTheme.colorScheme.primary else glassSurfaceColor()
+                                            )
+                                            .border(
+                                                0.5.dp,
+                                                if (active) MaterialTheme.colorScheme.primary else glassBorderColor(),
+                                                RoundedCornerShape(50)
+                                            )
+                                            .clickable { selectedTermKey = key }
+                                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    ) {
+                                        val label = buildString {
+                                            append(t.yearName)
+                                            append(' ')
+                                            append(t.termName)
+                                            t.totalScore?.let { append(" · ${formatScore(it)}") }
+                                        }
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
+                                            ),
+                                            color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 }
                             }
                         }
+                    }
 
-                        items(term.details, key = { "${term.termId}:${it.typeId}" }) { category ->
-                            ScsCategoryDetailCard(
-                                category = category,
-                                onlyScored = showOnlyScored
+                    selectedTerm?.let { term ->
+                        item {
+                            ScsFiveDimensionsCard(
+                                term = term,
+                                snapshot = snapshot
                             )
                         }
-                    } else if (term.isFullYear) {
-                        item {
-                            ScsEmptyCard("「全年」视图展示年度汇总总分；点击上方「第一学期 / 第二学期」胶囊可查看各维度评分明细。")
-                        }
-                    } else {
-                        item {
-                            ScsEmptyCard("该学期暂未生成五育细则数据。")
-                        }
-                    }
-                }
-            } else {
-                val activities = snapshot.activities
-                if (activities.isEmpty()) {
-                    item {
-                        ScsEmptyCard(
-                            if (slice.provenance.refreshState == RefreshState.EMPTY_CONFIRMED) {
-                                "当前第二课堂活动列表为空（学校暂未发布可报名活动）。"
-                            } else {
-                                "当前暂无第二课堂活动记录。"
+
+                        if (term.details.isNotEmpty()) {
+                            item {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${term.yearName} ${term.termName} 评分细则",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onBackground
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(glassSurfaceColor())
+                                            .border(0.5.dp, glassBorderColor(), RoundedCornerShape(50))
+                                            .clickable { showOnlyScored = !showOnlyScored }
+                                            .padding(horizontal = 11.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = if (showOnlyScored) "仅看得分项" else "显示全部细则",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
                             }
-                        )
+
+                            items(term.details, key = { "${term.termId}:${it.typeId}" }) { category ->
+                                ScsCategoryDetailCard(
+                                    category = category,
+                                    onlyScored = showOnlyScored
+                                )
+                            }
+                        } else if (term.isFullYear) {
+                            item {
+                                SystemEmptyState(
+                                    title = "年度汇总视图",
+                                    message = "「全年」视图展示年度汇总总分；点击上方「第一学期 / 第二学期」胶囊可查看各维度评分明细。",
+                                    icon = Icons.Outlined.School
+                                )
+                            }
+                        } else {
+                            item {
+                                SystemEmptyState(
+                                    title = "暂无细则数据",
+                                    message = "该学期暂未生成五育评分细则数据。",
+                                    icon = Icons.Outlined.School
+                                )
+                            }
+                        }
                     }
                 } else {
-                    items(activities, key = { it.id }) { act ->
-                        ScsActivityCard(act)
+                    val activities = snapshot.activities
+                    if (activities.isEmpty()) {
+                        item {
+                            SystemEmptyState(
+                                title = "暂无二课活动",
+                                message = if (slice.provenance.refreshState == RefreshState.EMPTY_CONFIRMED) {
+                                    "当前第二课堂活动列表为空（学校暂未发布可报名活动）。"
+                                } else {
+                                    "当前暂无第二课堂活动记录。"
+                                },
+                                icon = Icons.Outlined.WorkspacePremium
+                            )
+                        }
+                    } else {
+                        items(activities, key = { it.id }) { act ->
+                            ScsActivityCard(act)
+                        }
                     }
                 }
             }
@@ -465,35 +424,14 @@ private fun ScsScreen(
                     val res = service.loginAndSync(username, passwordChars)
                     if (res.isSuccess) {
                         showLoginDialog = false
+                        GlassToaster.show("登录成功并已同步第二课堂数据")
                     } else {
-                        feedbackMsg = res.exceptionOrNull()?.message ?: "登录失败"
+                        val err = res.exceptionOrNull()?.message ?: "登录失败"
+                        feedbackMsg = err
+                        GlassToaster.show(err)
                     }
                 }
             }
-        )
-    }
-}
-
-@Composable
-private fun ScsCircleIconButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(glassSurfaceColor())
-            .border(0.5.dp, glassBorderColor(), CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.size(20.dp)
         )
     }
 }
@@ -584,13 +522,14 @@ private fun ScsSummaryHeroCard(
         }
 
         snapshot.currentWindow?.let { win ->
-            val badgeBg = if (win.isOpen) Color(0xFF34C759).copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            val badgeBg = if (win.isOpen) Color(0xFF34C759).copy(alpha = 0.14f) else glassSurfaceColor()
             val badgeFg = if (win.isOpen) Color(0xFF34C759) else MaterialTheme.colorScheme.onSurfaceVariant
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(badgeBg)
+                    .border(0.5.dp, glassBorderColor(), RoundedCornerShape(14.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -676,14 +615,10 @@ private fun ScsFiveDimensionsCard(
                         color = if (value != null) tint else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                LinearProgressIndicator(
-                    progress = { ratio },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                    color = tint,
-                    trackColor = tint.copy(alpha = 0.14f)
+                GlassProgressBar(
+                    progress = ratio,
+                    tint = tint,
+                    height = 6.dp
                 )
             }
         }
@@ -764,7 +699,7 @@ private fun ScsCategoryDetailCard(
 
         AnimatedVisibility(visible = expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                HorizontalDivider(color = glassBorderColor())
+                SystemDivider(alpha = 0.35f)
                 visibleItems.forEach { item ->
                     ScsEvalItemRow(item)
                 }
@@ -779,7 +714,8 @@ private fun ScsEvalItemRow(item: ScsEvalItem) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))
+            .background(glassSurfaceColor())
+            .border(0.5.dp, glassBorderColor(), RoundedCornerShape(14.dp))
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -870,82 +806,84 @@ private fun ScsActivityCard(act: ScsActivityItem) {
 }
 
 @Composable
-private fun ScsEmptyCard(text: String) {
-    val shape = RoundedCornerShape(22.dp)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(glassSurfaceColor())
-            .border(0.5.dp, glassBorderColor(), shape)
-            .padding(20.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
 private fun ScsSidLoginDialog(
     syncing: Boolean,
     onDismiss: () -> Unit,
     onSubmit: (username: String, passwordChars: CharArray) -> Unit
 ) {
-    val userManager = remember { UserManager.getInstance() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val userManager = remember { UserManager.getInstance().apply { init(context) } }
     var username by remember { mutableStateOf(userManager.username.ifBlank { userManager.studentId.orEmpty() }) }
     var password by remember { mutableStateOf("") }
 
-    AlertDialog(
+    fun submit() {
+        if (syncing || username.isBlank() || password.isEmpty()) return
+        val chars = password.toCharArray()
+        password = ""
+        onSubmit(username.trim(), chars)
+    }
+
+    SystemDialog(
         onDismissRequest = { if (!syncing) onDismiss() },
-        icon = { Icon(Icons.Outlined.School, contentDescription = null) },
-        title = { Text("统一身份认证登录") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "登录 sidportal.buct.edu.cn 以获取第二课堂五育评定成绩（凭据仅用于本次换票，学号密码不落盘）。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("学号") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("统一身份认证密码") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+        title = {
+            Text(
+                text = "统一身份认证登录",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
         },
         confirmButton = {
-            Button(
+            SystemPrimaryButton(
+                text = if (syncing) "登录中…" else "登录并同步",
                 enabled = !syncing && username.isNotBlank() && password.isNotEmpty(),
-                onClick = {
-                    val chars = password.toCharArray()
-                    password = ""
-                    onSubmit(username.trim(), chars)
-                }
-            ) {
-                Text(if (syncing) "登录中…" else "登录并同步")
-            }
+                onClick = ::submit,
+                modifier = Modifier.fillMaxWidth()
+            )
         },
         dismissButton = {
-            OutlinedButton(enabled = !syncing, onClick = onDismiss) {
-                Text("取消")
-            }
+            SystemSecondaryButton(
+                text = "取消",
+                enabled = !syncing,
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
-    )
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = "登录 sidportal.buct.edu.cn 以获取第二课堂五育评定成绩（凭据仅用于本次换票，学号密码不落盘）。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            GlassTextField(
+                value = username,
+                onValueChange = { username = it },
+                placeholder = "请输入学号",
+                leadingIcon = Icons.Outlined.Person,
+                singleLine = true,
+                enabled = !syncing,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Ascii,
+                    imeAction = ImeAction.Next
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+            GlassTextField(
+                value = password,
+                onValueChange = { password = it },
+                placeholder = "请输入统一身份认证密码",
+                leadingIcon = Icons.Outlined.Lock,
+                singleLine = true,
+                enabled = !syncing,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
 }
 
 private fun formatScore(value: Double): String {

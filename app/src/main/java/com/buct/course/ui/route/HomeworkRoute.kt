@@ -19,38 +19,37 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Assignment
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.UploadFile
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -67,17 +66,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.buct.course.TheolAttachmentOpener
 import com.buct.course.TheolSubmitWebViewActivity
+import com.buct.course.ui.system.GlassLoadingIndicator
+import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.LocalAppOverlayBottomInset
+import com.buct.course.ui.system.SystemActionButton
+import com.buct.course.ui.system.SystemCompactSegmentedControl
+import com.buct.course.ui.system.SystemDestructiveButton
+import com.buct.course.ui.system.SystemDialog
+import com.buct.course.ui.system.SystemDivider
+import com.buct.course.ui.system.SystemEmptyState
+import com.buct.course.ui.system.SystemIconButton
+import com.buct.course.ui.system.SystemPrimaryButton
+import com.buct.course.ui.system.SystemSecondaryButton
+import com.buct.course.ui.system.SystemTopBar
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.one.data.model.LocalTodoItem
@@ -207,71 +219,46 @@ fun HomeworkRoute() {
     val bottomInset = LocalAppOverlayBottomInset.current
     val timeFormatter = remember { SimpleDateFormat("MM-dd HH:mm", Locale.CHINA) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(horizontal = 16.dp)
-    ) {
-        Spacer(Modifier.height(12.dp))
+    val baseSubtitle = when (theolSlice.provenance.refreshState) {
+        RefreshState.NEVER -> "尚未同步"
+        RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED ->
+            "更新于 ${timeFormatter.format(Date(theolSlice.provenance.capturedAt))}"
+        RefreshState.STALE ->
+            "历史快照 · ${timeFormatter.format(Date(theolSlice.provenance.capturedAt))}"
+        RefreshState.FAILED_FALLBACK ->
+            "同步失败（已保留旧快照）"
+    }
+    val subtitle = if (theolBgSyncing) "$baseSubtitle · 后台补齐已交课程中…" else baseSubtitle
 
-        // 顶部标题与圆形玻璃操作钮
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "作业与测验",
-                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                val baseSubtitle = when (theolSlice.provenance.refreshState) {
-                    RefreshState.NEVER -> "北化在线尚未同步"
-                    RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED ->
-                        "更新于 ${timeFormatter.format(Date(theolSlice.provenance.capturedAt))}"
-                    RefreshState.STALE ->
-                        "历史快照 · ${timeFormatter.format(Date(theolSlice.provenance.capturedAt))}"
-                    RefreshState.FAILED_FALLBACK ->
-                        "同步失败（已保留旧快照）"
-                }
-                val subtitle = if (theolBgSyncing) "$baseSubtitle · 后台补齐已交课程中…" else baseSubtitle
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (theolSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK) {
-                        Color(0xFFFF453A)
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CircleGlassButton(
+    Column(modifier = Modifier.fillMaxSize()) {
+        SystemTopBar(
+            title = "作业",
+            subtitle = "北化在线 · $subtitle",
+            actions = {
+                SystemIconButton(
                     icon = Icons.Outlined.FilterList,
-                    description = "黑名单与已隐藏管理",
+                    contentDescription = "黑名单与已隐藏管理",
                     tint = if (hasActiveFilters) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     onClick = { showFilterManageDialog = true }
                 )
-                CircleGlassButton(
+                SystemIconButton(
                     icon = Icons.Outlined.Add,
-                    description = "新建本地待办",
+                    contentDescription = "新建本地待办",
                     onClick = { showAddTodoDialog = true }
                 )
-                CircleGlassButton(
+                SystemIconButton(
                     icon = Icons.Outlined.Login,
-                    description = "登录北化在线",
+                    contentDescription = "登录北化在线",
                     onClick = { showLoginDialog = true }
                 )
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(glassSurfaceColor())
-                        .border(0.5.dp, glassBorderColor(), CircleShape)
-                        .clickable(enabled = !syncing) {
+                if (syncing) {
+                    GlassLoadingIndicator(size = 38.dp)
+                } else {
+                    SystemIconButton(
+                        icon = Icons.Outlined.Refresh,
+                        contentDescription = "刷新北化在线",
+                        tint = MaterialTheme.colorScheme.primary,
+                        onClick = {
                             scope.launch {
                                 feedbackMsg = null
                                 if (selectedTab == 3) {
@@ -293,255 +280,244 @@ fun HomeworkRoute() {
                                     }
                                 }
                             }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (syncing) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(
-                            imageVector = Icons.Outlined.Refresh,
-                            contentDescription = "刷新北化在线",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // 悬浮胶囊分段选择器
-        val segments = listOf(
-            "待交(${pendingHomeworks.size})",
-            "全部(${homeworks.size})",
-            "测验(${tests.size})",
-            "实验(${expReports.size})",
-            "待办(${activeTodos.count { !it.completed }})"
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(glassSurfaceColor())
-                .border(0.5.dp, glassBorderColor(), RoundedCornerShape(22.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            segments.forEachIndexed { index, label ->
-                val selected = selectedTab == index
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
-                        )
-                        .clickable { selectedTab = index }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                        ),
-                        color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        }
                     )
                 }
             }
-        }
+        )
 
-        val bannerError = feedbackMsg ?: if (selectedTab == 3) sjcxSlice.lastError else theolSlice.lastError
-        if (!bannerError.isNullOrBlank()) {
-            Spacer(Modifier.height(10.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0xFFFF453A).copy(alpha = 0.12f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Text(
-                    text = bannerError,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFFF453A)
-                )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset + 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
         ) {
-            when (selectedTab) {
-                0 -> {
-                    if (pendingHomeworks.isEmpty()) {
-                        item {
-                            EmptyGlassHint(
-                                text = if (theolSlice.provenance.refreshState == RefreshState.NEVER) {
-                                    "尚未同步北化在线。点击右上角登录图标，用统一身份认证账号原生登录即可获取待交作业。"
-                                } else {
-                                    "当前没有待提交的作业。"
-                                }
-                            )
-                        }
-                    } else {
-                        items(pendingHomeworks, key = { it.hwtid }) { hw ->
-                            val targetUrl = hw.submitHref.ifBlank { hw.detailHref }
-                            HomeworkGlassCard(
-                                hw = hw,
-                                onOpenDetail = { selectedHomeworkForDetail = hw },
-                                onOpenSubmit = {
-                                    TheolSubmitWebViewActivity.launch(
-                                        context = context,
-                                        url = targetUrl,
-                                        title = hw.title,
-                                        courseName = hw.courseName,
-                                        courseLid = hw.lid
-                                    )
-                                },
-                                onHideHomework = { service.hideHomework(hw.hwtid) },
-                                onBlacklistCourse = {
-                                    pendingBlacklistCourse = hw.lid to hw.courseName.ifBlank { "未命名课程" }
-                                }
-                            )
-                        }
-                    }
+            Spacer(Modifier.height(4.dp))
+
+            val segments = listOf(
+                "待交${pendingHomeworks.size}",
+                "全部",
+                "测验${tests.size}",
+                "实验${expReports.size}",
+                "待办${activeTodos.count { !it.completed }}"
+            )
+            SystemCompactSegmentedControl(
+                options = segments,
+                selectedIndex = selectedTab,
+                onSelect = { selectedTab = it }
+            )
+
+            val bannerError = feedbackMsg ?: if (selectedTab == 3) sjcxSlice.lastError else theolSlice.lastError
+            if (!bannerError.isNullOrBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xFFFF453A).copy(alpha = 0.12f))
+                        .border(0.5.dp, Color(0xFFFF453A).copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = bannerError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFF453A)
+                    )
                 }
-                1 -> {
-                    if (homeworks.isEmpty()) {
-                        item { EmptyGlassHint("暂无作业记录，请点击右上角刷新或登录北化在线。") }
-                    } else {
-                        items(homeworks, key = { it.hwtid }) { hw ->
-                            val targetUrl = when {
-                                hw.canSubmit -> hw.submitHref.ifBlank { hw.detailHref }
-                                hw.resultHref.isNotBlank() -> hw.resultHref
-                                else -> hw.detailHref
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = bottomInset + 20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                when (selectedTab) {
+                    0 -> {
+                        if (pendingHomeworks.isEmpty()) {
+                            item {
+                                SystemEmptyState(
+                                    title = if (theolSlice.provenance.refreshState == RefreshState.NEVER) "北化在线尚未同步" else "当前暂无待交作业",
+                                    message = if (theolSlice.provenance.refreshState == RefreshState.NEVER) {
+                                        "点击右上角登录图标，用统一身份认证账号原生登录即可获取待交作业。"
+                                    } else {
+                                        "太棒了，当前没有待提交的作业任务。"
+                                    },
+                                    icon = Icons.Outlined.Assignment
+                                )
                             }
-                            HomeworkGlassCard(
-                                hw = hw,
-                                onOpenDetail = { selectedHomeworkForDetail = hw },
-                                onOpenSubmit = {
-                                    TheolSubmitWebViewActivity.launch(
-                                        context = context,
-                                        url = targetUrl,
-                                        title = hw.title,
-                                        courseName = hw.courseName,
-                                        courseLid = hw.lid
-                                    )
-                                },
-                                onHideHomework = { service.hideHomework(hw.hwtid) },
-                                onBlacklistCourse = {
-                                    pendingBlacklistCourse = hw.lid to hw.courseName.ifBlank { "未命名课程" }
-                                }
-                            )
-                        }
-                    }
-                }
-                2 -> {
-                    if (tests.isEmpty()) {
-                        item { EmptyGlassHint("暂无在线测验记录。") }
-                    } else {
-                        items(tests, key = { "${it.lid}:${it.testId}" }) { test ->
-                            TestGlassCard(
-                                test = test,
-                                onOpenDetail = { selectedTestForDetail = test },
-                                onOpenTest = {
-                                    TheolSubmitWebViewActivity.launch(
-                                        context = context,
-                                        url = resolveSafeTestUrl(test),
-                                        title = test.title,
-                                        courseName = test.courseName,
-                                        courseLid = test.lid
-                                    )
-                                },
-                                onHideTest = { service.hideTest(test.lid, test.testId) },
-                                onBlacklistCourse = {
-                                    pendingBlacklistCourse = test.lid to test.courseName.ifBlank { "未命名课程" }
-                                }
-                            )
-                        }
-                    }
-                }
-                3 -> {
-                    if (expReports.isEmpty()) {
-                        item {
-                            EmptyGlassHint(
-                                text = if (sjcxSlice.provenance.refreshState == RefreshState.NEVER) {
-                                    "尚未同步实践教学平台（sjcx.buct.edu.cn）。点击右上角刷新或登录按钮，即可同步本学期实验报告与上传入口。"
-                                } else {
-                                    "本学期暂无实验报告任务。"
-                                }
-                            )
-                        }
-                    } else {
-                        items(expReports, key = { "${it.courseId}:${it.expId}:${it.stuId}" }) { exp ->
-                            ExperimentReportGlassCard(
-                                item = exp,
-                                enabled = !syncing,
-                                onDownloadTemplate = {
-                                    scope.launch {
-                                        GlassToaster.show("正在下载实验报告模板…")
-                                        val res = sjcxService.downloadReportTemplate(exp)
-                                        res.onSuccess { downloaded ->
-                                            TheolAttachmentOpener.open(
-                                                context,
-                                                TheolDownloadedFile(
-                                                    filePath = downloaded.localPath,
-                                                    fileName = downloaded.displayName,
-                                                    mimeType = downloaded.mimeType,
-                                                    sizeBytes = downloaded.sizeBytes
-                                                )
-                                            )
-                                        }.onFailure { err ->
-                                            GlassToaster.show(err.message ?: "下载模板失败")
-                                        }
+                        } else {
+                            items(pendingHomeworks, key = { it.hwtid }) { hw ->
+                                val targetUrl = hw.submitHref.ifBlank { hw.detailHref }
+                                HomeworkGlassCard(
+                                    hw = hw,
+                                    onOpenDetail = { selectedHomeworkForDetail = hw },
+                                    onOpenSubmit = {
+                                        TheolSubmitWebViewActivity.launch(
+                                            context = context,
+                                            url = targetUrl,
+                                            title = hw.title,
+                                            courseName = hw.courseName,
+                                            courseLid = hw.lid
+                                        )
+                                    },
+                                    onHideHomework = { service.hideHomework(hw.hwtid) },
+                                    onBlacklistCourse = {
+                                        pendingBlacklistCourse = hw.lid to hw.courseName.ifBlank { "未命名课程" }
                                     }
-                                },
-                                onDownloadSubmitted = {
-                                    scope.launch {
-                                        GlassToaster.show("正在下载已提交报告…")
-                                        val res = sjcxService.downloadSubmittedReport(exp)
-                                        res.onSuccess { downloaded ->
-                                            TheolAttachmentOpener.open(
-                                                context,
-                                                TheolDownloadedFile(
-                                                    filePath = downloaded.localPath,
-                                                    fileName = downloaded.displayName,
-                                                    mimeType = downloaded.mimeType,
-                                                    sizeBytes = downloaded.sizeBytes
-                                                )
-                                            )
-                                        }.onFailure { err ->
-                                            GlassToaster.show(err.message ?: "下载已交报告失败")
-                                        }
-                                    }
-                                },
-                                onUploadPdf = {
-                                    pendingUploadExpReport = exp
-                                    pdfUploadLauncher.launch(arrayOf("application/pdf"))
-                                }
-                            )
+                                )
+                            }
                         }
                     }
-                }
-                4 -> {
-                    if (activeTodos.isEmpty()) {
-                        item { EmptyGlassHint("暂无本地待办。点击右上角 + 新建自定义作业或 DDL 提醒。") }
-                    } else {
-                        items(activeTodos, key = { it.id }) { todo ->
-                            LocalTodoGlassCard(
-                                item = todo,
-                                onToggle = { service.toggleTodoCompleted(todo.id) },
-                                onDelete = { service.softDeleteTodo(todo.id) }
-                            )
+                    1 -> {
+                        if (homeworks.isEmpty()) {
+                            item {
+                                SystemEmptyState(
+                                    title = "暂无作业记录",
+                                    message = "请点击右上角刷新或登录北化在线获取全部课程作业。",
+                                    icon = Icons.Outlined.Assignment
+                                )
+                            }
+                        } else {
+                            items(homeworks, key = { it.hwtid }) { hw ->
+                                val targetUrl = when {
+                                    hw.canSubmit -> hw.submitHref.ifBlank { hw.detailHref }
+                                    hw.resultHref.isNotBlank() -> hw.resultHref
+                                    else -> hw.detailHref
+                                }
+                                HomeworkGlassCard(
+                                    hw = hw,
+                                    onOpenDetail = { selectedHomeworkForDetail = hw },
+                                    onOpenSubmit = {
+                                        TheolSubmitWebViewActivity.launch(
+                                            context = context,
+                                            url = targetUrl,
+                                            title = hw.title,
+                                            courseName = hw.courseName,
+                                            courseLid = hw.lid
+                                        )
+                                    },
+                                    onHideHomework = { service.hideHomework(hw.hwtid) },
+                                    onBlacklistCourse = {
+                                        pendingBlacklistCourse = hw.lid to hw.courseName.ifBlank { "未命名课程" }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    2 -> {
+                        if (tests.isEmpty()) {
+                            item {
+                                SystemEmptyState(
+                                    title = "暂无在线测验记录",
+                                    message = "当前课程暂无在线测验或已全部隐藏。",
+                                    icon = Icons.Outlined.Assignment
+                                )
+                            }
+                        } else {
+                            items(tests, key = { "${it.lid}:${it.testId}" }) { test ->
+                                TestGlassCard(
+                                    test = test,
+                                    onOpenDetail = { selectedTestForDetail = test },
+                                    onOpenTest = {
+                                        TheolSubmitWebViewActivity.launch(
+                                            context = context,
+                                            url = resolveSafeTestUrl(test),
+                                            title = test.title,
+                                            courseName = test.courseName,
+                                            courseLid = test.lid
+                                        )
+                                    },
+                                    onHideTest = { service.hideTest(test.lid, test.testId) },
+                                    onBlacklistCourse = {
+                                        pendingBlacklistCourse = test.lid to test.courseName.ifBlank { "未命名课程" }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    3 -> {
+                        if (expReports.isEmpty()) {
+                            item {
+                                SystemEmptyState(
+                                    title = "暂无实验报告任务",
+                                    message = if (sjcxSlice.provenance.refreshState == RefreshState.NEVER) {
+                                        "尚未同步实践教学平台（sjcx.buct.edu.cn）。点击右上角刷新或登录按钮，即可同步本学期实验报告与上传入口。"
+                                    } else {
+                                        "本学期暂无实验报告任务。"
+                                    },
+                                    icon = Icons.Outlined.Science
+                                )
+                            }
+                        } else {
+                            items(expReports, key = { "${it.courseId}:${it.expId}:${it.stuId}" }) { exp ->
+                                ExperimentReportGlassCard(
+                                    item = exp,
+                                    enabled = !syncing,
+                                    onDownloadTemplate = {
+                                        scope.launch {
+                                            GlassToaster.show("正在下载实验报告模板…")
+                                            val res = sjcxService.downloadReportTemplate(exp)
+                                            res.onSuccess { downloaded ->
+                                                TheolAttachmentOpener.open(
+                                                    context,
+                                                    TheolDownloadedFile(
+                                                        filePath = downloaded.localPath,
+                                                        fileName = downloaded.displayName,
+                                                        mimeType = downloaded.mimeType,
+                                                        sizeBytes = downloaded.sizeBytes
+                                                    )
+                                                )
+                                            }.onFailure { err ->
+                                                GlassToaster.show(err.message ?: "下载模板失败")
+                                            }
+                                        }
+                                    },
+                                    onDownloadSubmitted = {
+                                        scope.launch {
+                                            GlassToaster.show("正在下载已提交报告…")
+                                            val res = sjcxService.downloadSubmittedReport(exp)
+                                            res.onSuccess { downloaded ->
+                                                TheolAttachmentOpener.open(
+                                                    context,
+                                                    TheolDownloadedFile(
+                                                        filePath = downloaded.localPath,
+                                                        fileName = downloaded.displayName,
+                                                        mimeType = downloaded.mimeType,
+                                                        sizeBytes = downloaded.sizeBytes
+                                                    )
+                                                )
+                                            }.onFailure { err ->
+                                                GlassToaster.show(err.message ?: "下载已交报告失败")
+                                            }
+                                        }
+                                    },
+                                    onUploadPdf = {
+                                        pendingUploadExpReport = exp
+                                        pdfUploadLauncher.launch(arrayOf("application/pdf"))
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    4 -> {
+                        if (activeTodos.isEmpty()) {
+                            item {
+                                SystemEmptyState(
+                                    title = "暂无本地待办",
+                                    message = "点击右上角 + 新建自定义作业或 DDL 提醒。",
+                                    icon = Icons.Outlined.CheckCircle
+                                )
+                            }
+                        } else {
+                            items(activeTodos, key = { it.id }) { todo ->
+                                LocalTodoGlassCard(
+                                    item = todo,
+                                    onToggle = { service.toggleTodoCompleted(todo.id) },
+                                    onDelete = { service.softDeleteTodo(todo.id) }
+                                )
+                            }
                         }
                     }
                 }
@@ -632,28 +608,38 @@ fun HomeworkRoute() {
     }
 
     pendingBlacklistCourse?.let { (lid, courseName) ->
-        AlertDialog(
+        SystemDialog(
             onDismissRequest = { pendingBlacklistCourse = null },
-            title = { Text("拉黑课程") },
-            text = {
-                Text("确定将「$courseName」加入黑名单吗？之后该课程的作业和测验（包括刷新同步后）将不再显示，可在右上角筛选管理中随时移出。")
+            title = {
+                Text(
+                    text = "拉黑课程",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
             },
             confirmButton = {
-                TextButton(
+                SystemDestructiveButton(
+                    text = "拉黑",
                     onClick = {
                         service.blacklistCourse(lid, courseName)
                         pendingBlacklistCourse = null
-                    }
-                ) {
-                    Text("拉黑", color = Color(0xFFFF453A))
-                }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             },
             dismissButton = {
-                TextButton(onClick = { pendingBlacklistCourse = null }) {
-                    Text("取消")
-                }
+                SystemSecondaryButton(
+                    text = "取消",
+                    onClick = { pendingBlacklistCourse = null },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
-        )
+        ) {
+            Text(
+                text = "确定将「$courseName」加入黑名单吗？之后该课程的作业和测验（包括刷新同步后）将不再显示，可在右上角筛选管理中随时移出。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 
     if (showFilterManageDialog) {
@@ -701,31 +687,6 @@ fun HomeworkRoute() {
                 showAddTodoDialog = false
                 selectedTab = 4
             }
-        )
-    }
-}
-
-@Composable
-private fun CircleGlassButton(
-    icon: ImageVector,
-    description: String,
-    tint: Color = MaterialTheme.colorScheme.onSurface,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(glassSurfaceColor())
-            .border(0.5.dp, glassBorderColor(), CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = description,
-            tint = tint,
-            modifier = Modifier.size(20.dp)
         )
     }
 }
@@ -917,10 +878,13 @@ private fun HomeworkDetailDialog(
     val scoreDisplay = detail?.score?.ifBlank { null } ?: hw.score
     val publisherDisplay = detail?.publisher?.ifBlank { null } ?: hw.publisher
 
-    AlertDialog(
+    SystemDialog(
         onDismissRequest = onDismiss,
         title = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 Text(
                     text = hw.courseName.ifBlank { "北化在线课程" },
                     style = MaterialTheme.typography.labelMedium,
@@ -928,219 +892,259 @@ private fun HomeworkDetailDialog(
                 )
                 Text(
                     text = detail?.title?.ifBlank { null } ?: hw.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 360.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        confirmButton = {
+            SystemPrimaryButton(
+                text = when {
+                    hw.canSubmit -> "去交作业"
+                    hw.hasResult || hw.resultHref.isNotBlank() -> "查看结果"
+                    else -> "打开作业页"
+                },
+                onClick = onGoSubmit,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        dismissButton = {
+            SystemSecondaryButton(
+                text = "关闭",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(statusColor.copy(alpha = 0.14f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(statusColor.copy(alpha = 0.14f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            text = if (hw.isGroup) "${hw.status} · 分组作业" else hw.status,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = statusColor
-                        )
-                    }
-                    if (publisherDisplay.isNotBlank()) {
-                        Text(
-                            text = "发布：$publisherDisplay",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
-                        text = "截止时间：$deadlineDisplay",
+                        text = if (hw.isGroup) "${hw.status} · 分组作业" else hw.status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = statusColor
+                    )
+                }
+                if (publisherDisplay.isNotBlank()) {
+                    Text(
+                        text = "发布：$publisherDisplay",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = "截止时间：$deadlineDisplay",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (scoreDisplay.isNotBlank()) {
+                    Text(
+                        text = "评分：$scoreDisplay",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (scoreDisplay.isNotBlank()) {
+                }
+            }
+
+            if (hw.lid.isNotBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                        .clickable { onOpenCourseHome() }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "进入课程主页",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        imageVector = Icons.Outlined.OpenInNew,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+
+            SystemDivider(alpha = 0.35f)
+
+            when {
+                loading -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlassLoadingIndicator(size = 24.dp)
+                        Spacer(Modifier.width(10.dp))
                         Text(
-                            text = "评分：$scoreDisplay",
+                            text = "正在获取作业要求…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-
-                HorizontalDivider()
-
-                when {
-                    loading -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                errorMsg != null -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "未能读取正文说明：${errorMsg}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFFF453A)
+                        )
+                        Text(
+                            text = "仍可点击下方按钮尝试直接进入北化在线查看或提交。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(
+                            onClick = { reloadTick++ },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                text = "正在获取作业要求…",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("重试拉取详情")
                         }
                     }
-                    errorMsg != null -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                }
+                else -> {
+                    val content = detail?.contentText.orEmpty()
+                    if (content.isNotBlank()) {
+                        SelectionContainer {
                             Text(
-                                text = "未能读取正文说明：${errorMsg}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFFF453A)
-                            )
-                            Text(
-                                text = "仍可点击下方按钮尝试直接进入北化在线查看或提交。",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            TextButton(
-                                onClick = { reloadTick++ },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text("重试拉取详情")
-                            }
-                        }
-                    }
-                    else -> {
-                        val content = detail?.contentText.orEmpty()
-                        if (content.isNotBlank()) {
-                            SelectionContainer {
-                                Text(
-                                    text = content,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        } else {
-                            Text(
-                                text = "老师未填写文字说明，可点击下方按钮打开北化在线查看。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        val attachments = detail?.attachments.orEmpty()
-                        if (attachments.isNotEmpty()) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = "附件（${attachments.size}）",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                text = content,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            attachments.forEach { att ->
-                                val isDownloading = downloadingUrl == att.url
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                                        .clickable(enabled = downloadingUrl == null) {
-                                            attachmentError = null
-                                            lastFailedAttachment = null
-                                            downloadingUrl = att.url
-                                            attachmentScope.launch {
-                                                val result = service.downloadAttachment(
-                                                    url = att.url,
-                                                    suggestedName = att.name,
-                                                    courseLid = hw.lid
-                                                )
-                                                downloadingUrl = null
-                                                result.onSuccess { downloaded ->
-                                                    if (downloaded.isHtmlPage) {
-                                                        onOpenAttachment(att)
-                                                    } else if (!TheolAttachmentOpener.open(detailContext, downloaded)) {
-                                                        lastFailedAttachment = att
-                                                        attachmentError = "未找到可打开「${downloaded.fileName}」的应用"
-                                                    }
-                                                }.onFailure { err ->
+                        }
+                    } else {
+                        Text(
+                            text = "老师未填写文字说明，可点击下方按钮打开北化在线查看。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    val attachments = detail?.attachments.orEmpty()
+                    if (attachments.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "附件（${attachments.size}）",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        attachments.forEach { att ->
+                            val isDownloading = downloadingUrl == att.url
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                    .clickable(enabled = downloadingUrl == null) {
+                                        attachmentError = null
+                                        lastFailedAttachment = null
+                                        downloadingUrl = att.url
+                                        attachmentScope.launch {
+                                            val result = service.downloadAttachment(
+                                                url = att.url,
+                                                suggestedName = att.name,
+                                                courseLid = hw.lid
+                                            )
+                                            downloadingUrl = null
+                                            result.onSuccess { downloaded ->
+                                                if (downloaded.isHtmlPage) {
+                                                    onOpenAttachment(att)
+                                                } else if (!TheolAttachmentOpener.open(detailContext, downloaded)) {
                                                     lastFailedAttachment = att
-                                                    attachmentError = err.message ?: "附件下载失败，请稍后重试"
+                                                    attachmentError = "未找到可打开「${downloaded.fileName}」的应用"
                                                 }
+                                            }.onFailure { err ->
+                                                lastFailedAttachment = att
+                                                attachmentError = err.message ?: "附件下载失败，请稍后重试"
                                             }
                                         }
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.AttachFile,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = if (isDownloading) "${att.name}（正在下载…）" else att.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (isDownloading) {
+                                    GlassLoadingIndicator(size = 18.dp)
+                                } else {
                                     Icon(
-                                        imageVector = Icons.Outlined.AttachFile,
+                                        imageVector = Icons.Outlined.OpenInNew,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
-                                    Text(
-                                        text = if (isDownloading) "${att.name}（正在下载…）" else att.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.weight(1f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    if (isDownloading) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(14.dp),
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Outlined.OpenInNew,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
                                 }
                             }
-                            attachmentError?.let { errMsg ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f))
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text(
-                                        text = errMsg,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onErrorContainer
-                                    )
-                                    lastFailedAttachment?.let { failed ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.End
+                        }
+                        attachmentError?.let { errMsg ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f))
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = errMsg,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                lastFailedAttachment?.let { failed ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        TextButton(
+                                            onClick = { onOpenAttachment(failed) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                         ) {
-                                            TextButton(
-                                                onClick = { onOpenAttachment(failed) },
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                            ) {
-                                                Text(
-                                                    text = "在网页中打开",
-                                                    style = MaterialTheme.typography.labelMedium
-                                                )
-                                            }
+                                            Text(
+                                                text = "在网页中打开",
+                                                style = MaterialTheme.typography.labelMedium
+                                            )
                                         }
                                     }
                                 }
@@ -1149,34 +1153,8 @@ private fun HomeworkDetailDialog(
                     }
                 }
             }
-        },
-        confirmButton = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (hw.lid.isNotBlank()) {
-                    TextButton(onClick = onOpenCourseHome) {
-                        Text("课程主页")
-                    }
-                }
-                Button(onClick = onGoSubmit) {
-                    Text(
-                        when {
-                            hw.canSubmit -> "去交作业"
-                            hw.hasResult || hw.resultHref.isNotBlank() -> "查看已交结果"
-                            else -> "打开作业页"
-                        }
-                    )
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
-            }
         }
-    )
+    }
 }
 
 private fun resolveSafeTestUrl(test: TheolTestItem): String {
@@ -1369,10 +1347,13 @@ private fun TestDetailDialog(
     val endDisplay = detail?.endTime?.ifBlank { null } ?: test.endTime.ifBlank { "未标注" }
     val durationDisplay = detail?.duration?.ifBlank { null } ?: test.duration
 
-    AlertDialog(
+    SystemDialog(
         onDismissRequest = onDismiss,
         title = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 Text(
                     text = test.courseName.ifBlank { "北化在线课程" },
                     style = MaterialTheme.typography.labelMedium,
@@ -1380,180 +1361,199 @@ private fun TestDetailDialog(
                 )
                 Text(
                     text = detail?.title?.ifBlank { null } ?: test.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 360.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(statusColor.copy(alpha = 0.14f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            text = test.status,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = statusColor
-                        )
-                    }
-                    if (test.allowedAttempts.isNotBlank()) {
-                        Text(
-                            text = "允许次数：${test.allowedAttempts}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(
-                        text = "开放时间：$startDisplay ~ $endDisplay",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (durationDisplay.isNotBlank()) {
-                        Text(
-                            text = "考试时长：$durationDisplay",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    detail?.totalScore?.takeIf { it.isNotBlank() }?.let { total ->
-                        Text(
-                            text = "测验总分：$total",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    detail?.questionCount?.takeIf { it.isNotBlank() }?.let { count ->
-                        Text(
-                            text = "题目数量：$count",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                if (test.resultHref.isNotBlank()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                            .clickable { onOpenResult(test.resultHref) }
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "查看答题结果与批改详情",
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Icon(
-                            imageVector = Icons.Outlined.OpenInNew,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-
-                HorizontalDivider()
-
-                when {
-                    loading -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                text = "正在获取测验说明…",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    errorMsg != null -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "未能读取详细说明：$errorMsg",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFFF453A)
-                            )
-                            Text(
-                                text = "仍可点击下方「进入测验」直接前往北化在线测验列表页。",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            TextButton(
-                                onClick = { reloadTick++ },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text("重试拉取详情")
-                            }
-                        }
-                    }
-                    else -> {
-                        val desc = detail?.description.orEmpty()
-                        if (desc.isNotBlank()) {
-                            SelectionContainer {
-                                Text(
-                                    text = desc,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        } else {
-                            Text(
-                                text = "老师未填写额外说明，可点击下方按钮打开北化在线测验列表页查看或答题。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        },
         confirmButton = {
+            SystemPrimaryButton(
+                text = "进入测验",
+                onClick = onOpenTestList,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        dismissButton = {
+            SystemSecondaryButton(
+                text = "关闭",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (test.lid.isNotBlank()) {
-                    TextButton(onClick = onOpenCourseHome) {
-                        Text("课程主页")
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(statusColor.copy(alpha = 0.14f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = test.status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = statusColor
+                    )
+                }
+                if (test.allowedAttempts.isNotBlank()) {
+                    Text(
+                        text = "允许次数：${test.allowedAttempts}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = "开放时间：$startDisplay ~ $endDisplay",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (durationDisplay.isNotBlank()) {
+                    Text(
+                        text = "考试时长：$durationDisplay",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                detail?.totalScore?.takeIf { it.isNotBlank() }?.let { total ->
+                    Text(
+                        text = "测验总分：$total",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                detail?.questionCount?.takeIf { it.isNotBlank() }?.let { count ->
+                    Text(
+                        text = "题目数量：$count",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (test.resultHref.isNotBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                        .clickable { onOpenResult(test.resultHref) }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "查看答题结果与批改详情",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        imageVector = Icons.Outlined.OpenInNew,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+
+            if (test.lid.isNotBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                        .clickable { onOpenCourseHome() }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "进入课程主页",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        imageVector = Icons.Outlined.OpenInNew,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+
+            SystemDivider(alpha = 0.35f)
+
+            when {
+                loading -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlassLoadingIndicator(size = 24.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = "正在获取测验说明…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
-                Button(onClick = onOpenTestList) {
-                    Text("进入测验")
+                errorMsg != null -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "未能读取详细说明：$errorMsg",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFFF453A)
+                        )
+                        Text(
+                            text = "仍可点击下方「进入测验」直接前往北化在线测验列表页。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(
+                            onClick = { reloadTick++ },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("重试拉取详情")
+                        }
+                    }
+                }
+                else -> {
+                    val desc = detail?.description.orEmpty()
+                    if (desc.isNotBlank()) {
+                        SelectionContainer {
+                            Text(
+                                text = desc,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "老师未填写额外说明，可点击下方按钮打开北化在线测验列表页查看或答题。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
-            }
         }
-    )
+    }
 }
 
 @Composable
@@ -1564,90 +1564,96 @@ private fun FilterManageDialog(
     onRestoreAllHomeworks: () -> Unit,
     onRestoreAllTests: () -> Unit
 ) {
-    AlertDialog(
+    SystemDialog(
         onDismissRequest = onDismiss,
-        title = { Text("课程黑名单与已隐藏项") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (filterPrefs.blacklistedCourses.isEmpty() &&
-                    filterPrefs.hiddenHomeworkIds.isEmpty() &&
-                    filterPrefs.hiddenTestKeys.isEmpty()
-                ) {
-                    Text(
-                        text = "当前没有拉黑课程或手动删除的作业/测验。在卡片右上角菜单可隐藏单条作业或拉黑已退课程。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                if (filterPrefs.blacklistedCourses.isNotEmpty()) {
-                    Text(
-                        text = "已拉黑课程（${filterPrefs.blacklistedCourses.size}）",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
-                    )
-                    filterPrefs.blacklistedCourses.forEach { bc ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = bc.courseName.ifBlank { "课程 #${bc.lid}" },
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            TextButton(onClick = { onUnblacklist(bc.key) }) {
-                                Text("移出")
-                            }
-                        }
-                    }
-                }
-
-                if (filterPrefs.hiddenHomeworkIds.isNotEmpty() || filterPrefs.hiddenTestKeys.isNotEmpty()) {
-                    if (filterPrefs.blacklistedCourses.isNotEmpty()) {
-                        HorizontalDivider()
-                    }
-                    if (filterPrefs.hiddenHomeworkIds.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "已隐藏作业（${filterPrefs.hiddenHomeworkIds.size}）",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            TextButton(onClick = onRestoreAllHomeworks) {
-                                Text("恢复全部")
-                            }
-                        }
-                    }
-                    if (filterPrefs.hiddenTestKeys.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "已隐藏测验（${filterPrefs.hiddenTestKeys.size}）",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            TextButton(onClick = onRestoreAllTests) {
-                                Text("恢复全部")
-                            }
-                        }
-                    }
-                }
-            }
+        title = {
+            Text(
+                text = "课程黑名单与已隐藏项",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
+            SystemPrimaryButton(
+                text = "完成",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (filterPrefs.blacklistedCourses.isEmpty() &&
+                filterPrefs.hiddenHomeworkIds.isEmpty() &&
+                filterPrefs.hiddenTestKeys.isEmpty()
+            ) {
+                Text(
+                    text = "当前没有拉黑课程或手动删除的作业/测验。在卡片右上角菜单可隐藏单条作业或拉黑已退课程。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (filterPrefs.blacklistedCourses.isNotEmpty()) {
+                Text(
+                    text = "已拉黑课程（${filterPrefs.blacklistedCourses.size}）",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
+                filterPrefs.blacklistedCourses.forEach { bc ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = bc.courseName.ifBlank { "课程 #${bc.lid}" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        TextButton(onClick = { onUnblacklist(bc.key) }) {
+                            Text("移出")
+                        }
+                    }
+                }
+            }
+
+            if (filterPrefs.hiddenHomeworkIds.isNotEmpty() || filterPrefs.hiddenTestKeys.isNotEmpty()) {
+                if (filterPrefs.blacklistedCourses.isNotEmpty()) {
+                    SystemDivider(alpha = 0.35f)
+                }
+                if (filterPrefs.hiddenHomeworkIds.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "已隐藏作业（${filterPrefs.hiddenHomeworkIds.size}）",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        TextButton(onClick = onRestoreAllHomeworks) {
+                            Text("恢复全部")
+                        }
+                    }
+                }
+                if (filterPrefs.hiddenTestKeys.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "已隐藏测验（${filterPrefs.hiddenTestKeys.size}）",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        TextButton(onClick = onRestoreAllTests) {
+                            Text("恢复全部")
+                        }
+                    }
+                }
             }
         }
-    )
+    }
 }
 
 @Composable
@@ -1703,25 +1709,6 @@ private fun LocalTodoGlassCard(
 }
 
 @Composable
-private fun EmptyGlassHint(text: String) {
-    val shape = RoundedCornerShape(24.dp)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(glassSurfaceColor())
-            .border(0.5.dp, glassBorderColor(), shape)
-            .padding(20.dp)
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
 private fun TheolNativeLoginDialog(
     syncing: Boolean,
     onDismiss: () -> Unit,
@@ -1730,51 +1717,74 @@ private fun TheolNativeLoginDialog(
     var username by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
-    AlertDialog(
+    fun submit() {
+        if (syncing || username.isBlank() || password.isEmpty()) return
+        val chars = password.toCharArray()
+        password = ""
+        onSubmit(username, chars)
+    }
+
+    SystemDialog(
         onDismissRequest = { if (!syncing) onDismiss() },
-        title = { Text("原生登录北化在线") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "直连 sidportal.buct.edu.cn 完成 AES 原生认证，密码仅在内存加密后即刻清零，绝不落盘。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it.trim() },
-                    label = { Text("学号") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("统一身份认证密码") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+        title = {
+            Text(
+                text = "原生登录北化在线",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
         },
         confirmButton = {
-            TextButton(
+            SystemPrimaryButton(
+                text = if (syncing) "同步中…" else "登录并同步",
                 enabled = !syncing && username.isNotBlank() && password.isNotEmpty(),
-                onClick = {
-                    val chars = password.toCharArray()
-                    password = ""
-                    onSubmit(username, chars)
-                }
-            ) {
-                Text(if (syncing) "同步中…" else "登录并同步")
-            }
+                onClick = ::submit,
+                modifier = Modifier.fillMaxWidth()
+            )
         },
         dismissButton = {
-            TextButton(enabled = !syncing, onClick = onDismiss) {
-                Text("取消")
-            }
+            SystemSecondaryButton(
+                text = "取消",
+                enabled = !syncing,
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
-    )
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = "直连 sidportal.buct.edu.cn 完成 AES 原生认证，密码仅在内存加密后即刻清零，绝不落盘。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            GlassTextField(
+                value = username,
+                onValueChange = { username = it.trim() },
+                placeholder = "请输入学号",
+                leadingIcon = Icons.Outlined.Person,
+                singleLine = true,
+                enabled = !syncing,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Ascii,
+                    imeAction = ImeAction.Next
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+            GlassTextField(
+                value = password,
+                onValueChange = { password = it },
+                placeholder = "请输入统一身份认证密码",
+                leadingIcon = Icons.Outlined.Lock,
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                enabled = !syncing,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
 }
 
 @Composable
@@ -1785,41 +1795,47 @@ private fun AddLocalTodoDialog(
     var title by remember { mutableStateOf("") }
     var course by remember { mutableStateOf("") }
 
-    AlertDialog(
+    SystemDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建本地待办") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("待办 / 作业标题") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = course,
-                    onValueChange = { course = it },
-                    label = { Text("所属课程（选填）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+        title = {
+            Text(
+                text = "新建本地待办",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
         },
         confirmButton = {
-            TextButton(
+            SystemPrimaryButton(
+                text = "添加",
                 enabled = title.isNotBlank(),
-                onClick = { onAdd(title.trim(), course.trim()) }
-            ) {
-                Text("添加")
-            }
+                onClick = { onAdd(title.trim(), course.trim()) },
+                modifier = Modifier.fillMaxWidth()
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
+            SystemSecondaryButton(
+                text = "取消",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
-    )
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassTextField(
+                value = title,
+                onValueChange = { title = it },
+                placeholder = "待办 / 作业标题",
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            GlassTextField(
+                value = course,
+                onValueChange = { course = it },
+                placeholder = "所属课程（选填）",
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
 }
 
 @Composable
@@ -1944,43 +1960,30 @@ private fun ExperimentReportGlassCard(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (item.templateName.isNotBlank()) {
-                TextButton(enabled = enabled, onClick = onDownloadTemplate) {
-                    Icon(
-                        imageVector = Icons.Outlined.Download,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("下载模板")
-                }
+                SystemActionButton(
+                    text = "下载模板",
+                    icon = Icons.Outlined.Download,
+                    primary = false,
+                    enabled = enabled,
+                    onClick = onDownloadTemplate
+                )
             }
             if (item.state != 3) {
-                Spacer(Modifier.width(6.dp))
-                Button(
+                SystemActionButton(
+                    text = when {
+                        !item.canUpload -> "未开放上传"
+                        item.uploadedDocName.isNotBlank() -> "重新上传 PDF"
+                        else -> "上传报告 PDF"
+                    },
+                    icon = Icons.Outlined.UploadFile,
+                    primary = true,
                     enabled = enabled && item.canUpload,
-                    onClick = onUploadPdf,
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.UploadFile,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = when {
-                            !item.canUpload -> "未开放上传"
-                            item.uploadedDocName.isNotBlank() -> "重新上传 PDF"
-                            else -> "上传报告 PDF"
-                        },
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
+                    onClick = onUploadPdf
+                )
             }
         }
     }

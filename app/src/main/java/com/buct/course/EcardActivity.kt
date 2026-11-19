@@ -19,12 +19,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,19 +38,12 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.WarningAmber
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,7 +51,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,11 +66,21 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.buct.course.manager.AppThemeCoordinator
 import com.buct.course.manager.UserManager
+import com.buct.course.ui.system.GlassLoadingIndicator
+import com.buct.course.ui.system.GlassLoadingState
+import com.buct.course.ui.system.GlassPageScaffold
+import com.buct.course.ui.system.GlassTextField
+import com.buct.course.ui.system.SystemCompactSegmentedControl
+import com.buct.course.ui.system.SystemDestructiveButton
+import com.buct.course.ui.system.SystemDialog
+import com.buct.course.ui.system.SystemEmptyState
 import com.buct.course.ui.system.SystemIconButton
-import com.buct.course.ui.system.SystemTopBar
+import com.buct.course.ui.system.SystemPrimaryButton
+import com.buct.course.ui.system.SystemSecondaryButton
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.course.ui.theme.CourseSelectorTheme
@@ -110,7 +109,7 @@ private enum class EcardRangeFilter(val label: String) {
 
 /**
  * 原生校园卡中心（ecard.buct.edu.cn）。
- * 独立于统一身份认证（sidportal），支持独立登录、实时余额、隐私遮罩、消费流水筛选分页与企微快捷跳转。
+ * 统一托管于 [GlassPageScaffold] 液态玻璃体系：动态壁纸折射顶栏、玻璃输入框/分段条与玻璃弹窗。
  */
 class EcardActivity : ComponentActivity() {
 
@@ -126,90 +125,73 @@ class EcardActivity : ComponentActivity() {
 
         setContent {
             CourseSelectorTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val cardSlice by cardService.cardState.collectAsState()
-                    val syncing by cardService.syncing.collectAsState()
-                    val hasSession by cardService.hasSession.collectAsState()
-                    val scope = rememberCoroutineScope()
+                val cardSlice by cardService.cardState.collectAsState()
+                val syncing by cardService.syncing.collectAsState()
+                val hasSession by cardService.hasSession.collectAsState()
+                val scope = rememberCoroutineScope()
 
-                    var forceLoginScreen by remember { mutableStateOf(false) }
-                    var allowCachedPreview by remember { mutableStateOf(false) }
-                    var selectedRange by remember { mutableStateOf(EcardRangeFilter.DAYS_30) }
-                    var currentPage by remember { mutableIntStateOf(0) }
-                    var showLogoutConfirm by remember { mutableStateOf(false) }
+                var forceLoginScreen by remember { mutableStateOf(false) }
+                var allowCachedPreview by remember { mutableStateOf(false) }
+                var selectedRange by remember { mutableStateOf(EcardRangeFilter.DAYS_30) }
+                var currentPage by remember { mutableIntStateOf(0) }
+                var showLogoutConfirm by remember { mutableStateOf(false) }
 
-                    LaunchedEffect(Unit) {
-                        if (hasSession && !forceLoginScreen) {
-                            val (start, end) = selectedRange.resolveDates()
-                            currentPage = 0
-                            cardService.refresh(startDate = start, endDate = end, pageSize = PAGE_SIZE)
-                        }
+                LaunchedEffect(Unit) {
+                    if (hasSession && !forceLoginScreen) {
+                        val (start, end) = selectedRange.resolveDates()
+                        currentPage = 0
+                        cardService.refresh(startDate = start, endDate = end, pageSize = PAGE_SIZE)
                     }
+                }
 
-                    val showLoginScreen = forceLoginScreen || (!hasSession && (cardSlice.data == null || !allowCachedPreview))
+                val showLoginScreen = forceLoginScreen || (!hasSession && (cardSlice.data == null || !allowCachedPreview))
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .navigationBarsPadding()
-                            .imePadding()
-                    ) {
-                        SystemTopBar(
-                            title = if (showLoginScreen) "登录校园卡" else "校园一卡通",
-                            subtitle = if (showLoginScreen) "ecard.buct.edu.cn · 独立认证" else "实时余额与消费流水",
-                            backdrop = null,
-                            navigationIcon = {
+                GlassPageScaffold(
+                    title = if (showLoginScreen) "登录校园卡" else "校园一卡通",
+                    subtitle = if (showLoginScreen) "ecard.buct.edu.cn · 独立认证" else "实时余额与消费流水",
+                    onBack = {
+                        if (forceLoginScreen && cardSlice.data != null) {
+                            forceLoginScreen = false
+                        } else {
+                            finish()
+                        }
+                    },
+                    actions = {
+                        if (!showLoginScreen) {
+                            if (syncing) {
+                                GlassLoadingIndicator(size = 38.dp)
+                            } else {
                                 SystemIconButton(
-                                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "返回",
+                                    icon = Icons.Default.Refresh,
+                                    contentDescription = "刷新",
+                                    tint = MaterialTheme.colorScheme.primary,
                                     onClick = {
-                                        if (forceLoginScreen && cardSlice.data != null) {
-                                            forceLoginScreen = false
+                                        if (hasSession) {
+                                            val (start, end) = selectedRange.resolveDates()
+                                            currentPage = 0
+                                            scope.launch {
+                                                cardService.refresh(startDate = start, endDate = end, pageSize = PAGE_SIZE)
+                                            }
                                         } else {
-                                            finish()
+                                            forceLoginScreen = true
                                         }
                                     }
                                 )
-                            },
-                            actions = {
-                                if (!showLoginScreen) {
-                                    SystemIconButton(
-                                        icon = Icons.Default.Refresh,
-                                        contentDescription = "刷新",
-                                        enabled = !syncing,
-                                        onClick = {
-                                            if (hasSession) {
-                                                val (start, end) = selectedRange.resolveDates()
-                                                currentPage = 0
-                                                scope.launch {
-                                                    cardService.refresh(startDate = start, endDate = end, pageSize = PAGE_SIZE)
-                                                }
-                                            } else {
-                                                forceLoginScreen = true
-                                            }
-                                        }
-                                    )
-                                    SystemIconButton(
-                                        icon = Icons.AutoMirrored.Outlined.Logout,
-                                        contentDescription = "退出校园卡登录",
-                                        enabled = !syncing,
-                                        onClick = { showLogoutConfirm = true }
-                                    )
-                                }
                             }
-                        )
-
-                        if (syncing) {
-                            LinearProgressIndicator(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(2.dp)
+                            SystemIconButton(
+                                icon = Icons.AutoMirrored.Outlined.Logout,
+                                contentDescription = "退出校园卡登录",
+                                enabled = !syncing,
+                                onClick = { showLogoutConfirm = true }
                             )
                         }
-
+                    }
+                ) { padding ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .imePadding()
+                    ) {
                         if (showLoginScreen) {
                             val prefillId = remember {
                                 cardService.getSavedAccountId()
@@ -223,6 +205,8 @@ class EcardActivity : ComponentActivity() {
                                     cardSlice.lastError ?: "校园卡会话已过期，请重新登录以刷新最新余额"
                                 } else null,
                                 syncing = syncing,
+                                topPadding = padding.calculateTopPadding(),
+                                bottomPadding = padding.calculateBottomPadding(),
                                 onViewCached = {
                                     forceLoginScreen = false
                                     allowCachedPreview = true
@@ -253,6 +237,8 @@ class EcardActivity : ComponentActivity() {
                                 hasSession = hasSession,
                                 syncing = syncing,
                                 selectedRange = selectedRange,
+                                topPadding = padding.calculateTopPadding(),
+                                bottomPadding = padding.calculateBottomPadding(),
                                 onSelectRange = { range ->
                                     if (!hasSession) {
                                         forceLoginScreen = true
@@ -299,12 +285,17 @@ class EcardActivity : ComponentActivity() {
                     }
 
                     if (showLogoutConfirm) {
-                        AlertDialog(
+                        SystemDialog(
                             onDismissRequest = { showLogoutConfirm = false },
-                            title = { Text("退出校园卡登录") },
-                            text = { Text("将清除本地加密保存的校园卡会话与缓存流水记录（不影响教务统一身份认证登录）。") },
+                            title = {
+                                Text(
+                                    text = "退出校园卡登录",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                            },
                             confirmButton = {
-                                TextButton(
+                                SystemDestructiveButton(
+                                    text = "确认退出",
                                     onClick = {
                                         showLogoutConfirm = false
                                         scope.launch {
@@ -312,17 +303,24 @@ class EcardActivity : ComponentActivity() {
                                             allowCachedPreview = false
                                             forceLoginScreen = true
                                         }
-                                    }
-                                ) {
-                                    Text("确认退出", color = MaterialTheme.colorScheme.error)
-                                }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             },
                             dismissButton = {
-                                TextButton(onClick = { showLogoutConfirm = false }) {
-                                    Text("取消")
-                                }
+                                SystemSecondaryButton(
+                                    text = "取消",
+                                    onClick = { showLogoutConfirm = false },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
-                        )
+                        ) {
+                            Text(
+                                text = "将清除本地加密保存的校园卡会话与缓存流水记录（不影响教务统一身份认证登录）。",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -371,6 +369,8 @@ private fun EcardLoginPane(
     hasCachedSnapshot: Boolean,
     sessionExpiredMessage: String?,
     syncing: Boolean,
+    topPadding: Dp,
+    bottomPadding: Dp,
     onViewCached: () -> Unit,
     onSubmit: (idserial: String, password: CharArray, onDone: (error: String?) -> Unit) -> Unit
 ) {
@@ -404,7 +404,12 @@ private fun EcardLoginPane(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 18.dp),
+            .padding(
+                start = 20.dp,
+                end = 20.dp,
+                top = topPadding + 12.dp,
+                bottom = bottomPadding + 24.dp
+            ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         val cardShape = RoundedCornerShape(26.dp)
@@ -459,8 +464,9 @@ private fun EcardLoginPane(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFFFF9500).copy(alpha = 0.14f))
+                        .border(0.5.dp, Color(0xFFFF9500).copy(alpha = 0.35f), RoundedCornerShape(14.dp))
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -480,45 +486,40 @@ private fun EcardLoginPane(
                 }
             }
 
-            OutlinedTextField(
+            GlassTextField(
                 value = idInput,
                 onValueChange = {
                     idInput = it
                     localError = null
                 },
-                label = { Text("学工号") },
-                placeholder = { Text("请输入学号或教工号") },
-                leadingIcon = {
-                    Icon(imageVector = Icons.Outlined.Person, contentDescription = null)
-                },
+                placeholder = "学工号（请输入学号或教工号）",
+                leadingIcon = Icons.Outlined.Person,
                 singleLine = true,
                 enabled = !syncing,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Ascii,
                     imeAction = ImeAction.Next
                 ),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
+                modifier = Modifier.fillMaxWidth()
             )
 
-            OutlinedTextField(
+            GlassTextField(
                 value = passwordInput,
                 onValueChange = {
                     passwordInput = it
                     localError = null
                 },
-                label = { Text("校园卡查询密码") },
-                placeholder = { Text("默认一般为身份证后六位") },
-                leadingIcon = {
-                    Icon(imageVector = Icons.Outlined.Lock, contentDescription = null)
-                },
-                trailingIcon = {
-                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(
-                            imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                            contentDescription = if (passwordVisible) "隐藏密码" else "显示密码"
-                        )
-                    }
+                placeholder = "校园卡查询密码（默认一般为身份证后六位）",
+                leadingIcon = Icons.Outlined.Lock,
+                trailing = {
+                    Icon(
+                        imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                        contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clickable { passwordVisible = !passwordVisible }
+                    )
                 },
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 singleLine = true,
@@ -528,8 +529,7 @@ private fun EcardLoginPane(
                     imeAction = ImeAction.Done
                 ),
                 keyboardActions = KeyboardActions(onDone = { triggerLogin() }),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
+                modifier = Modifier.fillMaxWidth()
             )
 
             localError?.let { errMsg ->
@@ -540,36 +540,20 @@ private fun EcardLoginPane(
                 )
             }
 
-            Button(
-                onClick = { triggerLogin() },
+            SystemPrimaryButton(
+                text = if (syncing) "正在安全登录并同步…" else "登录并同步校园卡",
                 enabled = !syncing,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                if (syncing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("正在安全登录并同步…")
-                } else {
-                    Text("登录并同步校园卡")
-                }
-            }
+                onClick = { triggerLogin() },
+                modifier = Modifier.fillMaxWidth()
+            )
 
             if (hasCachedSnapshot) {
-                OutlinedButton(
-                    onClick = onViewCached,
+                SystemSecondaryButton(
+                    text = "先查看本地缓存数据",
                     enabled = !syncing,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text("先查看本地缓存数据")
-                }
+                    onClick = onViewCached,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
@@ -581,6 +565,8 @@ private fun EcardHomePane(
     hasSession: Boolean,
     syncing: Boolean,
     selectedRange: EcardRangeFilter,
+    topPadding: Dp,
+    bottomPadding: Dp,
     onSelectRange: (EcardRangeFilter) -> Unit,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
@@ -594,20 +580,10 @@ private fun EcardHomePane(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(top = topPadding, bottom = bottomPadding, start = 24.dp, end = 24.dp),
             contentAlignment = Alignment.Center
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                Text(
-                    text = "正在同步校园卡数据…",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            GlassLoadingState(text = "正在同步校园卡数据…")
         }
         return
     }
@@ -624,12 +600,17 @@ private fun EcardHomePane(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = topPadding + 10.dp,
+            bottom = bottomPadding + 24.dp
+        ),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // 1. 液态渐变校园卡 Hero 卡
         item {
-            val heroShape = RoundedCornerShape(24.dp)
+            val heroShape = RoundedCornerShape(26.dp)
             val heroBrush = Brush.linearGradient(
                 colors = listOf(
                     MaterialTheme.colorScheme.primary,
@@ -642,6 +623,7 @@ private fun EcardHomePane(
                     .fillMaxWidth()
                     .clip(heroShape)
                     .background(heroBrush)
+                    .border(0.6.dp, Color.White.copy(alpha = 0.28f), heroShape)
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
@@ -747,9 +729,9 @@ private fun EcardHomePane(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .background(warnColor.copy(alpha = 0.12f))
-                        .border(0.5.dp, warnColor.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                        .border(0.5.dp, warnColor.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -778,59 +760,51 @@ private fun EcardHomePane(
             }
         }
 
-        // 3. 快捷操作行
+        // 3. 液态胶囊快捷操作行
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                OutlinedButton(
-                    onClick = onRefresh,
+                SystemSecondaryButton(
+                    text = if (hasSession) "刷新余额" else "重新登录",
                     enabled = !syncing,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (hasSession) "刷新余额流水" else "重新登录")
-                }
-                Button(
+                    onClick = onRefresh,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                SystemPrimaryButton(
+                    text = "企微充值/刷码",
                     onClick = onOpenWecom,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.QrCodeScanner,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text("企微充值 / 刷码")
-                }
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.QrCodeScanner,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
 
-        // 4. 流水日期筛选与统计
+        // 4. 流水日期分段筛选与统计
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    EcardRangeFilter.entries.forEach { range ->
-                        FilterChip(
-                            selected = selectedRange == range,
-                            onClick = { onSelectRange(range) },
-                            label = { Text(range.label) },
-                            enabled = !syncing
-                        )
-                    }
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SystemCompactSegmentedControl(
+                    options = EcardRangeFilter.entries.map { it.label },
+                    selectedIndex = EcardRangeFilter.entries.indexOf(selectedRange).coerceAtLeast(0),
+                    onSelect = { idx ->
+                        EcardRangeFilter.entries.getOrNull(idx)?.let(onSelectRange)
+                    },
+                    enabled = !syncing
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -853,33 +827,15 @@ private fun EcardHomePane(
         // 5. 空列表或流水明细
         if (snapshot.transactions.isEmpty()) {
             item {
-                val emptyShape = RoundedCornerShape(22.dp)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(emptyShape)
-                        .background(glassSurfaceColor())
-                        .border(0.5.dp, glassBorderColor(), emptyShape)
-                        .padding(vertical = 32.dp, horizontal = 20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.ReceiptLong,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(34.dp)
-                    )
-                    Text(
-                        text = if (slice.provenance.refreshState == RefreshState.NEVER) {
-                            "尚未同步到流水记录"
-                        } else {
-                            "所选时间段暂无消费或充值记录"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                SystemEmptyState(
+                    title = if (slice.provenance.refreshState == RefreshState.NEVER) "尚未同步到流水记录" else "暂无消费或充值记录",
+                    message = if (slice.provenance.refreshState == RefreshState.NEVER) {
+                        "请点击上方「刷新余额」拉取最新交易明细。"
+                    } else {
+                        "当前所选时间范围内没有查到交易记录。"
+                    },
+                    icon = Icons.Outlined.ReceiptLong
+                )
             }
         } else {
             itemsIndexed(
@@ -891,29 +847,14 @@ private fun EcardHomePane(
 
             if (snapshot.hasMore && hasSession) {
                 item {
-                    OutlinedButton(
-                        onClick = onLoadMore,
+                    SystemSecondaryButton(
+                        text = if (syncing) "正在加载更多…" else "加载更多（已显示 ${snapshot.transactions.size} / ${snapshot.totalCount}）",
                         enabled = !syncing,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        if (syncing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("正在加载更多…")
-                        } else {
-                            Text("加载更多记录（已显示 ${snapshot.transactions.size} / ${snapshot.totalCount}）")
-                        }
-                    }
+                        onClick = onLoadMore,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
-        }
-
-        item {
-            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -923,7 +864,7 @@ private fun EcardTransactionCard(
     tx: CardTransaction,
     hideAmount: Boolean
 ) {
-    val cardShape = RoundedCornerShape(18.dp)
+    val cardShape = RoundedCornerShape(20.dp)
     val amountColor = when {
         tx.amountFen > 0L && (tx.txName.contains("充") || tx.txName.contains("补") || tx.txName.contains("退") || tx.txCode in setOf("2239", "2240", "2241")) ->
             Color(0xFF34C759)
