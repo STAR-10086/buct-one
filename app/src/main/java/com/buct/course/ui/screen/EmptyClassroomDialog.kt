@@ -1,6 +1,13 @@
 package com.buct.course.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,29 +15,29 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.MeetingRoom
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,20 +46,35 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.buct.course.manager.UserManager
 import com.buct.course.network.EmptyClassroom
 import com.buct.course.network.EmptyClassroomApi
 import com.buct.course.network.SessionExpiredException
+import com.buct.course.ui.system.GlassLoadingState
+import com.buct.course.ui.system.GlassPageScaffold
+import com.buct.course.ui.system.GlassSubpage
+import com.buct.course.ui.system.SecondaryVerificationOverlay
 import com.buct.course.ui.system.SessionExpiredHint
+import com.buct.course.ui.system.SystemActionButton
+import com.buct.course.ui.system.SystemDivider
+import com.buct.course.ui.system.SystemEmptyState
+import com.buct.course.ui.system.SystemIconButton
+import com.buct.course.ui.system.glassBorderColor
+import com.buct.course.ui.system.glassSurfaceColor
+import com.buct.course.utils.SessionRenewer
 import com.buct.course.utils.SessionRepair
 import kotlinx.coroutines.CancellationException
 
+/**
+ * 空闲教室查询全屏液态玻璃页：
+ * - 统一采用 [GlassSubpage] + [GlassPageScaffold] 与上游折射顶栏；
+ * - 筛选栏（时间、校区、教学楼、楼层）默认收起为单行摘要胶囊，为教室列表留出充足可视空间。
+ */
 @Composable
 fun EmptyClassroomDialog(
     semester: String,
@@ -60,6 +82,7 @@ fun EmptyClassroomDialog(
     day: Int,
     period: Int,
     allowTimeSwitch: Boolean = false,
+    initialCampusId: Int = 2,
     onDismiss: () -> Unit
 ) {
     val school = remember { UserManager.getInstance().currentSchool }
@@ -67,14 +90,15 @@ fun EmptyClassroomDialog(
     var selectedWeek by remember(week) { mutableIntStateOf(week.coerceIn(1, 20)) }
     var selectedDay by remember(day) { mutableIntStateOf(day.coerceIn(1, 7)) }
     var selectedPeriod by remember(period) { mutableIntStateOf(period.coerceIn(1, 12)) }
-    var showTimePicker by remember(allowTimeSwitch) { mutableStateOf(allowTimeSwitch) }
-    var campusId by remember { mutableIntStateOf(2) }
+    var campusId by remember(initialCampusId) { mutableIntStateOf(initialCampusId) }
     var selectedBuilding by remember { mutableStateOf("全部") }
     var selectedFloor by remember { mutableStateOf("全部") }
+    var filtersExpanded by remember { mutableStateOf(false) }
+
     var classrooms by remember { mutableStateOf<List<EmptyClassroom>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-    var expiredCode by remember { mutableStateOf(0) }
+    var expiredCode by remember { mutableIntStateOf(0) }
     var repairing by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
     val dayText = listOf("一", "二", "三", "四", "五", "六", "日").getOrElse(selectedDay - 1) { selectedDay.toString() }
@@ -125,175 +149,325 @@ fun EmptyClassroomDialog(
         if (selectedFloor != allLabel && selectedFloor !in floors) selectedFloor = allLabel
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box {
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.94f).heightIn(max = 680.dp).clip(RoundedCornerShape(28.dp)),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("空闲教室", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+    val campusLabel = EmptyClassroomApi.campuses.firstOrNull { it.id == campusId }?.label ?: "全部校区"
+    val hasActiveSubFilter = selectedBuilding != allLabel || selectedFloor != allLabel
+    val filterSummary = buildList {
+        add(campusLabel)
+        add(if (selectedBuilding == allLabel) "全部楼宇" else selectedBuilding)
+        if (selectedFloor != allLabel) {
+            add(if (selectedFloor.endsWith("层")) selectedFloor else "${selectedFloor}层")
+        }
+    }.joinToString(" · ")
+
+    GlassSubpage(onDismiss = onDismiss) { close ->
+        Box(modifier = Modifier.fillMaxSize()) {
+            GlassPageScaffold(
+                title = "空闲教室",
+                subtitle = "第 ${selectedWeek} 周 · 星期${dayText} · 第 ${selectedPeriod} 节",
+                onBack = close,
+                actions = {
+                    SystemIconButton(
+                        icon = Icons.Outlined.Refresh,
+                        contentDescription = "刷新",
+                        enabled = !loading,
+                        onClick = { reload++ }
+                    )
+                }
+            ) { padding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            top = padding.calculateTopPadding() + 4.dp,
+                            start = 16.dp,
+                            end = 16.dp
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // 单行可收起筛选摘要条（默认收起，给下方列表留足查看空间）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(glassSurfaceColor())
+                            .border(0.5.dp, glassBorderColor(), RoundedCornerShape(20.dp))
+                            .clickable { filtersExpanded = !filtersExpanded }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
                         ) {
                             Text(
-                                text = "第 ${selectedWeek} 周 · 星期${dayText} · 第 ${selectedPeriod} 节",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = filterSummary,
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            TextButton(
-                                onClick = { showTimePicker = !showTimePicker },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                modifier = Modifier.heightIn(min = 24.dp)
+                            val countHint = when {
+                                loading -> "正在查询可用教室…"
+                                error.isNotBlank() || expiredCode != 0 -> "点击右侧展开筛选或重试"
+                                else -> "共 ${filteredClassrooms.size} 间空闲教室" +
+                                    if (filtersExpanded) " · 点击收起筛选" else " · 点击切换筛选"
+                            }
+                            Text(
+                                text = countHint,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        if (hasActiveSubFilter) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                    .clickable {
+                                        selectedBuilding = allLabel
+                                        selectedFloor = allLabel
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
                                 Text(
-                                    text = if (showTimePicker) "收起时间" else "切换时间",
-                                    style = MaterialTheme.typography.labelSmall
+                                    text = "重置",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭")
-                    }
-                }
-                if (showTimePicker) {
-                    Spacer(Modifier.height(8.dp))
-                    EmptyClassroomTimePicker(
-                        selectedWeek = selectedWeek,
-                        selectedDay = selectedDay,
-                        selectedPeriod = selectedPeriod,
-                        onWeekChange = {
-                            if (selectedWeek != it) {
-                                selectedWeek = it
-                                selectedBuilding = allLabel
-                                selectedFloor = allLabel
-                            }
-                        },
-                        onDayChange = {
-                            if (selectedDay != it) {
-                                selectedDay = it
-                                selectedBuilding = allLabel
-                                selectedFloor = allLabel
-                            }
-                        },
-                        onPeriodChange = {
-                            if (selectedPeriod != it) {
-                                selectedPeriod = it
-                                selectedBuilding = allLabel
-                                selectedFloor = allLabel
-                            }
-                        }
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    HorizontalDivider()
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    EmptyClassroomApi.campuses.forEach { option ->
-                        FilterChip(
-                            selected = campusId == option.id,
-                            onClick = {
-                                if (campusId != option.id) {
-                                    campusId = option.id
-                                    selectedBuilding = allLabel
-                                    selectedFloor = allLabel
-                                }
-                            },
-                            label = { Text(option.label) }
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                FilterSection(
-                    label = "教学楼",
-                    options = buildings,
-                    selected = selectedBuilding,
-                    onSelect = { selectedBuilding = it; selectedFloor = allLabel }
-                )
-                Spacer(Modifier.height(6.dp))
-                FilterSection(
-                    label = "楼层",
-                    options = floors,
-                    selected = selectedFloor,
-                    onSelect = { selectedFloor = it },
-                    format = { floor -> if (floor.endsWith("层")) floor else "${floor}层" }
-                )
-                Spacer(Modifier.height(12.dp))
-                when {
-                    loading -> Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator()
-                            Spacer(Modifier.height(12.dp))
-                            Text("正在查询空闲教室…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                        val toggleHighlight = filtersExpanded || hasActiveSubFilter
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (toggleHighlight) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Tune,
+                                contentDescription = null,
+                                tint = if (toggleHighlight) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = if (filtersExpanded) "收起" else "筛选",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (toggleHighlight) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+                            )
+                            Icon(
+                                imageVector = if (filtersExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = if (toggleHighlight) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(15.dp)
+                            )
                         }
                     }
-                    expiredCode != 0 -> Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
-                        SessionExpiredHint(
-                            title = "登录状态已失效（$expiredCode）",
-                            subtitle = error.ifBlank { "教务登录过期了，更新一下就能继续查" },
-                            repairing = repairing,
-                            onRepair = {
-                                repairing = true
-                                error = ""
-                                SessionRepair.repair(context) { outcome ->
-                                    repairing = false
-                                    if (outcome.ok) {
-                                        reload++
-                                    } else {
-                                        error = outcome.message ?: "更新失败，请稍后重试"
+
+                    // 展开后的统一液态玻璃筛选面板
+                    AnimatedVisibility(
+                        visible = filtersExpanded,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(glassSurfaceColor())
+                                .border(0.5.dp, glassBorderColor(), RoundedCornerShape(22.dp))
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (allowTimeSwitch) {
+                                EmptyClassroomTimePicker(
+                                    selectedWeek = selectedWeek,
+                                    selectedDay = selectedDay,
+                                    selectedPeriod = selectedPeriod,
+                                    onWeekChange = {
+                                        if (selectedWeek != it) {
+                                            selectedWeek = it
+                                            selectedBuilding = allLabel
+                                            selectedFloor = allLabel
+                                        }
+                                    },
+                                    onDayChange = {
+                                        if (selectedDay != it) {
+                                            selectedDay = it
+                                            selectedBuilding = allLabel
+                                            selectedFloor = allLabel
+                                        }
+                                    },
+                                    onPeriodChange = {
+                                        if (selectedPeriod != it) {
+                                            selectedPeriod = it
+                                            selectedBuilding = allLabel
+                                            selectedFloor = allLabel
+                                        }
+                                    }
+                                )
+                                SystemDivider(alpha = 0.35f)
+                            }
+
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "校区",
+                                    modifier = Modifier.width(50.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    EmptyClassroomApi.campuses.forEach { option ->
+                                        GlassFilterPill(
+                                            label = option.label,
+                                            selected = campusId == option.id,
+                                            onClick = {
+                                                if (campusId != option.id) {
+                                                    campusId = option.id
+                                                    selectedBuilding = allLabel
+                                                    selectedFloor = allLabel
+                                                }
+                                            }
+                                        )
                                     }
                                 }
                             }
-                        )
-                    }
-                    error.isNotBlank() -> Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(error, color = MaterialTheme.colorScheme.error)
-                            Spacer(Modifier.height(8.dp))
-                            TextButton(onClick = { reload++ }) { Text("重试") }
+
+                            FilterSection(
+                                label = "教学楼",
+                                options = buildings,
+                                selected = selectedBuilding,
+                                onSelect = { selectedBuilding = it; selectedFloor = allLabel }
+                            )
+
+                            FilterSection(
+                                label = "楼层",
+                                options = floors,
+                                selected = selectedFloor,
+                                onSelect = { selectedFloor = it },
+                                format = { floor -> if (floor.endsWith("层")) floor else "${floor}层" }
+                            )
                         }
                     }
-                    classrooms.isEmpty() -> Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
-                        Text("这个时间没有查到空闲教室", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    filteredClassrooms.isEmpty() -> Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("当前筛选条件下没有空闲教室", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton(onClick = { selectedBuilding = allLabel; selectedFloor = allLabel }) { Text("清除筛选") }
-                        }
-                    }
-                    else -> {
-                        Text("共 ${filteredClassrooms.size} 间空闲教室", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(8.dp))
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 420.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(filteredClassrooms, key = { it.id }) { room -> EmptyClassroomRow(room) }
+
+                    // 教室结果列表区（独占剩余视口）
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        when {
+                            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                GlassLoadingState(text = "正在查询空闲教室…")
+                            }
+
+                            expiredCode != 0 -> Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(glassSurfaceColor())
+                                    .border(0.5.dp, glassBorderColor(), RoundedCornerShape(24.dp))
+                                    .padding(20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                SessionExpiredHint(
+                                    title = "登录状态已失效（$expiredCode）",
+                                    subtitle = error.ifBlank { "教务登录过期了，更新一下就能继续查" },
+                                    repairing = repairing,
+                                    onRepair = {
+                                        repairing = true
+                                        error = ""
+                                        SessionRepair.repair(context) { outcome ->
+                                            repairing = false
+                                            if (outcome.ok) {
+                                                reload++
+                                            } else {
+                                                error = outcome.message ?: "更新失败，请稍后重试"
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+
+                            error.isNotBlank() -> SystemEmptyState(
+                                title = "空闲教室查询失败",
+                                message = error,
+                                icon = Icons.Outlined.MeetingRoom,
+                                action = {
+                                    SystemActionButton(
+                                        text = "重新查询",
+                                        primary = true,
+                                        onClick = { reload++ }
+                                    )
+                                }
+                            )
+
+                            classrooms.isEmpty() -> SystemEmptyState(
+                                title = "当前时段暂无空闲教室",
+                                message = "可展开上方筛选条切换校区、周次或节次重新查询。",
+                                icon = Icons.Outlined.MeetingRoom,
+                                action = if (!filtersExpanded) {
+                                    {
+                                        SystemActionButton(
+                                            text = "展开筛选",
+                                            onClick = { filtersExpanded = true }
+                                        )
+                                    }
+                                } else null
+                            )
+
+                            filteredClassrooms.isEmpty() -> SystemEmptyState(
+                                title = "当前筛选下无教室",
+                                message = "请清除楼宇或楼层筛选条件后再试。",
+                                icon = Icons.Outlined.MeetingRoom,
+                                action = {
+                                    SystemActionButton(
+                                        text = "清除筛选",
+                                        primary = true,
+                                        onClick = {
+                                            selectedBuilding = allLabel
+                                            selectedFloor = allLabel
+                                        }
+                                    )
+                                }
+                            )
+
+                            else -> LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + 20.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                items(filteredClassrooms, key = { it.id }) { room ->
+                                    EmptyClassroomRow(room)
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-        val verification by com.buct.course.utils.SessionRenewer.verification.collectAsState()
-        com.buct.course.ui.system.SecondaryVerificationOverlay(
-            state = verification,
-            onRememberChange = { com.buct.course.utils.SessionRenewer.setRememberDevice(it) },
-            onSendCode = { captcha -> com.buct.course.utils.SessionRenewer.sendSecondarySms(captcha) },
-            onSubmit = { code -> com.buct.course.utils.SessionRenewer.submitSecondarySms(code) },
-            onDismiss = { com.buct.course.utils.SessionRenewer.cancelVerification() }
-        )
+
+            val verification by SessionRenewer.verification.collectAsState()
+            SecondaryVerificationOverlay(
+                state = verification,
+                onRememberChange = { SessionRenewer.setRememberDevice(it) },
+                onSendCode = { captcha -> SessionRenewer.sendSecondarySms(captcha) },
+                onSubmit = { code -> SessionRenewer.submitSecondarySms(code) },
+                onDismiss = { SessionRenewer.cancelVerification() }
+            )
         }
     }
 }
@@ -311,29 +485,125 @@ private fun buildingFilterRank(name: String): Int {
 }
 
 @Composable
+private fun GlassFilterPill(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(50)
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(
+                when {
+                    selected -> MaterialTheme.colorScheme.primary
+                    else -> glassSurfaceColor()
+                }
+            )
+            .border(
+                width = 0.5.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary else glassBorderColor(),
+                shape = shape
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            ),
+            color = when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                selected -> MaterialTheme.colorScheme.onPrimary
+                else -> MaterialTheme.colorScheme.onSurface
+            },
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+@Composable
 private fun EmptyClassroomRow(room: EmptyClassroom) {
     val location = listOf(room.building, room.campus, room.floor.takeIf { it.isNotBlank() }?.let { "${it}层" } ?: "")
         .filter { it.isNotBlank() }
         .joinToString(" · ")
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    val cardShape = RoundedCornerShape(20.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(glassSurfaceColor())
+            .border(0.5.dp, glassBorderColor(), cardShape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(room.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                if (location.isNotBlank()) {
-                    Text(location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (room.code.isNotBlank() && room.code != room.name) {
-                    Text("编号 ${room.code}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.MeetingRoom,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = room.name,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (location.isNotBlank()) {
+                Text(
+                    text = location,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("${room.seats} 座", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                Text(room.type.ifBlank { "教室" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (room.code.isNotBlank() && room.code != room.name) {
+                Text(
+                    text = "编号 ${room.code}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
+        }
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .padding(horizontal = 9.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = "${room.seats} 座",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Text(
+                text = room.type.ifBlank { "教室" },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -350,24 +620,26 @@ private fun FilterSection(
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = label,
-            modifier = Modifier.width(56.dp),
+            modifier = Modifier.width(50.dp),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Row(
-            modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FilterChip(
+            GlassFilterPill(
+                label = "全部",
                 selected = selected == "全部",
-                onClick = { onSelect("全部") },
-                label = { Text("全部") }
+                onClick = { onSelect("全部") }
             )
             options.forEach { option ->
-                FilterChip(
+                GlassFilterPill(
+                    label = format(option),
                     selected = selected == option,
-                    onClick = { onSelect(option) },
-                    label = { Text(format(option)) }
+                    onClick = { onSelect(option) }
                 )
             }
         }
@@ -384,55 +656,59 @@ private fun EmptyClassroomTimePicker(
     onPeriodChange: (Int) -> Unit
 ) {
     val weekDays = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "周次",
-                modifier = Modifier.width(56.dp),
+                modifier = Modifier.width(50.dp),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(
-                modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FilterChip(
+                GlassFilterPill(
+                    label = "上一周",
                     selected = false,
                     enabled = selectedWeek > 1,
-                    onClick = { onWeekChange((selectedWeek - 1).coerceAtLeast(1)) },
-                    label = { Text("上一周") }
+                    onClick = { onWeekChange((selectedWeek - 1).coerceAtLeast(1)) }
                 )
-                FilterChip(
+                GlassFilterPill(
+                    label = "第 $selectedWeek 周",
                     selected = true,
-                    onClick = {},
-                    label = { Text("第 $selectedWeek 周") }
+                    onClick = {}
                 )
-                FilterChip(
+                GlassFilterPill(
+                    label = "下一周",
                     selected = false,
                     enabled = selectedWeek < 20,
-                    onClick = { onWeekChange((selectedWeek + 1).coerceAtMost(20)) },
-                    label = { Text("下一周") }
+                    onClick = { onWeekChange((selectedWeek + 1).coerceAtMost(20)) }
                 )
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "星期",
-                modifier = Modifier.width(56.dp),
+                modifier = Modifier.width(50.dp),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(
-                modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 weekDays.forEachIndexed { index, label ->
                     val d = index + 1
-                    FilterChip(
+                    GlassFilterPill(
+                        label = label,
                         selected = selectedDay == d,
-                        onClick = { onDayChange(d) },
-                        label = { Text(label) }
+                        onClick = { onDayChange(d) }
                     )
                 }
             }
@@ -440,19 +716,21 @@ private fun EmptyClassroomTimePicker(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "节次",
-                modifier = Modifier.width(56.dp),
+                modifier = Modifier.width(50.dp),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(
-                modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 for (p in 1..12) {
-                    FilterChip(
+                    GlassFilterPill(
+                        label = "第${p}节",
                         selected = selectedPeriod == p,
-                        onClick = { onPeriodChange(p) },
-                        label = { Text("第${p}节") }
+                        onClick = { onPeriodChange(p) }
                     )
                 }
             }

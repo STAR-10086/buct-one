@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +33,9 @@ import androidx.compose.ui.unit.dp
 import com.buct.course.ui.theme.MotionEasing
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicLong
+
+/** 标记当前组合树是否已挂载根级 [GlassToastHost]，避免独立窗口缺失或主窗口重复渲染。 */
+internal val LocalHasGlassToastHost = staticCompositionLocalOf { false }
 
 /**
  * 全局玻璃 Toast：悬浮深色玻璃胶囊，取代系统 Toast 的样式割裂。

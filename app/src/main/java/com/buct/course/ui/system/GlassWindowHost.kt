@@ -4,12 +4,16 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -27,6 +31,7 @@ private val LocalGlassWindowOwner = staticCompositionLocalOf<android.view.View?>
 @Composable
 fun GlassWindowHost(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     val view = LocalView.current
+    val parentHasToastHost = LocalHasGlassToastHost.current
     val appWallpaper = com.buct.course.ui.theme.rememberAppWallpaperStyle()
     if (LocalGlassWindowOwner.current === view) {
         Box(modifier.fillMaxSize()) { content() }
@@ -50,7 +55,8 @@ fun GlassWindowHost(modifier: Modifier = Modifier, content: @Composable BoxScope
         LocalModalBackdrop provides modal,
         LocalGlassLensAnchor provides controlAnchor,
         LocalGlassLensModalAnchor provides modalAnchor,
-        LocalDialogHost provides dialogs
+        LocalDialogHost provides dialogs,
+        LocalHasGlassToastHost provides true
     ) {
         GlassOverlayHost(modifier) {
             Canvas(Modifier.fillMaxSize().then(if (wallpaper != null) Modifier.layerBackdrop(wallpaper) else Modifier)) {
@@ -59,6 +65,14 @@ fun GlassWindowHost(modifier: Modifier = Modifier, content: @Composable BoxScope
             Box(Modifier.fillMaxSize().glassLensAnchor(controlAnchor).glassLensAnchor(modalAnchor)
                 .then(if (page != null) Modifier.layerBackdrop(page) else Modifier)) { content() }
             DialogHost(dialogs)
+            if (!parentHasToastHost) {
+                GlassToastHost(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 24.dp)
+                )
+            }
         }
     }
 }

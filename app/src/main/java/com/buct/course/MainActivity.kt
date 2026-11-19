@@ -526,6 +526,7 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
             LocalAppOverlayBottomInset provides navBarContentInset,
             LocalDialogHost provides dialogHostState,
             LocalPageDataState provides pageData,
+            com.buct.course.ui.system.LocalHasGlassToastHost provides true,
             LocalFloatingNotice provides tokenExpiredNotice,
             LocalNoticeAnchor provides noticeAnchorState,
             com.buct.course.ui.system.glass.LocalPageGlassFreshness provides lensFreshness,
