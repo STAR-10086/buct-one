@@ -57,6 +57,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ (inputs.publish_release && '0') || '1' }}
 
       - uses: actions/setup-java@v4
         with:
@@ -275,6 +277,74 @@ jobs:
           cp "app/build/outputs/apk/debug/app-universal-debug.apk"       "release-dist/buct-one-${TAG}-debug.apk"
           ls -lh release-dist/
 
+      - name: Generate release notes
+        if: inputs.publish_release == true && inputs.release_tag != ''
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.release_tag }}"
+          OUT="release-dist/release-notes.md"
+          VER_NAME=$(sed -n 's/^VERSION_NAME=//p' app/version.properties | tr -d '\r' | head -1)
+          VER_CODE=$(sed -n 's/^VERSION_CODE=//p' app/version.properties | tr -d '\r' | head -1)
+
+          CERT_INFO=$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "release-dist/buct-one-${TAG}-universal.apk" || true)
+          CERT_DN=$(printf '%s\n' "$CERT_INFO" | sed -n 's/.*certificate DN: //p' | head -1)
+          CERT_SHA=$(printf '%s\n' "$CERT_INFO" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
+
+          if [[ "$TAG" == *-* ]]; then
+            KIND_LABEL="测试版"
+            SIGN_TIP="当前为预发行测试版；若与已安装版本的签名证书不同，请先卸载旧包再安装。\`debug\` 包仅用于调试抓日志，不可与正式版互相覆盖安装。"
+          else
+            KIND_LABEL="正式版"
+            SIGN_TIP="本版本使用正式发布签名证书构建，同证书后续正式版可直接覆盖升级；若此前安装了临时签名的测试包或 \`debug\` 包，请先卸载旧包再安装。"
+          fi
+
+          {
+            echo "## BUCT One ${TAG} ${KIND_LABEL}"
+            echo ""
+            echo "> ⚠️ **安装与签名提示**：${SIGN_TIP}"
+            echo ""
+            echo "### 安装包下载建议"
+            echo ""
+            echo "| 安装包 | 适用设备 / 用途 | 文件大小 | SHA-256 |"
+            echo "| --- | --- | --- | --- |"
+            for ARCH in arm64-v8a armeabi-v7a universal debug; do
+              FILE="release-dist/buct-one-${TAG}-${ARCH}.apk"
+              BYTES=$(stat -c%s "$FILE")
+              MB=$(awk "BEGIN{printf \"%.2f\", $BYTES/1048576}")
+              SHA=$(sha256sum "$FILE" | awk '{print $1}')
+              case "$ARCH" in
+                arm64-v8a)   DESC="**推荐**：绝大多数近几年的 64 位 Android 手机" ;;
+                armeabi-v7a) DESC="较老的 32 位 ARM Android 设备" ;;
+                universal)   DESC="全架构通用包（不确定设备架构或模拟器使用）" ;;
+                debug)       DESC="仅开发调试 / 抓日志使用（Debug 签名）" ;;
+              esac
+              echo "| \`buct-one-${TAG}-${ARCH}.apk\` | ${DESC} | ${MB} MB (\`${BYTES}\` B) | \`${SHA}\` |"
+            done
+            echo ""
+            echo "### 更新日志"
+            echo ""
+            if [ -f "release-notes/${TAG}.md" ]; then
+              cat "release-notes/${TAG}.md"
+            else
+              PREV_TAG=$(git tag -l 'v*' --sort=-creatordate | grep -Fxv "$TAG" | head -1 || true)
+              if [ -n "$PREV_TAG" ]; then
+                echo "自 \`${PREV_TAG}\` 以来的提交记录："
+                echo ""
+                git log "${PREV_TAG}..HEAD" --no-merges --pretty=format:"- %s (\`%h\`)" || true
+              else
+                git log -n 20 --no-merges --pretty=format:"- %s (\`%h\`)" || true
+              fi
+            fi
+            echo ""
+            echo ""
+            echo "### 产物与签名校验信息"
+            echo ""
+            echo "- **包名**：\`com.buct.one\`"
+            echo "- **版本号**：\`${VER_NAME}\`（\`versionCode = ${VER_CODE}\`）"
+            echo "- **正式签名证书主体**：\`${CERT_DN}\`"
+            echo "- **正式签名证书 SHA-256 指纹**：\`${CERT_SHA}\`"
+          } > "$OUT"
+
       - name: Publish to Release
         if: inputs.publish_release == true && inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
@@ -282,5 +352,6 @@ jobs:
           tag_name: ${{ inputs.release_tag }}
           name: "BUCT One ${{ inputs.release_tag }}"
           prerelease: ${{ contains(inputs.release_tag, '-') }}
+          body_path: release-dist/release-notes.md
           files: release-dist/*.apk
           fail_on_unmatched_files: true
