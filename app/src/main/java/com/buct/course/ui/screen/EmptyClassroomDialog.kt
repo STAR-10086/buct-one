@@ -5,6 +5,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,10 +59,15 @@ fun EmptyClassroomDialog(
     week: Int,
     day: Int,
     period: Int,
+    allowTimeSwitch: Boolean = false,
     onDismiss: () -> Unit
 ) {
     val school = remember { UserManager.getInstance().currentSchool }
     val context = LocalContext.current
+    var selectedWeek by remember(week) { mutableIntStateOf(week.coerceIn(1, 20)) }
+    var selectedDay by remember(day) { mutableIntStateOf(day.coerceIn(1, 7)) }
+    var selectedPeriod by remember(period) { mutableIntStateOf(period.coerceIn(1, 12)) }
+    var showTimePicker by remember(allowTimeSwitch) { mutableStateOf(allowTimeSwitch) }
     var campusId by remember { mutableIntStateOf(2) }
     var selectedBuilding by remember { mutableStateOf("全部") }
     var selectedFloor by remember { mutableStateOf("全部") }
@@ -71,9 +77,9 @@ fun EmptyClassroomDialog(
     var expiredCode by remember { mutableStateOf(0) }
     var repairing by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
-    val dayText = listOf("一", "二", "三", "四", "五", "六", "日").getOrElse(day - 1) { day.toString() }
+    val dayText = listOf("一", "二", "三", "四", "五", "六", "日").getOrElse(selectedDay - 1) { selectedDay.toString() }
 
-    LaunchedEffect(school, semester, week, day, period, campusId, reload) {
+    LaunchedEffect(school, semester, selectedWeek, selectedDay, selectedPeriod, campusId, reload) {
         if (school == null) {
             error = "请先登录教务系统"
             return@LaunchedEffect
@@ -82,7 +88,7 @@ fun EmptyClassroomDialog(
         error = ""
         expiredCode = 0
         try {
-            classrooms = EmptyClassroomApi.load(school, semester, week, day, period, campusId)
+            classrooms = EmptyClassroomApi.load(school, semester, selectedWeek, selectedDay, selectedPeriod, campusId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: SessionExpiredException) {
@@ -133,11 +139,61 @@ fun EmptyClassroomDialog(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("空闲教室", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("第 ${week} 周 · 星期${dayText} · 第 ${period} 节", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "第 ${selectedWeek} 周 · 星期${dayText} · 第 ${selectedPeriod} 节",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(
+                                onClick = { showTimePicker = !showTimePicker },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.heightIn(min = 24.dp)
+                            ) {
+                                Text(
+                                    text = if (showTimePicker) "收起时间" else "切换时间",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
                     }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "关闭")
                     }
+                }
+                if (showTimePicker) {
+                    Spacer(Modifier.height(8.dp))
+                    EmptyClassroomTimePicker(
+                        selectedWeek = selectedWeek,
+                        selectedDay = selectedDay,
+                        selectedPeriod = selectedPeriod,
+                        onWeekChange = {
+                            if (selectedWeek != it) {
+                                selectedWeek = it
+                                selectedBuilding = allLabel
+                                selectedFloor = allLabel
+                            }
+                        },
+                        onDayChange = {
+                            if (selectedDay != it) {
+                                selectedDay = it
+                                selectedBuilding = allLabel
+                                selectedFloor = allLabel
+                            }
+                        },
+                        onPeriodChange = {
+                            if (selectedPeriod != it) {
+                                selectedPeriod = it
+                                selectedBuilding = allLabel
+                                selectedFloor = allLabel
+                            }
+                        }
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    HorizontalDivider()
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(
@@ -221,7 +277,7 @@ fun EmptyClassroomDialog(
                         Text("共 ${filteredClassrooms.size} 间空闲教室", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(8.dp))
                         LazyColumn(
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 420.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(filteredClassrooms, key = { it.id }) { room -> EmptyClassroomRow(room) }
@@ -313,6 +369,92 @@ private fun FilterSection(
                     onClick = { onSelect(option) },
                     label = { Text(format(option)) }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyClassroomTimePicker(
+    selectedWeek: Int,
+    selectedDay: Int,
+    selectedPeriod: Int,
+    onWeekChange: (Int) -> Unit,
+    onDayChange: (Int) -> Unit,
+    onPeriodChange: (Int) -> Unit
+) {
+    val weekDays = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "周次",
+                modifier = Modifier.width(56.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = false,
+                    enabled = selectedWeek > 1,
+                    onClick = { onWeekChange((selectedWeek - 1).coerceAtLeast(1)) },
+                    label = { Text("上一周") }
+                )
+                FilterChip(
+                    selected = true,
+                    onClick = {},
+                    label = { Text("第 $selectedWeek 周") }
+                )
+                FilterChip(
+                    selected = false,
+                    enabled = selectedWeek < 20,
+                    onClick = { onWeekChange((selectedWeek + 1).coerceAtMost(20)) },
+                    label = { Text("下一周") }
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "星期",
+                modifier = Modifier.width(56.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                weekDays.forEachIndexed { index, label ->
+                    val d = index + 1
+                    FilterChip(
+                        selected = selectedDay == d,
+                        onClick = { onDayChange(d) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "节次",
+                modifier = Modifier.width(56.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                for (p in 1..12) {
+                    FilterChip(
+                        selected = selectedPeriod == p,
+                        onClick = { onPeriodChange(p) },
+                        label = { Text("第${p}节") }
+                    )
+                }
             }
         }
     }

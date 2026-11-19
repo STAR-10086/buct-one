@@ -1,5 +1,7 @@
 package com.buct.course.ui.route
 
+import android.appwidget.AppWidgetManager
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,9 +21,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Assignment
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.DateRange
+import androidx.compose.material.icons.outlined.MeetingRoom
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -30,8 +34,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,11 +47,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.buct.course.manager.ScheduleSettingsManager
 import com.buct.course.manager.StartupPage
+import com.buct.course.manager.UserManager
+import com.buct.course.ui.screen.EmptyClassroomDialog
 import com.buct.course.ui.system.GlassStatChip
 import com.buct.course.ui.system.LocalAppOverlayBottomInset
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
+import com.buct.course.widget.WidgetScheduleSource
+import com.buct.course.widget.parseClockMinutes
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.sync.TheolSyncService
 import kotlinx.coroutines.launch
@@ -64,11 +75,21 @@ fun DashboardRoute(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val userManager = remember { UserManager.getInstance().apply { init(context) } }
+    val session by userManager.sessionState.state.collectAsState()
+    val displayName = remember(session.token, session.expired, userManager.studentName) {
+        userManager.studentName?.trim()?.takeIf { it.isNotBlank() } ?: "北化同学"
+    }
+
     val theolService = remember(context) { TheolSyncService.getInstance(context) }
     val theolSlice by theolService.theolState.collectAsState()
     val localTodos by theolService.todosState.collectAsState()
     val filterPrefs by theolService.filterPrefs.collectAsState()
     val syncing by theolService.syncing.collectAsState()
+    var showEmptyClassroomDialog by remember { mutableStateOf(false) }
+    val classroomSlot = remember(showEmptyClassroomDialog) { resolveCurrentClassroomSlot(context) }
+    val classroomDayLabel = listOf("一", "二", "三", "四", "五", "六", "日")
+        .getOrElse(classroomSlot.day - 1) { "一" }
 
     val now = remember { Date() }
     val greeting = remember {
@@ -116,11 +137,18 @@ fun DashboardRoute(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Text(
-                        text = "$greeting，北化同学",
+                        text = "$greeting，$displayName",
                         style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = "$dateLine · BUCT One 工作台",
@@ -263,11 +291,11 @@ fun DashboardRoute(
             }
         }
 
-        // 卡片 2：快捷入口网格
+        // 卡片 2：快捷入口网格与查空闲教室
         item {
             DashboardGlassCard(
                 title = "校园入口",
-                badge = "五栏直达",
+                badge = "快捷直达",
                 badgeColor = MaterialTheme.colorScheme.primary
             ) {
                 Row(
@@ -287,9 +315,87 @@ fun DashboardRoute(
                         onSwitchPage(StartupPage.Settings)
                     }
                 }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                        .clickable { showEmptyClassroomDialog = true }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.MeetingRoom,
+                        contentDescription = "查空闲教室",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "查空闲教室",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "第 ${classroomSlot.week} 周 · 周${classroomDayLabel} · 第 ${classroomSlot.period} 节 · 可自由切换",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }
+
+    if (showEmptyClassroomDialog) {
+        EmptyClassroomDialog(
+            semester = classroomSlot.semester,
+            week = classroomSlot.week,
+            day = classroomSlot.day,
+            period = classroomSlot.period,
+            allowTimeSwitch = true,
+            onDismiss = { showEmptyClassroomDialog = false }
+        )
+    }
+}
+
+private data class ClassroomSlot(
+    val semester: String,
+    val week: Int,
+    val day: Int,
+    val period: Int
+)
+
+private fun resolveCurrentClassroomSlot(context: Context): ClassroomSlot {
+    val termId = WidgetScheduleSource.resolveTerm(context, AppWidgetManager.INVALID_APPWIDGET_ID).id
+    val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context)
+    val cal = Calendar.getInstance()
+    val week = WidgetScheduleSource.weekForDate(startMillis, cal)
+    val day = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
+    val nowMinutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+    val settings = ScheduleSettingsManager.getInstance().apply { init(context) }
+    val periodTimes = settings.getPeriodTimes().sortedBy { it.period }
+    val defaultTimes = settings.getDefaultPeriodTimes().sortedBy { it.period }
+    val activePeriod = (if (periodTimes.isNotEmpty()) periodTimes else defaultTimes)
+        .firstOrNull { pt ->
+            val endMin = parseClockMinutes(pt.endTime)
+            endMin != null && endMin > nowMinutes
+        }?.period ?: 1
+    return ClassroomSlot(
+        semester = termId,
+        week = week,
+        day = day,
+        period = activePeriod.coerceIn(1, 12)
+    )
 }
 
 @Composable
