@@ -99,7 +99,6 @@ fun SettingsRoute(
     var showSchoolDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
-    var showAcademicSupport by remember { mutableStateOf(false) }
     var showCreditsDialog by remember { mutableStateOf(false) }
     var showStartupPageDialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val startupPagePreferences = remember(context) { StartupPagePreferences.from(context) }
@@ -350,8 +349,6 @@ fun SettingsRoute(
         quotaInfo = quotaInfo,
         canRefreshCookie = canRefreshCookie,
         isRefreshingCookie = isRefreshingCookie,
-        academicSystemName = com.buct.course.academic.AcademicCapabilities.name(UserManager.getInstance().currentSchool?.academicSystem),
-        onAcademicSupport = { showAcademicSupport = true },
         analyticsEnabled = analyticsEnabled,
         onAnalyticsChange = {
             analyticsEnabled = it
@@ -406,9 +403,6 @@ fun SettingsRoute(
             isDownloading = updateState.isDownloading()
         )
     }
-
-    if (showAcademicSupport) com.buct.course.ui.screen.AcademicSupportDialog(
-        UserManager.getInstance().currentSchool?.academicSystem, onDismiss = { showAcademicSupport = false })
 
     if (showThemeDialog) {
         com.buct.course.ui.screen.AppThemeSettingsDialog { showThemeDialog = false }

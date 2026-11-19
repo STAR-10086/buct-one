@@ -174,7 +174,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "1. 回到桌面，长按空白处\n2. 选「小组件」\n3. 找到「北化课表」，把课表小组件拖到桌面",
+                                text = "1. 回到桌面，长按空白处\n2. 选「小组件」\n3. 找到「BUCT One」，把课表小组件拖到桌面",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -183,7 +183,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                 }
 
                 Text(
-                    text = "想再放一个？回到桌面长按空白处 → 小组件（或「桌面卡片」）→ 找到「北化课表」→ 拖到桌面即可。",
+                    text = "想再放一个？回到桌面长按空白处 → 小组件（或「桌面卡片」）→ 找到「BUCT One」→ 拖到桌面即可。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp)
