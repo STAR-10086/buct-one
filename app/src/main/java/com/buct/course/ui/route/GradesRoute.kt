@@ -14,10 +14,14 @@ import com.buct.course.manager.SessionRequestTicket
 import com.buct.course.manager.SessionRequestGate
 import com.buct.course.model.SchoolConfig
 import com.buct.course.network.CourseApiClient
+import com.buct.course.ui.screen.CurriculumCourseUi
+import com.buct.course.ui.screen.CurriculumNodeUi
 import com.buct.course.ui.screen.ExamItemUi
+import com.buct.course.ui.screen.GradeBucket
 import com.buct.course.ui.screen.GradeItemUi
 import com.buct.course.ui.screen.GradesScreen
 import com.buct.course.ui.screen.OverallStatsUi
+import com.buct.course.ui.screen.classifyGradeBucket
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Response
@@ -59,6 +63,11 @@ fun GradesRoute() {
     var overallIsLoading by remember { mutableStateOf(false) }
     // 官方绩点（N105515 学业情况页 GPA）：学期「全部」页直接展示官方口径，避免合并接口绩点字段差异
     var officialOverallGpa by remember { mutableStateOf("") }
+
+    // 培养方案状态（N105515 树结构 + 各模块课程明细）
+    var curriculumNodes by rememberPageData<List<CurriculumNodeUi>>("grades.curriculum") { emptyList() }
+    var curriculumLoaded by rememberPageData("grades.curriculum.loaded") { false }
+    var curriculumIsLoading by remember { mutableStateOf(false) }
 
     // 考试安排状态（考试学期独立选择，缓存按学期）
     var examSemester by rememberSaveable { mutableStateOf("") }
@@ -432,6 +441,8 @@ fun GradesRoute() {
             overallStats = DemoData.overallStats
             overallLoaded = true
             overallIsLoading = false
+            curriculumLoaded = true
+            curriculumIsLoading = false
             return
         }
         val userManager = UserManager.getInstance()
@@ -443,6 +454,10 @@ fun GradesRoute() {
             overallStats = com.buct.course.ui.route.GradesLogic.calculateStats(overallGrades, "0", 0.0, 0)
             overallLoaded = true
             overallIsLoading = false
+            val localCurr = loadCurriculumLocal(context)
+            if (localCurr != null) curriculumNodes = localCurr
+            curriculumLoaded = true
+            curriculumIsLoading = false
             return
         }
         if (school != null && !overallIsLoading) {
@@ -455,13 +470,20 @@ fun GradesRoute() {
                 overallStats = GradesLogic.calculateStats(cachedOverall, "", 0.0, 0)
                 overallLoaded = true
             }
+            val cachedCurriculum = loadCurriculumLocal(context).orEmpty()
+            if (cachedCurriculum.isNotEmpty() && curriculumNodes.isEmpty()) {
+                curriculumNodes = cachedCurriculum
+                curriculumLoaded = true
+            }
 
             overallIsLoading = true
+            curriculumIsLoading = true
 
             CourseApiClient.getInstance().fetchOverallGradesIndex(school, object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     runOnUiThreadForAccount(requestAccountKey) {
                         overallIsLoading = false
+                        curriculumIsLoading = false
                         GlassToaster.show("获取参数失败：${e.message}")
                     }
                 }
@@ -471,7 +493,10 @@ fun GradesRoute() {
                     
                     // Parse Index Logic
                     if (isLoginPageHtml(html)) {
-                        runOnUiThreadForAccount(requestAccountKey) { overallIsLoading = false }
+                        runOnUiThreadForAccount(requestAccountKey) {
+                            overallIsLoading = false
+                            curriculumIsLoading = false
+                        }
                         CourseApiClient.getInstance().notifyCookieExpired(requestAccountKey.session)
                         return
                     }
@@ -488,23 +513,45 @@ fun GradesRoute() {
                     }
 
                     val xfyqjdIds = GradesLogic.extractXfyqjdIds(doc, html)
+                    val parsedTreeNodes = GradesLogic.extractCurriculumTreeNodes(html)
                     val xh_id = doc.selectFirst("input[name=xh_id]")?.attr("value") ?: ""
                     val cjlrxn = doc.selectFirst("input[name=cjlrxn]")?.attr("value") ?: ""
                     val cjlrxq = doc.selectFirst("input[name=cjlrxq]")?.attr("value") ?: ""
 
+                    if (parsedTreeNodes.isNotEmpty() && curriculumNodes.isEmpty()) {
+                        runOnUiThreadForAccount(requestAccountKey) {
+                            curriculumNodes = parsedTreeNodes
+                        }
+                    }
+
                     if (xfyqjdIds.isEmpty()) {
-                        runOnUiThreadForAccount(requestAccountKey) { overallIsLoading = false; overallLoaded = true }
+                        runOnUiThreadForAccount(requestAccountKey) {
+                            overallIsLoading = false
+                            overallLoaded = true
+                            curriculumIsLoading = false
+                            curriculumLoaded = true
+                        }
                         return
                     }
                     
                     // Recursive Fetch
                     GradesLogic.fetchGradesDetailsRecursive(
                         school, xfyqjdIds.toList(), 0, xh_id, cjlrxn, cjlrxq, mutableListOf(),
+                        linkedMapOf(),
                         isCurrent = { requests.isCurrent(requestAccountKey) },
-                        onComplete = { resultGrades ->
+                        onComplete = { resultGrades, coursesByNodeId ->
                              Log.d("GradesRoute", "OVERALL_ONCOMPLETE size=${resultGrades.size} isCurrent=${requests.isCurrent(requestAccountKey)}")
                              runOnUiThreadForAccount(requestAccountKey) {
                                  overallIsLoading = false
+                                 curriculumIsLoading = false
+                                 curriculumLoaded = true
+                                 if (parsedTreeNodes.isNotEmpty()) {
+                                     val enrichedNodes = parsedTreeNodes.map { node ->
+                                         node.copy(courses = coursesByNodeId[node.id].orEmpty())
+                                     }
+                                     curriculumNodes = enrichedNodes
+                                     saveCurriculumLocal(context, enrichedNodes)
+                                 }
                                  // 显示全部课程（含未出分/在读，像学业情况页那样信息全）；未出分的在分布区单列「未出分」
                                  // 网络返回不带分项，必须先把缓存里已有的分项接过来，否则每次刷新都会把「成绩构成」抹掉
                                  val carried = carryDetails(cachedOverall + overallGrades, resultGrades)
@@ -695,14 +742,17 @@ fun GradesRoute() {
         requests.cancel("overall")
         requests.cancel("exams")
         overallIsLoading = false
+        curriculumIsLoading = false
         examIsLoading = false
     }
     LaunchedEffect(currentTab, examSemester, session.token) {
-        if (currentTab == 1 && !overallLoaded) loadOverallGrades()
-        if (currentTab == 2 && !examsLoaded) loadExamSchedule()
+        if ((currentTab == 1 && !overallLoaded) || (currentTab == 2 && !curriculumLoaded)) loadOverallGrades()
+        if (currentTab == 3 && !examsLoaded) loadExamSchedule()
     }
 
-    com.buct.course.ui.system.ReportPageContent(semesterGrades.isNotEmpty() || overallGrades.isNotEmpty() || examList.isNotEmpty())
+    com.buct.course.ui.system.ReportPageContent(
+        semesterGrades.isNotEmpty() || overallGrades.isNotEmpty() || curriculumNodes.isNotEmpty() || examList.isNotEmpty()
+    )
 
     // 自建考试与教务考试合并展示；CustomExamStore.revision 变化会自动重组
     val localExamRevision = com.buct.course.manager.CustomExamStore.revision
@@ -751,10 +801,12 @@ fun GradesRoute() {
         onRefresh = {
             when (currentTab) {
                 0 -> loadSemesterGrades()
-                1 -> loadOverallGrades()
-                2 -> loadExamSchedule()
+                1, 2 -> loadOverallGrades()
+                else -> loadExamSchedule()
             }
         },
+        curriculumNodes = curriculumNodes,
+        curriculumIsLoading = curriculumIsLoading,
         onExportGrades = { grades ->
             try {
                 // 生成 CSV 内容（带 BOM，确保 Excel 正确识别 UTF-8）
@@ -1177,7 +1229,7 @@ private object GradesLogic {
     }
     
     fun extractXfyqjdIds(doc: Document, html: String): Set<String> {
-        val ids = HashSet<String>()
+        val ids = LinkedHashSet<String>()
         val pattern = Pattern.compile("xfyqjd_id=[\"']?([A-Fa-f0-9]{20,})[\"']?")
         val matcher = pattern.matcher(html)
         while (matcher.find()) {
@@ -1189,17 +1241,88 @@ private object GradesLogic {
         }
         return ids
     }
-    
+
+    fun extractCurriculumTreeNodes(html: String): List<CurriculumNodeUi> {
+        val result = LinkedHashMap<String, CurriculumNodeUi>()
+        val pattern = Pattern.compile(
+            "fxfyqjd_id='([^']*)'[^>]*>[\\s\\S]{0,240}?xfyqjd_id='([A-Fa-f0-9]+)'\\s+jdkcsx='([^']*)'\\s+leaf='([^']*)'\\s+sfmjd='([^']*)'\\s*><p class='title1'\\s+id='p[A-Fa-f0-9]+'\\s+yxxf='([^']*)'\\s+yqzdxf='([^']*)'\\s+sftg='([^']*)'[^>]*>\"\\s*\\+\\s*\\r?\\n\\s*\"([^\"&]+)"
+        )
+        val matcher = pattern.matcher(html)
+        while (matcher.find()) {
+            val parentId = matcher.group(1)?.trim().orEmpty()
+            val id = matcher.group(2)?.trim().orEmpty()
+            if (id.isEmpty() || result.containsKey(id)) continue
+            val sfmjd = matcher.group(5)?.trim().orEmpty()
+            val yxxf = matcher.group(6)?.trim()?.toDoubleOrNull() ?: 0.0
+            val yqzdxf = matcher.group(7)?.trim()?.toDoubleOrNull() ?: 0.0
+            val sftg = matcher.group(8)?.trim() == "1"
+            val name = matcher.group(9)?.trim().orEmpty()
+            if (name.isEmpty()) continue
+            result[id] = CurriculumNodeUi(
+                id = id,
+                parentId = parentId,
+                name = name,
+                earnedCredits = yxxf,
+                requiredCredits = yqzdxf,
+                passed = sftg,
+                isLeaf = sfmjd == "1"
+            )
+        }
+        return result.values.toList()
+    }
+
+    fun parseCurriculumCoursesJson(json: String): List<CurriculumCourseUi> {
+        val list = mutableListOf<CurriculumCourseUi>()
+        try {
+            val arr = if (json.trim().startsWith("[")) {
+                JSONArray(json)
+            } else {
+                JSONObject(json).optJSONArray("items") ?: return list
+            }
+            val seen = HashSet<String>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val name = getOptString(obj, "KCMC", "kcmc").trim()
+                if (name.isEmpty()) continue
+                val code = getOptString(obj, "KCH", "kch", "KCH_ID", "kch_id").trim()
+                val key = "$code|$name"
+                if (!seen.add(key)) continue
+                val credits = getOptString(obj, "XF", "xf").ifEmpty { "0" }
+                val xdzt = getOptString(obj, "XDZT", "xdzt").ifEmpty { "3" }
+                val cj = getOptString(obj, "MAXCJ", "CJ", "cj")
+                val jyXn = getOptString(obj, "JYXDXNMC", "jyxdxnmc", "XNMC", "xnmc")
+                val jyXq = getOptString(obj, "JYXDXQMC", "jyxdxqmc", "XQMMC", "xqmmc")
+                val kcxz = getOptString(obj, "KCXZMC", "kcxzmc", "KCLBMC", "kclbmc")
+                list.add(
+                    CurriculumCourseUi(
+                        courseCode = code,
+                        courseName = name,
+                        credits = credits,
+                        studyStatus = xdzt,
+                        grade = cj,
+                        maxGrade = getOptString(obj, "MAXCJ", "maxcj"),
+                        suggestedYear = jyXn,
+                        suggestedTerm = jyXq,
+                        courseCategory = kcxz
+                    )
+                )
+            }
+        } catch (_: Exception) {
+        }
+        return list
+    }
+
     fun fetchGradesDetailsRecursive(
         school: SchoolConfig, 
         ids: List<String>, index: Int, xh_id: String, cjlrxn: String, cjlrxq: String,
         accumulatedGrades: MutableList<GradeItemUi>,
+        coursesByNodeId: MutableMap<String, List<CurriculumCourseUi>>,
         isCurrent: () -> Boolean = { true },
-        onComplete: (List<GradeItemUi>) -> Unit
+        onComplete: (List<GradeItemUi>, Map<String, List<CurriculumCourseUi>>) -> Unit
     ) {
         if (!isCurrent()) return
         if (index >= ids.size) {
-            onComplete(accumulatedGrades)
+            onComplete(accumulatedGrades, coursesByNodeId)
             return
         }
 
@@ -1208,7 +1331,7 @@ private object GradesLogic {
 
         CourseApiClient.getInstance().fetchOverallGradesData(school, postBody, object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                fetchGradesDetailsRecursive(school, ids, index + 1, xh_id, cjlrxn, cjlrxq, accumulatedGrades, isCurrent, onComplete)
+                fetchGradesDetailsRecursive(school, ids, index + 1, xh_id, cjlrxn, cjlrxq, accumulatedGrades, coursesByNodeId, isCurrent, onComplete)
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -1219,7 +1342,11 @@ private object GradesLogic {
                         accumulatedGrades.add(newItem)
                     }
                 }
-                fetchGradesDetailsRecursive(school, ids, index + 1, xh_id, cjlrxn, cjlrxq, accumulatedGrades, isCurrent, onComplete)
+                val nodeCourses = parseCurriculumCoursesJson(json)
+                if (nodeCourses.isNotEmpty()) {
+                    coursesByNodeId[xfyqjd_id] = nodeCourses
+                }
+                fetchGradesDetailsRecursive(school, ids, index + 1, xh_id, cjlrxn, cjlrxq, accumulatedGrades, coursesByNodeId, isCurrent, onComplete)
             }
         })
     }
@@ -1231,6 +1358,7 @@ private object GradesLogic {
         var good = 0
         var medium = 0
         var pass = 0
+        var fail = 0
         var notGraded = 0
 
         // GPA 按北化官方规则：素质教育课程、两级制计分课程、体育课程不参与
@@ -1240,31 +1368,15 @@ private object GradesLogic {
             val gps = g.gpa.toDoubleOrNull() ?: 0.0
             totalCredits += c
             weightedGPA += c * gps
-            
         }
         grades.forEach { g ->
-            val gradeText = g.grade.trim()
-            val score = gradeText.replace("[^0-9]".toRegex(), "").toIntOrNull()
-            val dist = when {
-                score != null -> when {
-                    score >= 90 -> 0
-                    score >= 80 -> 1
-                    score >= 70 -> 2
-                    score >= 60 -> 3
-                    else -> -1
-                }
-                gradeText.contains("优秀") || gradeText == "优" || gradeText.startsWith("A") -> 0
-                gradeText.contains("良好") || gradeText == "良" || gradeText.startsWith("B") -> 1
-                gradeText.contains("中等") || gradeText == "中" || gradeText.startsWith("C") -> 2
-                gradeText.contains("合格") || gradeText.contains("及格") || gradeText.startsWith("D") -> 3
-                else -> -1
-            }
-            when (dist) {
-                0 -> excellent++
-                1 -> good++
-                2 -> medium++
-                3 -> pass++
-                else -> notGraded++
+            when (classifyGradeBucket(g.grade)) {
+                GradeBucket.Excellent -> excellent++
+                GradeBucket.Good -> good++
+                GradeBucket.Medium -> medium++
+                GradeBucket.Pass -> pass++
+                GradeBucket.Fail -> fail++
+                GradeBucket.NotGraded -> notGraded++
             }
         }
 
@@ -1274,7 +1386,7 @@ private object GradesLogic {
         val displayCredits = if (totalCredits > 0) String.format("%.1f", totalCredits) else String.format("%.1f", baseCredits)
         val displayCount = if (grades.isNotEmpty()) grades.size else baseCount
 
-        return OverallStatsUi(displayGPA, displayCredits, displayCount, excellent, good, medium, pass, notGraded)
+        return OverallStatsUi(displayGPA, displayCredits, displayCount, excellent, good, medium, pass, notGraded, fail)
     }
 
     private fun getOptString(obj: JSONObject, vararg keys: String): String {
@@ -1462,4 +1574,77 @@ private fun loadExamsLocal(context: android.content.Context): List<ExamItemUi>? 
             seatNumber = o.optString("seatNumber"), examName = o.optString("examName"), teacher = o.optString("teacher")
         )
     }
+}
+
+private fun saveCurriculumLocal(context: android.content.Context, nodes: List<CurriculumNodeUi>) {
+    val arr = org.json.JSONArray()
+    nodes.forEach { n ->
+        val coursesArr = org.json.JSONArray()
+        n.courses.forEach { c ->
+            coursesArr.put(org.json.JSONObject().apply {
+                put("courseCode", c.courseCode)
+                put("courseName", c.courseName)
+                put("credits", c.credits)
+                put("studyStatus", c.studyStatus)
+                put("grade", c.grade)
+                put("maxGrade", c.maxGrade)
+                put("suggestedYear", c.suggestedYear)
+                put("suggestedTerm", c.suggestedTerm)
+                put("courseCategory", c.courseCategory)
+            })
+        }
+        arr.put(org.json.JSONObject().apply {
+            put("id", n.id)
+            put("parentId", n.parentId)
+            put("name", n.name)
+            put("earnedCredits", n.earnedCredits)
+            put("requiredCredits", n.requiredCredits)
+            put("passed", n.passed)
+            put("isLeaf", n.isLeaf)
+            put("courses", coursesArr)
+        })
+    }
+    com.buct.course.manager.LocalStore.save(
+        context,
+        "curriculum_${UserManager.getInstance().currentAccountStorageKey}.json",
+        arr.toString()
+    )
+}
+
+private fun loadCurriculumLocal(context: android.content.Context): List<CurriculumNodeUi>? {
+    val raw = com.buct.course.manager.LocalStore.load(
+        context,
+        "curriculum_${UserManager.getInstance().currentAccountStorageKey}.json"
+    ) ?: return null
+    return runCatching {
+        val arr = org.json.JSONArray(raw)
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            val cArr = o.optJSONArray("courses") ?: org.json.JSONArray()
+            val courses = (0 until cArr.length()).map { j ->
+                val co = cArr.getJSONObject(j)
+                CurriculumCourseUi(
+                    courseCode = co.optString("courseCode"),
+                    courseName = co.optString("courseName"),
+                    credits = co.optString("credits"),
+                    studyStatus = co.optString("studyStatus", "3"),
+                    grade = co.optString("grade"),
+                    maxGrade = co.optString("maxGrade"),
+                    suggestedYear = co.optString("suggestedYear"),
+                    suggestedTerm = co.optString("suggestedTerm"),
+                    courseCategory = co.optString("courseCategory")
+                )
+            }
+            CurriculumNodeUi(
+                id = o.optString("id"),
+                parentId = o.optString("parentId"),
+                name = o.optString("name"),
+                earnedCredits = o.optDouble("earnedCredits", 0.0),
+                requiredCredits = o.optDouble("requiredCredits", 0.0),
+                passed = o.optBoolean("passed", false),
+                isLeaf = o.optBoolean("isLeaf", true),
+                courses = courses
+            )
+        }
+    }.getOrNull()
 }

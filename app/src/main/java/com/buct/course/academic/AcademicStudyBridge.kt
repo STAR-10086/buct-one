@@ -45,9 +45,11 @@ object AcademicStudyBridge {
             if (passed.isEmpty()) "--" else String.format(Locale.ROOT, "%.1f", passed.sum())
         }
         val scores = report.grades.mapNotNull { score(it.score) }
+        val notGradedCount = report.grades.size - scores.size
         return OverallStatsUi(gpa, credits, report.grades.size,
             scores.count { it >= 90 }, scores.count { it >= 80 && it < 90 },
-            scores.count { it >= 70 && it < 80 }, scores.count { it >= 60 && it < 70 })
+            scores.count { it >= 70 && it < 80 }, scores.count { it >= 60 && it < 70 },
+            notGradedCount, scores.count { it < 60 })
     }
 
     internal fun score(value: String): Double? = value.trim().toDoubleOrNull() ?: when (value.trim()) {

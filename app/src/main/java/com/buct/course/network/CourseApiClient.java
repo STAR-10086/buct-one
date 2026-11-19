@@ -268,13 +268,29 @@ public class CourseApiClient {
                 if (appContext == null || token == null) return;
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
                         UserManager user = UserManager.getInstance();
-                        if (!user.getSessionState().expire(token)) return;
-                        user.setLoggedIn(false);
-                        Intent intent = new Intent(ACTION_COOKIE_EXPIRED).setPackage(appContext.getPackageName());
-                        intent.putExtra(EXTRA_ACCOUNT_STORAGE_KEY, token.getAccountStorageKey());
-                        intent.putExtra(EXTRA_SESSION_GENERATION, token.getGeneration());
-                        appContext.sendBroadcast(intent);
+                        if (!user.getSessionState().isCurrent(token)) return;
+                        if (com.buct.course.utils.SessionRenewer.canRenew()) {
+                                com.buct.course.utils.SessionRenewer.request(token, false, result -> {
+                                        if (!(result instanceof com.buct.course.utils.SessionRecoveryResult.Recovered)) {
+                                                markSessionExpiredAndBroadcast(token);
+                                        }
+                                        return kotlin.Unit.INSTANCE;
+                                });
+                                return;
+                        }
+                        markSessionExpiredAndBroadcast(token);
                 });
+        }
+
+        private void markSessionExpiredAndBroadcast(SessionToken token) {
+                if (appContext == null || token == null) return;
+                UserManager user = UserManager.getInstance();
+                if (!user.getSessionState().expire(token)) return;
+                user.setLoggedIn(false);
+                Intent intent = new Intent(ACTION_COOKIE_EXPIRED).setPackage(appContext.getPackageName());
+                intent.putExtra(EXTRA_ACCOUNT_STORAGE_KEY, token.getAccountStorageKey());
+                intent.putExtra(EXTRA_SESSION_GENERATION, token.getGeneration());
+                appContext.sendBroadcast(intent);
         }
 
         public <T> T runWithSession(SessionToken token, AccountScopedOperation<T> operation) {

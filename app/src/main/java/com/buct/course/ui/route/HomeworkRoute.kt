@@ -1,5 +1,9 @@
 package com.buct.course.ui.route
 
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,12 +33,15 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Science
+import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,19 +76,27 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.buct.course.TheolAttachmentOpener
 import com.buct.course.TheolSubmitWebViewActivity
+import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.LocalAppOverlayBottomInset
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.RefreshState
+import com.buct.one.data.model.SjcxExperimentReportItem
+import com.buct.one.data.model.TheolDownloadedFile
 import com.buct.one.data.model.TheolFilterPrefs
 import com.buct.one.data.model.TheolHomeworkAttachment
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
+import com.buct.one.data.sync.SjcxSyncService
 import com.buct.one.data.sync.TheolSyncService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -96,27 +111,79 @@ fun HomeworkRoute() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val service = remember(context) { TheolSyncService.getInstance(context) }
+    val sjcxService = remember(context) { SjcxSyncService.getInstance(context) }
 
     val theolSlice by service.theolState.collectAsState()
     val localTodos by service.todosState.collectAsState()
     val filterPrefs by service.filterPrefs.collectAsState()
-    val syncing by service.syncing.collectAsState()
+    val theolSyncing by service.syncing.collectAsState()
+    val sjcxSlice by sjcxService.sjcxState.collectAsState()
+    val sjcxSyncing by sjcxService.syncing.collectAsState()
+    val syncing = theolSyncing || sjcxSyncing
 
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) } // 0=待交 1=全部作业 2=测验 3=本地待办
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) } // 0=待交 1=全部 2=测验 3=实验 4=待办
     var showLoginDialog by rememberSaveable { mutableStateOf(false) }
     var showAddTodoDialog by rememberSaveable { mutableStateOf(false) }
     var showFilterManageDialog by rememberSaveable { mutableStateOf(false) }
     var pendingBlacklistCourse by remember { mutableStateOf<Pair<String, String>?>(null) }
     var selectedHomeworkForDetail by remember { mutableStateOf<TheolHomeworkItem?>(null) }
     var selectedTestForDetail by remember { mutableStateOf<TheolTestItem?>(null) }
+    var pendingUploadExpReport by remember { mutableStateOf<SjcxExperimentReportItem?>(null) }
     var feedbackMsg by remember { mutableStateOf<String?>(null) }
     var autoTried by rememberSaveable { mutableStateOf(false) }
 
-    // 首次进入作业页且本地已有教务统一认证凭证时，自动静默复用凭证同步北化在线
+    val pdfUploadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        val targetItem = pendingUploadExpReport
+        pendingUploadExpReport = null
+        if (uri == null || targetItem == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            feedbackMsg = null
+            GlassToaster.show("正在上传实验报告…")
+            val uploadResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    var displayName = "实验报告.pdf"
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIdx >= 0 && cursor.moveToFirst()) {
+                            displayName = cursor.getString(nameIdx)?.takeIf { it.isNotBlank() } ?: displayName
+                        }
+                    }
+                    val tempDir = File(context.cacheDir, "sjcx_upload").apply { if (!exists()) mkdirs() }
+                    val tempFile = File(tempDir, "upload_${System.currentTimeMillis()}.pdf")
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(tempFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    } ?: throw IllegalStateException("无法读取所选 PDF 文件")
+                    try {
+                        sjcxService.uploadExperimentReport(targetItem, tempFile, displayName).getOrThrow()
+                    } finally {
+                        runCatching { tempFile.delete() }
+                    }
+                }
+            }
+            if (uploadResult.isSuccess) {
+                GlassToaster.show(uploadResult.getOrNull() ?: "实验报告上传成功")
+            } else {
+                val err = uploadResult.exceptionOrNull()?.message ?: "实验报告上传失败"
+                feedbackMsg = err
+                GlassToaster.show(err)
+            }
+        }
+    }
+
+    // 首次进入作业页且本地已有教务统一认证凭证时，自动静默复用凭证同步北化在线与实践教学实验报告
     LaunchedEffect(Unit) {
-        if (!autoTried && theolSlice.provenance.refreshState == RefreshState.NEVER && service.hasSavedSsoSession()) {
+        if (!autoTried && service.hasSavedSsoSession()) {
             autoTried = true
-            service.refreshIfSessionValid()
+            if (theolSlice.provenance.refreshState == RefreshState.NEVER) {
+                launch { service.refreshIfSessionValid() }
+            }
+            if (sjcxSlice.provenance.refreshState == RefreshState.NEVER) {
+                launch { sjcxService.refresh() }
+            }
         }
     }
 
@@ -129,6 +196,7 @@ fun HomeworkRoute() {
     val tests = remember(allTests, filterPrefs) {
         allTests.filter { filterPrefs.isTestVisible(it) }
     }
+    val expReports = sjcxSlice.data?.reports.orEmpty()
     val activeTodos = remember(localTodos) { localTodos.filter { !it.deleted } }
 
     val hasActiveFilters = filterPrefs.blacklistedCourses.isNotEmpty() ||
@@ -204,11 +272,22 @@ fun HomeworkRoute() {
                         .clickable(enabled = !syncing) {
                             scope.launch {
                                 feedbackMsg = null
-                                val res = service.refreshIfSessionValid()
-                                if (res.isFailure) {
-                                    feedbackMsg = res.exceptionOrNull()?.message
-                                    if (feedbackMsg?.contains("登录") == true || feedbackMsg?.contains("过期") == true) {
-                                        showLoginDialog = true
+                                if (selectedTab == 3) {
+                                    val res = sjcxService.refresh()
+                                    if (res.isFailure) {
+                                        feedbackMsg = res.exceptionOrNull()?.message
+                                        if (feedbackMsg?.contains("登录") == true || feedbackMsg?.contains("过期") == true) {
+                                            showLoginDialog = true
+                                        }
+                                    }
+                                } else {
+                                    launch { sjcxService.refresh() }
+                                    val res = service.refreshIfSessionValid()
+                                    if (res.isFailure) {
+                                        feedbackMsg = res.exceptionOrNull()?.message
+                                        if (feedbackMsg?.contains("登录") == true || feedbackMsg?.contains("过期") == true) {
+                                            showLoginDialog = true
+                                        }
                                     }
                                 }
                             }
@@ -236,6 +315,7 @@ fun HomeworkRoute() {
             "待交(${pendingHomeworks.size})",
             "全部(${homeworks.size})",
             "测验(${tests.size})",
+            "实验(${expReports.size})",
             "待办(${activeTodos.count { !it.completed }})"
         )
         Row(
@@ -273,7 +353,7 @@ fun HomeworkRoute() {
             }
         }
 
-        val bannerError = feedbackMsg ?: theolSlice.lastError
+        val bannerError = feedbackMsg ?: if (selectedTab == 3) sjcxSlice.lastError else theolSlice.lastError
         if (!bannerError.isNullOrBlank()) {
             Spacer(Modifier.height(10.dp))
             Box(
@@ -385,6 +465,68 @@ fun HomeworkRoute() {
                     }
                 }
                 3 -> {
+                    if (expReports.isEmpty()) {
+                        item {
+                            EmptyGlassHint(
+                                text = if (sjcxSlice.provenance.refreshState == RefreshState.NEVER) {
+                                    "尚未同步实践教学平台（sjcx.buct.edu.cn）。点击右上角刷新或登录按钮，即可同步本学期实验报告与上传入口。"
+                                } else {
+                                    "本学期暂无实验报告任务。"
+                                }
+                            )
+                        }
+                    } else {
+                        items(expReports, key = { "${it.courseId}:${it.expId}:${it.stuId}" }) { exp ->
+                            ExperimentReportGlassCard(
+                                item = exp,
+                                enabled = !syncing,
+                                onDownloadTemplate = {
+                                    scope.launch {
+                                        GlassToaster.show("正在下载实验报告模板…")
+                                        val res = sjcxService.downloadReportTemplate(exp)
+                                        res.onSuccess { downloaded ->
+                                            TheolAttachmentOpener.open(
+                                                context,
+                                                TheolDownloadedFile(
+                                                    filePath = downloaded.localPath,
+                                                    fileName = downloaded.displayName,
+                                                    mimeType = downloaded.mimeType,
+                                                    sizeBytes = downloaded.sizeBytes
+                                                )
+                                            )
+                                        }.onFailure { err ->
+                                            GlassToaster.show(err.message ?: "下载模板失败")
+                                        }
+                                    }
+                                },
+                                onDownloadSubmitted = {
+                                    scope.launch {
+                                        GlassToaster.show("正在下载已提交报告…")
+                                        val res = sjcxService.downloadSubmittedReport(exp)
+                                        res.onSuccess { downloaded ->
+                                            TheolAttachmentOpener.open(
+                                                context,
+                                                TheolDownloadedFile(
+                                                    filePath = downloaded.localPath,
+                                                    fileName = downloaded.displayName,
+                                                    mimeType = downloaded.mimeType,
+                                                    sizeBytes = downloaded.sizeBytes
+                                                )
+                                            )
+                                        }.onFailure { err ->
+                                            GlassToaster.show(err.message ?: "下载已交报告失败")
+                                        }
+                                    }
+                                },
+                                onUploadPdf = {
+                                    pendingUploadExpReport = exp
+                                    pdfUploadLauncher.launch(arrayOf("application/pdf"))
+                                }
+                            )
+                        }
+                    }
+                }
+                4 -> {
                     if (activeTodos.isEmpty()) {
                         item { EmptyGlassHint("暂无本地待办。点击右上角 + 新建自定义作业或 DDL 提醒。") }
                     } else {
@@ -521,11 +663,20 @@ fun HomeworkRoute() {
             onSubmit = { username, pwdChars ->
                 scope.launch {
                     feedbackMsg = null
+                    val pwdCopyForSjcx = pwdChars.clone()
                     val res = service.loginAndSync(username, pwdChars)
                     if (res.isSuccess) {
+                        pwdCopyForSjcx.fill('\u0000')
+                        launch { sjcxService.refresh() }
                         showLoginDialog = false
                     } else {
-                        feedbackMsg = res.exceptionOrNull()?.message ?: "登录失败"
+                        val sjcxRes = sjcxService.loginAndSync(username, pwdCopyForSjcx)
+                        if (sjcxRes.isSuccess) {
+                            launch { service.refreshIfSessionValid() }
+                            showLoginDialog = false
+                        } else {
+                            feedbackMsg = res.exceptionOrNull()?.message ?: "登录失败"
+                        }
                     }
                 }
             }
@@ -538,7 +689,7 @@ fun HomeworkRoute() {
             onAdd = { title, course ->
                 service.addLocalTodo(title = title, courseName = course, deadlineMillis = null)
                 showAddTodoDialog = false
-                selectedTab = 3
+                selectedTab = 4
             }
         )
     }
@@ -1645,4 +1796,168 @@ private fun AddLocalTodoDialog(
             }
         }
     )
+}
+
+@Composable
+private fun ExperimentReportGlassCard(
+    item: SjcxExperimentReportItem,
+    enabled: Boolean,
+    onDownloadTemplate: () -> Unit,
+    onDownloadSubmitted: () -> Unit,
+    onUploadPdf: () -> Unit
+) {
+    val badgeColor = when (item.state) {
+        2 -> Color(0xFF0A84FF)
+        3 -> Color(0xFF34C759)
+        4 -> Color(0xFFFF453A)
+        else -> if (item.canUpload) Color(0xFFFF9F0A) else MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(glassSurfaceColor())
+            .border(0.5.dp, glassBorderColor(), RoundedCornerShape(22.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Science,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = item.courseName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(badgeColor.copy(alpha = 0.14f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = item.stateLabel,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = badgeColor
+                )
+            }
+        }
+
+        Text(
+            text = item.expName,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        val metaParts = buildList {
+            if (item.expCode.isNotBlank()) add("实验编号：${item.expCode}")
+            add("格式要求：PDF")
+            if (item.templateName.isNotBlank()) add("模板：${item.templateName}")
+        }
+        Text(
+            text = metaParts.joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (item.uploadedDocName.isNotBlank()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                    .clickable(enabled = enabled, onClick = onDownloadSubmitted)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.AttachFile,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "已交报告：${item.uploadedDocName}",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "查看/下载",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        if (item.opinion.isNotBlank()) {
+            Text(
+                text = "教师评语/意见：${item.opinion}",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFFF453A)
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (item.templateName.isNotBlank()) {
+                TextButton(enabled = enabled, onClick = onDownloadTemplate) {
+                    Icon(
+                        imageVector = Icons.Outlined.Download,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("下载模板")
+                }
+            }
+            if (item.state != 3) {
+                Spacer(Modifier.width(6.dp))
+                Button(
+                    enabled = enabled && item.canUpload,
+                    onClick = onUploadPdf,
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.UploadFile,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = when {
+                            !item.canUpload -> "未开放上传"
+                            item.uploadedDocName.isNotBlank() -> "重新上传 PDF"
+                            else -> "上传报告 PDF"
+                        },
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
+    }
 }

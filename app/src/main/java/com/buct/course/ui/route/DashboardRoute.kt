@@ -23,13 +23,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Assignment
-import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.CreditCard
-import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.MeetingRoom
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Science
+import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -50,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.buct.course.EcardActivity
+import com.buct.course.SjcxActivity
 import com.buct.course.manager.ScheduleSettingsManager
 import com.buct.course.manager.StartupPage
 import com.buct.course.manager.UserManager
@@ -63,6 +63,7 @@ import com.buct.course.widget.parseClockMinutes
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.formatFenToYuan
 import com.buct.one.data.sync.CardSyncService
+import com.buct.one.data.sync.SjcxSyncService
 import com.buct.one.data.sync.TheolSyncService
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -95,6 +96,9 @@ fun DashboardRoute(
     val cardSlice by cardService.cardState.collectAsState()
     val cardHasSession by cardService.hasSession.collectAsState()
     val cardSyncing by cardService.syncing.collectAsState()
+    val sjcxService = remember(context) { SjcxSyncService.getInstance(context) }
+    val sjcxSlice by sjcxService.sjcxState.collectAsState()
+    val sjcxSyncing by sjcxService.syncing.collectAsState()
     var showEmptyClassroomDialog by remember { mutableStateOf(false) }
     val classroomSlot = remember(showEmptyClassroomDialog) { resolveCurrentClassroomSlot(context) }
     val classroomDayLabel = listOf("一", "二", "三", "四", "五", "六", "日")
@@ -171,8 +175,9 @@ fun DashboardRoute(
                         .clip(CircleShape)
                         .background(glassSurfaceColor())
                         .border(0.5.dp, glassBorderColor(), CircleShape)
-                        .clickable(enabled = !syncing && !cardSyncing) {
+                        .clickable(enabled = !syncing && !cardSyncing && !sjcxSyncing) {
                             scope.launch { theolService.refreshIfSessionValid() }
+                            scope.launch { sjcxService.refresh() }
                             if (cardHasSession) {
                                 scope.launch { cardService.refresh() }
                             }
@@ -402,10 +407,82 @@ fun DashboardRoute(
             }
         }
 
-        // 卡片 3：快捷入口网格与查空闲教室
+        // 卡片 3：实践教学平台（实验课表 / 抢讲座 / 创新学分）
+        item {
+            val sjcxData = sjcxSlice.data
+            val sjcxState = sjcxSlice.provenance.refreshState
+            val sjcxBadge = when (sjcxState) {
+                RefreshState.NEVER -> "点击进入"
+                RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED -> {
+                    val openCount = sjcxData?.openLectures?.size ?: 0
+                    if (openCount > 0) "${openCount}场讲座可报" else "已同步"
+                }
+                RefreshState.STALE -> "历史快照"
+                RefreshState.FAILED_FALLBACK -> "离线快照"
+            }
+            val sjcxBadgeColor = when (sjcxState) {
+                RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED -> Color(0xFF34C759)
+                RefreshState.FAILED_FALLBACK -> Color(0xFFFF453A)
+                else -> MaterialTheme.colorScheme.primary
+            }
+
+            DashboardGlassCard(
+                title = "实践教学 · 实验课表与抢讲座",
+                badge = sjcxBadge,
+                badgeColor = sjcxBadgeColor,
+                onClick = { SjcxActivity.launch(context, initialTab = 0) }
+            ) {
+                if (sjcxData != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "实验排课 ${sjcxData.schedules.size} 节 · 实验报告 ${sjcxData.reports.size} 项",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "开放报名讲座 ${sjcxData.openLectures.size} 场 · 已获创新学分 ${String.format(Locale.ROOT, "%.1f", sjcxData.totalCredit)} 分",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "统一身份认证免密直连 sjcx.buct.edu.cn，一键查实验课表、抢讲座、写讲座心得与查创新学分",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickActionTile("实验课表", Icons.Outlined.Science, Modifier.weight(1f)) {
+                        SjcxActivity.launch(context, initialTab = 0)
+                    }
+                    QuickActionTile("抢讲座", Icons.Outlined.Campaign, Modifier.weight(1f)) {
+                        SjcxActivity.launch(context, initialTab = 1)
+                    }
+                    QuickActionTile("我的讲座", Icons.Outlined.Campaign, Modifier.weight(1f)) {
+                        SjcxActivity.launch(context, initialTab = 2)
+                    }
+                    QuickActionTile("创新学分", Icons.Outlined.WorkspacePremium, Modifier.weight(1f)) {
+                        SjcxActivity.launch(context, initialTab = 3)
+                    }
+                }
+            }
+        }
+
+        // 卡片 4：企微风格工作台应用卡片（已移除与底部 TabBar 重复的课表/成绩/北化在线/设置按钮）
         item {
             DashboardGlassCard(
-                title = "校园入口",
+                title = "工作台服务",
                 badge = "快捷直达",
                 badgeColor = MaterialTheme.colorScheme.primary
             ) {
@@ -413,17 +490,17 @@ fun DashboardRoute(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    QuickActionTile("课表", Icons.Outlined.DateRange, Modifier.weight(1f)) {
-                        onSwitchPage(StartupPage.Schedule)
+                    QuickActionTile("校园卡", Icons.Outlined.CreditCard, Modifier.weight(1f)) {
+                        context.startActivity(Intent(context, EcardActivity::class.java))
                     }
-                    QuickActionTile("成绩考试", Icons.Outlined.BarChart, Modifier.weight(1f)) {
-                        onSwitchPage(StartupPage.Grades)
+                    QuickActionTile("实验课表", Icons.Outlined.Science, Modifier.weight(1f)) {
+                        SjcxActivity.launch(context, initialTab = 0)
                     }
-                    QuickActionTile("北化在线", Icons.Outlined.Assignment, Modifier.weight(1f)) {
-                        onSwitchPage(StartupPage.Homework)
+                    QuickActionTile("抢讲座", Icons.Outlined.Campaign, Modifier.weight(1f)) {
+                        SjcxActivity.launch(context, initialTab = 1)
                     }
-                    QuickActionTile("我的设置", Icons.Outlined.Settings, Modifier.weight(1f)) {
-                        onSwitchPage(StartupPage.Settings)
+                    QuickActionTile("空闲教室", Icons.Outlined.MeetingRoom, Modifier.weight(1f)) {
+                        showEmptyClassroomDialog = true
                     }
                 }
                 Row(

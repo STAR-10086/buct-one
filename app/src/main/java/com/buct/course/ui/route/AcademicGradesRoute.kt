@@ -68,7 +68,7 @@ fun AcademicGradesRoute(school: SchoolConfig) {
     }
     LaunchedEffect(account, tab, examRevision, session.token) {
         val expected = expectedSession
-        if (tab != 2 || examsLoaded) return@LaunchedEffect
+        if (tab != 3 || examsLoaded) return@LaunchedEffect
         examLoading = true; examError = ""
         try {
             val loaded = withContext(Dispatchers.IO) {
@@ -97,7 +97,7 @@ fun AcademicGradesRoute(school: SchoolConfig) {
         currentExamSemester = "",
         onExamSemesterChange = {},
         examIsLoading = examLoading,
-        onRefresh = { if (tab == 2) { examsLoaded = false; examRevision++ } else revision++ },
+        onRefresh = { if (tab == 3) { examsLoaded = false; examRevision++ } else revision++ },
         semesterError = error, overallError = error, examError = examError,
         onExportGrades = { exportAcademicGrades(context, it) })
 }

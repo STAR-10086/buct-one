@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -237,8 +238,89 @@ data class OverallStatsUi(
     val good: Int,
     val medium: Int,
     val pass: Int,
-    val notGraded: Int = 0
+    val notGraded: Int = 0,
+    val fail: Int = 0
 )
+
+/**
+ * 成绩分布档位：0=优, 1=良, 2=中, 3=及格, 4=不及格, 5=未出分
+ */
+enum class GradeBucket(val label: String, val shortLabel: String, val tone: SystemTone) {
+    Excellent("优秀 (≥90 / A)", "优", SystemTone.Success),
+    Good("良好 (80-89 / B)", "良", SystemTone.Info),
+    Medium("中等 (70-79 / C)", "中", SystemTone.Warning),
+    Pass("及格 (60-69 / D / 合格)", "及格", SystemTone.Warning),
+    Fail("不及格 (<60 / F / 不合格)", "不及格", SystemTone.Danger),
+    NotGraded("未出分 / 在修", "未出分", SystemTone.Neutral)
+}
+
+fun classifyGradeBucket(gradeRaw: String): GradeBucket {
+    val gradeText = gradeRaw.trim()
+    if (gradeText.isEmpty() || gradeText == "--" || gradeText.equals("null", ignoreCase = true)) {
+        return GradeBucket.NotGraded
+    }
+    val numeric = gradeText.toDoubleOrNull()
+        ?: gradeText.replace("[^0-9.]".toRegex(), "").toDoubleOrNull()?.takeIf {
+            gradeText.any { ch -> ch.isDigit() }
+        }
+    if (numeric != null) {
+        return when {
+            numeric >= 90.0 -> GradeBucket.Excellent
+            numeric >= 80.0 -> GradeBucket.Good
+            numeric >= 70.0 -> GradeBucket.Medium
+            numeric >= 60.0 -> GradeBucket.Pass
+            else -> GradeBucket.Fail
+        }
+    }
+    return when {
+        gradeText.contains("优秀") || gradeText == "优" || gradeText.startsWith("A", ignoreCase = true) ->
+            GradeBucket.Excellent
+        gradeText.contains("良好") || gradeText == "良" || gradeText.startsWith("B", ignoreCase = true) ->
+            GradeBucket.Good
+        gradeText.contains("中等") || gradeText == "中" || gradeText.startsWith("C", ignoreCase = true) ->
+            GradeBucket.Medium
+        gradeText.contains("不及格") || gradeText.contains("不合格") || gradeText.contains("未通过") ||
+            gradeText.contains("不通过") || gradeText.equals("F", ignoreCase = true) ||
+            gradeText.equals("U", ignoreCase = true) || gradeText.equals("Unpass", ignoreCase = true) ->
+            GradeBucket.Fail
+        gradeText.contains("合格") || gradeText.contains("及格") || gradeText.contains("通过") ||
+            gradeText.startsWith("D", ignoreCase = true) ||
+            gradeText.equals("P", ignoreCase = true) || gradeText.equals("Pass", ignoreCase = true) ->
+            GradeBucket.Pass
+        else -> GradeBucket.NotGraded
+    }
+}
+
+data class CurriculumCourseUi(
+    val courseCode: String,
+    val courseName: String,
+    val credits: String,
+    val studyStatus: String, // "4"=已修通过, "1"=在修, "2"=未通过, "3"=未修
+    val grade: String = "",
+    val maxGrade: String = "",
+    val suggestedYear: String = "",
+    val suggestedTerm: String = "",
+    val courseCategory: String = ""
+) {
+    val isPassed: Boolean get() = studyStatus == "4"
+    val isStudying: Boolean get() = studyStatus == "1"
+    val isFailed: Boolean get() = studyStatus == "2"
+    val isUnstudied: Boolean get() = studyStatus != "4"
+}
+
+data class CurriculumNodeUi(
+    val id: String,
+    val parentId: String,
+    val name: String,
+    val earnedCredits: Double,
+    val requiredCredits: Double,
+    val passed: Boolean,
+    val isLeaf: Boolean,
+    val courses: List<CurriculumCourseUi> = emptyList()
+) {
+    val remainingCredits: Double
+        get() = (requiredCredits - earnedCredits).coerceAtLeast(0.0)
+}
 
 // ── 顶栏折叠几何 ────────────────────────────────────────────────
 // 与课表页同一条铁律：展开态与折叠态的高度【差】必须等于折叠行程，
@@ -280,13 +362,17 @@ fun GradesScreen(
     onExportGrades: (List<GradeItemUi>) -> Unit = {},
     semesterError: String = "",
     overallError: String = "",
-    examError: String = ""
+    examError: String = "",
+    curriculumNodes: List<CurriculumNodeUi> = emptyList(),
+    curriculumIsLoading: Boolean = false,
+    curriculumError: String = ""
 ) {
-    val tabTitles = listOf("学期", "总体", "考试")
-    val isRefreshing = semesterIsLoading || overallIsLoading || examIsLoading
+    val tabTitles = listOf("学期", "总体", "培养", "考试")
+    val isRefreshing = semesterIsLoading || overallIsLoading || curriculumIsLoading || examIsLoading
     val subtitle = when (currentTab) {
         0 -> "${semesterGrades.size} 门课程"
         1 -> "累计成绩与分布概览"
+        2 -> "培养方案与学分修读进度"
         else -> "近期考试安排"
     }
 
@@ -294,10 +380,12 @@ fun GradesScreen(
     // 折叠进度也跟着跳。顶栏读当前 tab 那一份。
     val semesterListState = rememberLazyListState()
     val overallListState = rememberLazyListState()
+    val curriculumListState = rememberLazyListState()
     val examListState = rememberLazyListState()
     val activeListState = when (currentTab) {
         0 -> semesterListState
         1 -> overallListState
+        2 -> curriculumListState
         else -> examListState
     }
     val metrics = rememberGradesHeaderMetrics()
@@ -352,7 +440,7 @@ fun GradesScreen(
                         1 -> overallGrades.isNotEmpty()
                         else -> false
                     },
-                    showShare = currentTab != 2,
+                    showShare = currentTab == 0 || currentTab == 1,
                     isRefreshing = isRefreshing,
                     onShare = {
                         val grades = if (currentTab == 0) semesterGrades else overallGrades
@@ -403,6 +491,15 @@ fun GradesScreen(
                         error = overallError,
                         listState = overallListState,
                         exams = examList,
+                        topInset = contentTopInset,
+                        bottomInset = contentBottomInset
+                    )
+
+                    2 -> CurriculumPlanContent(
+                        nodes = curriculumNodes,
+                        isLoading = curriculumIsLoading,
+                        error = curriculumError,
+                        listState = curriculumListState,
                         topInset = contentTopInset,
                         bottomInset = contentBottomInset
                     )
@@ -461,7 +558,15 @@ private fun OverallGradesContent(
     topInset: Dp,
     bottomInset: Dp
 ) {
-    val rowKeys = remember(grades) { gradeRowKeys(grades) }
+    var selectedBucketName by rememberSaveable { mutableStateOf("") }
+    val selectedBucket = remember(selectedBucketName) {
+        GradeBucket.entries.firstOrNull { it.name == selectedBucketName }
+    }
+    val visibleGrades = remember(grades, selectedBucket) {
+        if (selectedBucket == null) grades
+        else grades.filter { classifyGradeBucket(it.grade) == selectedBucket }
+    }
+    val rowKeys = remember(visibleGrades) { gradeRowKeys(visibleGrades) }
     when {
         isLoading && grades.isEmpty() -> {
             Box(
@@ -506,16 +611,50 @@ private fun OverallGradesContent(
                                 "总课程" to stats.courseCount.toString()
                             )
                         )
-                        GradeDistributionCard(stats = stats)
-                        SystemSectionHeader(
-                            title = "课程明细",
-                            subtitle = "共 ${grades.size} 门课程"
+                        GradeDistributionCard(
+                            stats = stats,
+                            selectedBucket = selectedBucket,
+                            onBucketClick = { bucket ->
+                                selectedBucketName = if (selectedBucket == bucket) "" else bucket.name
+                            }
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SystemSectionHeader(
+                                title = if (selectedBucket == null) "课程明细" else "筛选：${selectedBucket.label}",
+                                subtitle = if (selectedBucket == null) {
+                                    "共 ${grades.size} 门课程 · 点击上方分布可按档位筛选"
+                                } else {
+                                    "共 ${visibleGrades.size} 门（总 ${grades.size} 门）"
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (selectedBucket != null) {
+                                GlassFilterChip(
+                                    label = "全部 (${grades.size})",
+                                    selected = false,
+                                    onClick = { selectedBucketName = "" },
+                                    compact = true
+                                )
+                            }
+                        }
                     }
                 }
 
-                items(grades.size, key = { rowKeys[it] }, contentType = { "grade" }) { index ->
-                    GradeItemRow(item = grades[index], exams = exams)
+                if (visibleGrades.isEmpty()) {
+                    item {
+                        SystemEmptyState(
+                            title = "该档位下暂无课程",
+                            message = "点击上方分布标签可切换或恢复查看全部课程"
+                        )
+                    }
+                } else {
+                    items(visibleGrades.size, key = { rowKeys[it] }, contentType = { "grade" }) { index ->
+                        GradeItemRow(item = visibleGrades[index], exams = exams)
+                    }
                 }
             }
         }
@@ -637,7 +776,9 @@ private fun SemesterSelector(
 
 @Composable
 private fun GradeDistributionCard(
-    stats: OverallStatsUi
+    stats: OverallStatsUi,
+    selectedBucket: GradeBucket? = null,
+    onBucketClick: ((GradeBucket) -> Unit)? = null
 ) {
     SystemCard(
         modifier = Modifier.fillMaxWidth(),
@@ -646,7 +787,7 @@ private fun GradeDistributionCard(
     ) {
         SystemSectionHeader(
             title = "成绩分布",
-            subtitle = "按已统计课程划分"
+            subtitle = if (selectedBucket != null) "已筛选：${selectedBucket.shortLabel}（再次点击取消）" else "点击任一档位可筛选对应课程"
         )
 
         GlassSegmentedBar(
@@ -654,19 +795,63 @@ private fun GradeDistributionCard(
                 stats.excellent.toFloat() to SemanticSuccess,
                 stats.good.toFloat() to SemanticInfo,
                 stats.medium.toFloat() to SemanticWarning,
-                stats.pass.toFloat() to SemanticDanger
+                stats.pass.toFloat() to Color(0xFFB26A00),
+                stats.fail.toFloat() to SemanticDanger
             )
         )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            DistributionItem("优", stats.excellent, SystemTone.Success, Modifier.weight(1f))
-            DistributionItem("良", stats.good, SystemTone.Info, Modifier.weight(1f))
-            DistributionItem("中", stats.medium, SystemTone.Warning, Modifier.weight(1f))
-            DistributionItem("及", stats.pass, SystemTone.Danger, Modifier.weight(1f))
-            if (stats.notGraded > 0) DistributionItem("未出分", stats.notGraded, SystemTone.Neutral, Modifier.weight(1f))
+            DistributionItem(
+                label = "优",
+                count = stats.excellent,
+                tone = SystemTone.Success,
+                selected = selectedBucket == GradeBucket.Excellent,
+                onClick = { onBucketClick?.invoke(GradeBucket.Excellent) },
+                modifier = Modifier.weight(1f)
+            )
+            DistributionItem(
+                label = "良",
+                count = stats.good,
+                tone = SystemTone.Info,
+                selected = selectedBucket == GradeBucket.Good,
+                onClick = { onBucketClick?.invoke(GradeBucket.Good) },
+                modifier = Modifier.weight(1f)
+            )
+            DistributionItem(
+                label = "中",
+                count = stats.medium,
+                tone = SystemTone.Warning,
+                selected = selectedBucket == GradeBucket.Medium,
+                onClick = { onBucketClick?.invoke(GradeBucket.Medium) },
+                modifier = Modifier.weight(1f)
+            )
+            DistributionItem(
+                label = "及格",
+                count = stats.pass,
+                tone = SystemTone.Warning,
+                selected = selectedBucket == GradeBucket.Pass,
+                onClick = { onBucketClick?.invoke(GradeBucket.Pass) },
+                modifier = Modifier.weight(1f)
+            )
+            DistributionItem(
+                label = "不及格",
+                count = stats.fail,
+                tone = SystemTone.Danger,
+                selected = selectedBucket == GradeBucket.Fail,
+                onClick = { onBucketClick?.invoke(GradeBucket.Fail) },
+                modifier = Modifier.weight(1f)
+            )
+            DistributionItem(
+                label = "未出分",
+                count = stats.notGraded,
+                tone = SystemTone.Neutral,
+                selected = selectedBucket == GradeBucket.NotGraded,
+                onClick = { onBucketClick?.invoke(GradeBucket.NotGraded) },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -676,10 +861,34 @@ private fun DistributionItem(
     label: String,
     count: Int,
     tone: SystemTone,
+    selected: Boolean = false,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val accentColor = when (tone) {
+        SystemTone.Success -> SemanticSuccess
+        SystemTone.Info -> SemanticInfo
+        SystemTone.Warning -> SemanticWarning
+        SystemTone.Danger -> SemanticDanger
+        else -> MaterialTheme.colorScheme.primary
+    }
     Column(
-        modifier = modifier,
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (selected) accentColor.copy(alpha = 0.16f)
+                else Color.Transparent
+            )
+            .then(
+                if (selected) {
+                    Modifier.border(1.dp, accentColor.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                } else {
+                    Modifier
+                }
+            )
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         SystemStatusBadge(
@@ -688,8 +897,11 @@ private fun DistributionItem(
         )
         Text(
             text = "$count 门",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+            ),
+            color = if (selected) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
     }
 }
@@ -1044,16 +1256,36 @@ private fun ExamScheduleContent(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FilterChip(
-                        selected = hidePast,
-                        onClick = { hidePast = !hidePast },
-                        label = {
-                            Text(
-                                text = "隐藏已结束",
-                                style = MaterialTheme.typography.labelMedium
+                    val pastCount = remember(exams) { exams.count { it.isPastExam() } }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                if (hidePast) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                             )
-                        }
-                    )
+                            .border(
+                                width = if (hidePast) 1.2.dp else 0.6.dp,
+                                color = if (hidePast) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant,
+                                shape = RoundedCornerShape(18.dp)
+                            )
+                            .clickable { hidePast = !hidePast }
+                            .padding(horizontal = 13.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            text = if (hidePast) {
+                                if (pastCount > 0) "✓ 已隐藏已结束 ($pastCount)" else "✓ 已隐藏已结束"
+                            } else {
+                                "隐藏已结束"
+                            },
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (hidePast) FontWeight.SemiBold else FontWeight.Normal
+                            ),
+                            color = if (hidePast) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Spacer(Modifier.weight(1f))
                     if (onAddExam != null) {
                         TextButton(onClick = onAddExam) {
@@ -1244,23 +1476,349 @@ private fun ExamDetailRow(
 }
 
 fun getGradeColor(grade: String): Color {
-    val score = grade.replace("[^0-9]".toRegex(), "").toIntOrNull()
+    return when (classifyGradeBucket(grade)) {
+        GradeBucket.Excellent -> SemanticSuccess
+        GradeBucket.Good -> SemanticInfo
+        GradeBucket.Medium -> SemanticWarning
+        GradeBucket.Pass -> Color(0xFFB26A00)
+        GradeBucket.Fail -> SemanticDanger
+        GradeBucket.NotGraded -> SemanticInfo
+    }
+}
 
-    if (score != null) {
-        return when {
-            score >= 90 -> SemanticSuccess
-            score >= 80 -> SemanticInfo
-            score >= 70 -> SemanticWarning
-            score >= 60 -> Color(0xFFB26A00)
-            else -> SemanticDanger
+@Composable
+private fun CurriculumPlanContent(
+    nodes: List<CurriculumNodeUi>,
+    isLoading: Boolean,
+    error: String,
+    listState: LazyListState,
+    topInset: Dp,
+    bottomInset: Dp
+) {
+    // 0 = 未修/未通过/在修, 1 = 已修通过, 2 = 全部课程
+    var courseFilterMode by rememberSaveable { mutableStateOf(0) }
+    val rootNode = remember(nodes) { nodes.firstOrNull { it.parentId.isBlank() } }
+    val childNodes = remember(nodes) {
+        nodes.filter { it.parentId.isNotBlank() && (it.isLeaf || it.courses.isNotEmpty() || it.requiredCredits > 0.0) }
+    }
+    val parentNameMap = remember(nodes) { nodes.associate { it.id to it.name } }
+
+    when {
+        isLoading && nodes.isEmpty() -> {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(top = topInset),
+                contentAlignment = Alignment.Center
+            ) {
+                SystemLoadingState(text = "正在加载培养方案与学分修读情况…")
+            }
+        }
+
+        nodes.isEmpty() -> {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(top = topInset),
+                contentAlignment = Alignment.Center
+            ) {
+                SystemEmptyState(
+                    title = if (error.isNotBlank()) "培养方案加载失败" else "暂无培养方案数据",
+                    message = error.ifBlank { "点击右上角刷新获取学生学业情况（N105515）" }
+                )
+            }
+        }
+
+        else -> {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState,
+                contentPadding = PaddingValues(
+                    start = PagePadding,
+                    end = PagePadding,
+                    top = topInset,
+                    bottom = bottomInset
+                ),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    Column(Modifier.moduleEntrance(1), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        GradeRefreshStatus(isLoading, error)
+
+                        val totalEarned = rootNode?.earnedCredits
+                            ?: childNodes.filter { it.isLeaf }.sumOf { it.earnedCredits }
+                        val totalRequired = rootNode?.requiredCredits
+                            ?: childNodes.filter { it.isLeaf }.sumOf { it.requiredCredits }
+                        val totalRemaining = (totalRequired - totalEarned).coerceAtLeast(0.0)
+                        val unmetModuleCount = childNodes.count { !it.passed && it.remainingCredits > 0.0 }
+
+                        SystemStatStrip(
+                            items = listOf(
+                                "已获学分" to String.format(java.util.Locale.ROOT, "%.1f", totalEarned),
+                                "要求总学分" to String.format(java.util.Locale.ROOT, "%.1f", totalRequired),
+                                "未满学分" to String.format(java.util.Locale.ROOT, "%.1f", totalRemaining)
+                            )
+                        )
+
+                        SystemCard(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = rootNode?.name?.ifBlank { "专业培养方案" } ?: "专业培养方案",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = if (unmetModuleCount == 0 && totalRemaining <= 0.0) {
+                                            "所有模块学分已修满"
+                                        } else {
+                                            "还有 $unmetModuleCount 个模块未修满，共差 ${String.format(java.util.Locale.ROOT, "%.1f", totalRemaining)} 学分"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                SystemStatusBadge(
+                                    text = if (totalRemaining <= 0.0 && totalRequired > 0.0) "已达标" else "修读中",
+                                    tone = if (totalRemaining <= 0.0 && totalRequired > 0.0) SystemTone.Success else SystemTone.Info
+                                )
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            val overallProgress = if (totalRequired > 0.0) {
+                                (totalEarned / totalRequired).toFloat().coerceIn(0f, 1f)
+                            } else 1f
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(10.dp)
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(overallProgress)
+                                        .clip(RoundedCornerShape(5.dp))
+                                        .background(if (overallProgress >= 1f) SemanticSuccess else NeuPrimary)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf(
+                                0 to "未修 / 在修 / 未过",
+                                1 to "已修通过",
+                                2 to "全部课程"
+                            ).forEach { (mode, label) ->
+                                val selected = courseFilterMode == mode
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                        )
+                                        .border(
+                                            width = if (selected) 1.2.dp else 0.5.dp,
+                                            color = if (selected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.outlineVariant,
+                                            shape = RoundedCornerShape(16.dp)
+                                        )
+                                        .clickable { courseFilterMode = mode }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                        ),
+                                        color = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                items(childNodes, key = { it.id }) { node ->
+                    val parentName = parentNameMap[node.parentId].orEmpty()
+                    val displayTitle = if (parentName.isNotBlank() && parentName != rootNode?.name) {
+                        "$parentName · ${node.name}"
+                    } else {
+                        node.name
+                    }
+                    CurriculumNodeCard(
+                        node = node,
+                        displayTitle = displayTitle,
+                        courseFilterMode = courseFilterMode
+                    )
+                }
+            }
         }
     }
+}
 
-    return when (grade) {
-        "优秀" -> SemanticSuccess
-        "良好" -> SemanticInfo
-        "中等" -> SemanticWarning
-        "及格" -> Color(0xFFB26A00)
-        else -> SemanticDanger
+@Composable
+private fun CurriculumNodeCard(
+    node: CurriculumNodeUi,
+    displayTitle: String,
+    courseFilterMode: Int
+) {
+    val isMet = node.passed || (node.requiredCredits > 0.0 && node.earnedCredits >= node.requiredCredits)
+    var expanded by rememberSaveable(node.id) { mutableStateOf(!isMet) }
+    val filteredCourses = remember(node.courses, courseFilterMode) {
+        when (courseFilterMode) {
+            0 -> node.courses.filter { !it.isPassed }
+            1 -> node.courses.filter { it.isPassed }
+            else -> node.courses
+        }
+    }
+    val studyingCount = remember(node.courses) { node.courses.count { it.isStudying } }
+    val unstudiedCount = remember(node.courses) { node.courses.count { it.studyStatus == "3" } }
+    val failedCount = remember(node.courses) { node.courses.count { it.isFailed } }
+
+    SystemCard(
+        modifier = Modifier.fillMaxWidth().moduleEntrance(2),
+        onClick = if (node.courses.isNotEmpty()) ({ expanded = !expanded }) else null
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = displayTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                val subText = buildString {
+                    append("已修 ${String.format(java.util.Locale.ROOT, "%.1f", node.earnedCredits)} / 要求 ${String.format(java.util.Locale.ROOT, "%.1f", node.requiredCredits)} 学分")
+                    if (node.remainingCredits > 0.0 && !isMet) {
+                        append(" · 还差 ${String.format(java.util.Locale.ROOT, "%.1f", node.remainingCredits)} 学分")
+                    }
+                }
+                Text(
+                    text = subText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (!isMet && node.remainingCredits > 0.0) SemanticWarning else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (node.courses.isNotEmpty()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = buildString {
+                            append("共 ${node.courses.size} 门")
+                            if (studyingCount > 0) append(" · 在修 $studyingCount 门")
+                            if (unstudiedCount > 0) append(" · 未修 $unstudiedCount 门")
+                            if (failedCount > 0) append(" · 未过 $failedCount 门")
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            SystemStatusBadge(
+                text = if (isMet) "已修满" else "差 ${String.format(java.util.Locale.ROOT, "%.1f", node.remainingCredits)}分",
+                tone = if (isMet) SystemTone.Success else SystemTone.Warning
+            )
+        }
+
+        if (node.requiredCredits > 0.0) {
+            Spacer(Modifier.height(8.dp))
+            val ratio = (node.earnedCredits / node.requiredCredits).toFloat().coerceIn(0f, 1f)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(7.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(ratio)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isMet) SemanticSuccess else SemanticWarning)
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = expanded && node.courses.isNotEmpty()) {
+            Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SystemDivider(alpha = 0.5f)
+                if (filteredCourses.isEmpty()) {
+                    Text(
+                        text = when (courseFilterMode) {
+                            0 -> "该模块下没有未修或未通过的计划课程"
+                            1 -> "该模块下暂无已修通过的课程"
+                            else -> "暂无课程明细"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                } else {
+                    filteredCourses.forEach { course ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = course.courseName,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                val meta = buildString {
+                                    if (course.courseCode.isNotBlank()) append(course.courseCode)
+                                    if (course.credits.isNotBlank()) {
+                                        if (isNotEmpty()) append(" · ")
+                                        append("${course.credits}学分")
+                                    }
+                                    if (course.suggestedYear.isNotBlank()) {
+                                        if (isNotEmpty()) append(" · ")
+                                        append("建议 ${course.suggestedYear}")
+                                        if (course.suggestedTerm.isNotBlank()) append("-${course.suggestedTerm}")
+                                    }
+                                }
+                                if (meta.isNotBlank()) {
+                                    Text(
+                                        text = meta,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            val (badgeLabel, badgeTone) = when (course.studyStatus) {
+                                "4" -> (course.grade.ifBlank { "已通过" }) to SystemTone.Success
+                                "1" -> "在修" to SystemTone.Info
+                                "2" -> (if (course.grade.isNotBlank()) "未过(${course.grade})" else "未通过") to SystemTone.Danger
+                                else -> "未修" to SystemTone.Neutral
+                            }
+                            SystemStatusBadge(text = badgeLabel, tone = badgeTone)
+                        }
+                    }
+                }
+            }
+        }
     }
 }

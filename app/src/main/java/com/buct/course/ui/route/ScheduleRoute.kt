@@ -385,10 +385,10 @@ fun ScheduleRoute() {
                         if (requests.isCurrent(ticket) && studyGeneration == generation) {
                             val sessionExpired = (e as? com.buct.course.academic.AcademicException)?.status ==
                                 com.buct.course.academic.AcademicStatus.SESSION_EXPIRED
-                            if (forceRefresh && sessionExpired && UserManager.getInstance().canAutoRelogin()) {
-                                // 手动刷新时 Cookie 失效：用已保存密码静默续期，token 更新后自动重试刷新
+                            if (sessionExpired && UserManager.getInstance().canAutoRelogin()) {
+                                // Cookie 失效：用已保存密码静默续期，token 更新后自动重试刷新
                                 pendingForceRefreshAfterRenew = true
-                                com.buct.course.utils.SessionRenewer.request(ticket.session, manual = true) { result ->
+                                com.buct.course.utils.SessionRenewer.request(ticket.session, manual = forceRefresh) { result ->
                                     if (result !is com.buct.course.utils.SessionRecoveryResult.Recovered) {
                                         pendingForceRefreshAfterRenew = false
                                         if (requests.isCurrent(ticket) && studyGeneration == generation) {
@@ -435,9 +435,9 @@ fun ScheduleRoute() {
                 override fun onResponse(call: Call, response: Response) {
                     val json = response.body?.string() ?: ""
                     if (json.contains("用户登录") || response.code == 401 || response.code == 403) {
-                        if (forceRefresh && UserManager.getInstance().canAutoRelogin()) {
+                        if (UserManager.getInstance().canAutoRelogin()) {
                             pendingForceRefreshAfterRenew = true
-                            com.buct.course.utils.SessionRenewer.request(ticket.session, manual = true) { result ->
+                            com.buct.course.utils.SessionRenewer.request(ticket.session, manual = forceRefresh) { result ->
                                 if (result !is com.buct.course.utils.SessionRecoveryResult.Recovered) {
                                     pendingForceRefreshAfterRenew = false
                                     scope.launch(Dispatchers.Main) {
