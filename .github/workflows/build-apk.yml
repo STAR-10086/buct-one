@@ -134,38 +134,50 @@ jobs:
           check source "import com.buct.one.data.store"
           if [ "$v" = 0 ]; then echo "包依赖检查通过"; else exit 1; fi
 
-      - name: assembleRelease
+      - name: assembleRelease & assembleDebug
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace
 
-      - name: Verify APK signature
+      - name: Verify APK signatures
         run: |
           set -euo pipefail
-          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs "$APK"
+          for APK in \
+            app/build/outputs/apk/release/app-armeabi-v7a-release.apk \
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+            app/build/outputs/apk/release/app-universal-release.apk \
+            app/build/outputs/apk/debug/app-universal-debug.apk; do
+            echo "=== Verifying $APK ==="
+            "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs "$APK"
+          done
 
       - name: APK size gate (100MB)
         run: |
           set -euo pipefail
-          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-          BYTES=$(stat -c%s "$APK")
-          MB=$(awk "BEGIN{printf \"%.2f\", $BYTES/1048576}")
-          echo "APK: $APK  size: ${BYTES} bytes (${MB} MB)"
-          if [ "$BYTES" -gt $((100*1024*1024)) ]; then
-            echo "::error::APK ${MB}MB 超过 100MB 门禁"
-            unzip -l -v "$APK" | sort -k1 -n -r | head -30
-            exit 1
-          fi
-          if [ "$BYTES" -gt $((80*1024*1024)) ]; then
-            echo "::warning::APK ${MB}MB 已超 80MB 预警线，检查新增依赖与资源"
-          fi
-          echo "体积门禁通过 (${MB}MB <= 100MB)"
+          for APK in \
+            app/build/outputs/apk/release/app-armeabi-v7a-release.apk \
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+            app/build/outputs/apk/release/app-universal-release.apk \
+            app/build/outputs/apk/debug/app-universal-debug.apk; do
+            BYTES=$(stat -c%s "$APK")
+            MB=$(awk "BEGIN{printf \"%.2f\", $BYTES/1048576}")
+            echo "APK: $APK  size: ${BYTES} bytes (${MB} MB)"
+            if [ "$BYTES" -gt $((100*1024*1024)) ]; then
+              echo "::error::APK $APK (${MB}MB) 超过 100MB 门禁"
+              unzip -l -v "$APK" | sort -k1 -n -r | head -30
+              exit 1
+            fi
+            if [ "$BYTES" -gt $((80*1024*1024)) ]; then
+              echo "::warning::APK $APK (${MB}MB) 已超 80MB 预警线，检查新增依赖与资源"
+            fi
+            echo "体积门禁通过: $(basename "$APK") (${MB}MB <= 100MB)"
+          done
 
       - name: Per-entry size report
         if: always()
         run: |
-          APK=$(find app/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -1)
+          APK="app/build/outputs/apk/release/app-universal-release.apk"
+          [ -f "$APK" ] || APK=$(find app/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -1)
           if [ -z "$APK" ]; then exit 0; fi
           {
             echo "### APK 体积报告"
@@ -182,8 +194,10 @@ jobs:
           set -uo pipefail
           gh run download --repo "$GITHUB_REPOSITORY" --branch main --name apks --dir /tmp/baseline \
             || { echo "无基准产物，跳过 delta"; exit 0; }
-          BASE=$(find /tmp/baseline -name "*.apk" | head -1)
-          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          BASE=$(find /tmp/baseline -name "*universal*release*.apk" | head -1)
+          [ -n "$BASE" ] || BASE=$(find /tmp/baseline -name "*.apk" | head -1)
+          APK="app/build/outputs/apk/release/app-universal-release.apk"
+          [ -f "$APK" ] || APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           B=$(stat -c%s "$BASE"); N=$(stat -c%s "$APK")
           {
             echo "### 体积 delta"
@@ -197,16 +211,25 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: apks
-          path: app/build/outputs/apk/release/*.apk
+          path: |
+            app/build/outputs/apk/release/app-armeabi-v7a-release.apk
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk
+            app/build/outputs/apk/release/app-universal-release.apk
+            app/build/outputs/apk/debug/app-universal-debug.apk
           if-no-files-found: error
 
-      - name: Prepare release APK filename
+      - name: Prepare release APK files
         if: inputs.publish_release == true && inputs.release_tag != ''
         run: |
           set -euo pipefail
+          rm -rf release-dist
           mkdir -p release-dist
-          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-          cp "$APK" "release-dist/buct-one-${{ inputs.release_tag }}.apk"
+          TAG="${{ inputs.release_tag }}"
+          cp "app/build/outputs/apk/release/app-armeabi-v7a-release.apk" "release-dist/buct-one-${TAG}-armeabi-v7a.apk"
+          cp "app/build/outputs/apk/release/app-arm64-v8a-release.apk"   "release-dist/buct-one-${TAG}-arm64-v8a.apk"
+          cp "app/build/outputs/apk/release/app-universal-release.apk"   "release-dist/buct-one-${TAG}-universal.apk"
+          cp "app/build/outputs/apk/debug/app-universal-debug.apk"       "release-dist/buct-one-${TAG}-debug.apk"
+          ls -lh release-dist/
 
       - name: Publish to Release
         if: inputs.publish_release == true && inputs.release_tag != ''
@@ -215,5 +238,5 @@ jobs:
           tag_name: ${{ inputs.release_tag }}
           name: "BUCT One ${{ inputs.release_tag }}"
           prerelease: ${{ contains(inputs.release_tag, '-') }}
-          files: release-dist/buct-one-${{ inputs.release_tag }}.apk
+          files: release-dist/*.apk
           fail_on_unmatched_files: true
