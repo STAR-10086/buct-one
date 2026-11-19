@@ -3,6 +3,7 @@ package com.buct.course
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,11 +65,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.buct.course.manager.AppThemeCoordinator
 import com.buct.course.manager.UserManager
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
-import com.buct.course.ui.theme.CourseTheme
+import com.buct.course.ui.theme.CourseSelectorTheme
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.SjcxCreditRecordItem
 import com.buct.one.data.model.SjcxExperimentScheduleItem
@@ -90,13 +92,17 @@ import java.util.Locale
  * 3. 我的讲座（已报名讲座列表、取消报名、在线填写/修改讲座心得体会）
  * 4. 成绩与学分（实验分项与总评成绩 + 创新学分认定明细与累计学分）
  */
-class SjcxActivity : BaseActivity() {
+class SjcxActivity : ComponentActivity() {
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppThemeCoordinator.wrapContext(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 3)
         setContent {
-            CourseTheme {
+            CourseSelectorTheme {
                 SjcxScreen(
                     initialTab = initialTab,
                     onBack = { finish() }

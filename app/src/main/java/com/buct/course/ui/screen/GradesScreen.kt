@@ -623,15 +623,16 @@ private fun OverallGradesContent(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SystemSectionHeader(
-                                title = if (selectedBucket == null) "课程明细" else "筛选：${selectedBucket.label}",
-                                subtitle = if (selectedBucket == null) {
-                                    "共 ${grades.size} 门课程 · 点击上方分布可按档位筛选"
-                                } else {
-                                    "共 ${visibleGrades.size} 门（总 ${grades.size} 门）"
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
+                            Box(modifier = Modifier.weight(1f)) {
+                                SystemSectionHeader(
+                                    title = if (selectedBucket == null) "课程明细" else "筛选：${selectedBucket.label}",
+                                    subtitle = if (selectedBucket == null) {
+                                        "共 ${grades.size} 门课程 · 点击上方分布可按档位筛选"
+                                    } else {
+                                        "共 ${visibleGrades.size} 门（总 ${grades.size} 门）"
+                                    }
+                                )
+                            }
                             if (selectedBucket != null) {
                                 GlassFilterChip(
                                     label = "全部 (${grades.size})",

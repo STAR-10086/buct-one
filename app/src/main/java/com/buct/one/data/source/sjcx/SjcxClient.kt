@@ -54,8 +54,8 @@ import javax.crypto.spec.SecretKeySpec
  *    - Cnonce: RSA/ECB/PKCS1Padding(BAIDI_1, 32字节随机nonce) Base64
  *    - Xtsign: HmacSHA256(key=nonce, message=sortedKeyEqualsValues).toUpperCaseHex()
  * 6. 模块上下文激活：
- *    - 调用 /fteach/*（实验报告/实验课表/实验成绩）前必须先 POST /config/sys/menu/listStuMenuByProduct?menuId=9900
- *    - 调用 /fcredit/*（抢讲座/我的讲座/创新学分）前必须先 POST /config/sys/menu/listStuMenuByProduct?menuId=11900
+ *    - 调用 /fteach/ 下实验报告、实验课表、实验成绩接口前必须先 POST /config/sys/menu/listStuMenuByProduct?menuId=9900
+ *    - 调用 /fcredit/ 下抢讲座、我的讲座、创新学分接口前必须先 POST /config/sys/menu/listStuMenuByProduct?menuId=11900
  */
 class SjcxClient {
     private val cookieJar = MatchingMemoryCookieJar()
