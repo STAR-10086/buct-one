@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -49,10 +50,12 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.DashboardCustomize
 import androidx.compose.material.icons.outlined.LibraryAdd
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.MeetingRoom
 import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.WorkspacePremium
@@ -64,6 +67,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,6 +99,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -107,15 +112,18 @@ import com.buct.course.manager.StartupPage
 import com.buct.course.manager.UserManager
 import com.buct.course.manager.UserProfileStore
 import com.buct.course.ui.screen.EmptyClassroomDialog
+import com.buct.course.ui.system.GlassCircleButton
 import com.buct.course.ui.system.GlassStatChip
 import com.buct.course.ui.system.GlassSubpage
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.LocalAppOverlayBottomInset
+import com.buct.course.ui.system.SystemDivider
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.course.widget.WidgetScheduleSource
 import com.buct.course.widget.parseClockMinutes
 import com.buct.one.data.model.CardSnapshot
+import com.buct.one.data.model.CardTransaction
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.RefreshState
@@ -501,6 +509,8 @@ fun DashboardRoute(
     val scsSyncing by scsService.syncing.collectAsState()
 
     var showEmptyClassroomDialog by remember { mutableStateOf(false) }
+    var emptyClassroomInitialCampus by remember { mutableIntStateOf(2) }
+    var emptyClassroomPeriodOffset by remember { mutableIntStateOf(0) }
     var showCourseSelectSubpage by remember { mutableStateOf(false) }
     val classroomSlot = remember(showEmptyClassroomDialog) { resolveCurrentClassroomSlot(context) }
     val classroomDayLabel = listOf("一", "二", "三", "四", "五", "六", "日")
@@ -1016,7 +1026,11 @@ fun DashboardRoute(
                                     classroomSlot = classroomSlot,
                                     classroomDayLabel = classroomDayLabel,
                                     onNavigateTab = ::navigateToPageOrWarn,
-                                    onOpenClassroom = { showEmptyClassroomDialog = true },
+                                    onOpenClassroom = { campusId, periodOffset ->
+                                        emptyClassroomInitialCampus = campusId
+                                        emptyClassroomPeriodOffset = periodOffset
+                                        showEmptyClassroomDialog = true
+                                    },
                                     onOpenCourseSelect = {
                                         if (BottomNavPreferences.isVisible(StartupPage.Courses)) {
                                             onSwitchPage(StartupPage.Courses)
@@ -1080,8 +1094,9 @@ fun DashboardRoute(
             semester = classroomSlot.semester,
             week = classroomSlot.week,
             day = classroomSlot.day,
-            period = classroomSlot.period,
+            period = (classroomSlot.period + emptyClassroomPeriodOffset).coerceIn(1, 12),
             allowTimeSwitch = true,
+            initialCampusId = emptyClassroomInitialCampus,
             onDismiss = { showEmptyClassroomDialog = false }
         )
     }
@@ -1125,22 +1140,14 @@ private fun DashboardNormalHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(glassSurfaceColor())
-                .border(0.5.dp, glassBorderColor(), CircleShape)
-                .clickable(enabled = !anySyncing, onClick = onRefreshAll),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Refresh,
-                contentDescription = "刷新快照",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
+        GlassCircleButton(
+            onClick = onRefreshAll,
+            icon = Icons.Outlined.Refresh,
+            contentDescription = "刷新快照",
+            enabled = !anySyncing,
+            size = 42.dp,
+            tint = MaterialTheme.colorScheme.primary
+        )
     }
 }
 
@@ -1490,6 +1497,23 @@ private fun pickDisplayScsTerm(terms: List<ScsTermScore>): ScsTermScore? =
             it.physical != null || it.aesthetics != null || it.labor != null
     } ?: terms.firstOrNull()
 
+private fun isCardRecharge(tx: CardTransaction): Boolean =
+    tx.amountFen > 0L && (
+        tx.txName.contains("充") || tx.txName.contains("补") || tx.txName.contains("退") ||
+            tx.txCode in setOf("2239", "2240", "2241")
+        )
+
+private fun shortCardDateTime(raw: String): String {
+    val clean = raw.trim().replaceFirst(Regex("^20\\d{2}-"), "")
+    return if (clean.length > 11) clean.take(11) else clean
+}
+
+private fun formatCompactScore(v: Double?): String =
+    v?.let {
+        if (kotlin.math.abs(it - it.toInt()) < 0.05) it.toInt().toString()
+        else String.format(Locale.ROOT, "%.1f", it)
+    } ?: "--"
+
 @Composable
 private fun RenderModuleCard(
     config: DashboardModuleConfig,
@@ -1507,7 +1531,7 @@ private fun RenderModuleCard(
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
-    onOpenClassroom: () -> Unit,
+    onOpenClassroom: (campusId: Int, periodOffset: Int) -> Unit,
     onOpenCourseSelect: () -> Unit
 ) {
     when (config.size) {
@@ -1531,30 +1555,25 @@ private fun RenderModuleCard(
             onOpenCourseSelect = onOpenCourseSelect
         )
 
-        CardSize.MEDIUM -> {
-            val summary = buildCompactSummary(
-                module = config.module,
-                context = context,
-                theolSlice = theolSlice,
-                pendingHomeworks = pendingHomeworks,
-                pendingTests = pendingTests,
-                activeLocalTodos = activeLocalTodos,
-                cardSlice = cardSlice,
-                sjcxSlice = sjcxSlice,
-                scsSlice = scsSlice,
-                classroomSlot = classroomSlot,
-                classroomDayLabel = classroomDayLabel,
-                onNavigateTab = onNavigateTab,
-                onOpenClassroom = onOpenClassroom,
-                onOpenCourseSelect = onOpenCourseSelect
-            )
-            CompactMediumCard(
-                icon = config.module.icon,
-                summary = summary,
-                heightDp = slotHeightDp,
-                isEditing = isEditing
-            )
-        }
+        CardSize.MEDIUM -> RenderMediumModuleCard(
+            module = config.module,
+            slotHeightDp = slotHeightDp,
+            isEditing = isEditing,
+            context = context,
+            theolSlice = theolSlice,
+            pendingHomeworks = pendingHomeworks,
+            pendingTests = pendingTests,
+            activeLocalTodos = activeLocalTodos,
+            cardSlice = cardSlice,
+            cardHasSession = cardHasSession,
+            sjcxSlice = sjcxSlice,
+            scsSlice = scsSlice,
+            classroomSlot = classroomSlot,
+            classroomDayLabel = classroomDayLabel,
+            onNavigateTab = onNavigateTab,
+            onOpenClassroom = onOpenClassroom,
+            onOpenCourseSelect = onOpenCourseSelect
+        )
 
         CardSize.MINI -> {
             val summary = buildCompactSummary(
@@ -1570,7 +1589,7 @@ private fun RenderModuleCard(
                 classroomSlot = classroomSlot,
                 classroomDayLabel = classroomDayLabel,
                 onNavigateTab = onNavigateTab,
-                onOpenClassroom = onOpenClassroom,
+                onOpenClassroom = { onOpenClassroom(2, 0) },
                 onOpenCourseSelect = onOpenCourseSelect
             )
             CompactMiniCard(
@@ -1653,18 +1672,24 @@ private fun buildCompactSummary(
 
     DashboardModuleId.SJCX -> {
         val sjcxData = sjcxSlice.data
-        val valText = if (sjcxData != null) {
-            if (sjcxData.openLectures.isNotEmpty()) "${sjcxData.openLectures.size} 场可抢"
-            else "${sjcxData.schedules.size} 节实验"
-        } else {
-            "实验与讲座"
+        val availLectures = sjcxData?.openLectures?.count { !it.isFull } ?: 0
+        val valText = when {
+            sjcxData == null -> "实验与讲座"
+            availLectures > 0 -> "$availLectures 场可抢"
+            sjcxData.openLectures.isNotEmpty() -> "${sjcxData.openLectures.size} 场已满"
+            else -> "${sjcxData.schedules.size} 节实验"
         }
         val sub = if (sjcxData != null) {
             "排课 ${sjcxData.schedules.size} · ${String.format(Locale.ROOT, "%.1f", sjcxData.totalCredit)}学分"
         } else {
             "实验课表 · 抢讲座"
         }
-        val mini = sjcxData?.openLectures?.size?.let { "${it}可抢" } ?: "实验"
+        val mini = when {
+            sjcxData == null -> "实验"
+            availLectures > 0 -> "${availLectures}可抢"
+            sjcxData.openLectures.isNotEmpty() -> "${sjcxData.openLectures.size}活动"
+            else -> "${sjcxData.schedules.size}节"
+        }
         ModuleCompactSummary("实践教学", valText, sub, mini) {
             SjcxActivity.launch(context, initialTab = 0)
         }
@@ -1688,11 +1713,13 @@ private fun buildCompactSummary(
 }
 
 @Composable
-private fun CompactMediumCard(
+private fun MediumGlassCardFrame(
+    title: String,
     icon: ImageVector,
-    summary: ModuleCompactSummary,
     heightDp: Dp,
-    isEditing: Boolean
+    isEditing: Boolean,
+    onClick: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(26.dp)
     Column(
@@ -1702,9 +1729,9 @@ private fun CompactMediumCard(
             .clip(shape)
             .background(glassSurfaceColor())
             .border(0.5.dp, glassBorderColor(), shape)
-            .clickable(enabled = !isEditing, onClick = summary.onClick)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .clickable(enabled = !isEditing, onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1712,7 +1739,7 @@ private fun CompactMediumCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = summary.title,
+                text = title,
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -1721,36 +1748,353 @@ private fun CompactMediumCard(
             )
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(26.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
-                    contentDescription = summary.title,
+                    contentDescription = title,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
             }
         }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.SpaceBetween,
+            content = content
+        )
+    }
+}
 
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = summary.primaryValue,
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = summary.subLine,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+@Composable
+private fun RenderMediumModuleCard(
+    module: DashboardModuleId,
+    slotHeightDp: Dp,
+    isEditing: Boolean,
+    context: Context,
+    theolSlice: DomainSlice<TheolSnapshot>,
+    pendingHomeworks: List<TheolHomeworkItem>,
+    pendingTests: List<TheolTestItem>,
+    activeLocalTodos: List<LocalTodoItem>,
+    cardSlice: DomainSlice<CardSnapshot>,
+    cardHasSession: Boolean,
+    sjcxSlice: DomainSlice<SjcxSnapshot>,
+    scsSlice: DomainSlice<ScsSnapshot>,
+    classroomSlot: ClassroomSlot,
+    classroomDayLabel: String,
+    onNavigateTab: (StartupPage) -> Unit,
+    onOpenClassroom: (campusId: Int, periodOffset: Int) -> Unit,
+    onOpenCourseSelect: () -> Unit
+) {
+    when (module) {
+        DashboardModuleId.ECARD -> {
+            val cardData = cardSlice.data
+            MediumGlassCardFrame(
+                title = "校园卡",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { context.startActivity(Intent(context, EcardActivity::class.java)) }
+            ) {
+                if (cardData == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "点击登录",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "ecard.buct.edu.cn",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                    MediumBottomActionPill(text = "余额与消费流水 ›")
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            text = "¥ ${formatFenToYuan(cardData.account.balanceFen)}",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${if (cardHasSession) cardData.account.statusLabel else "待续期"} · ${cardData.account.maskedId}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (cardHasSession) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFFF9500),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        SystemDivider(alpha = 0.28f)
+                        val txs = cardData.transactions.take(2)
+                        if (txs.isEmpty()) {
+                            Text(
+                                text = "近期暂无流水记录",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        } else {
+                            txs.forEach { tx ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = tx.title,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f).padding(end = 4.dp),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "¥${formatFenToYuan(tx.amountFen)}",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (isCardRecharge(tx)) Color(0xFF34C759) else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        DashboardModuleId.SJCX -> {
+            val sjcxData = sjcxSlice.data
+            val availCount = sjcxData?.openLectures?.count { !it.isFull } ?: 0
+            val openCount = sjcxData?.openLectures?.size ?: 0
+            MediumGlassCardFrame(
+                title = "实践教学",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { SjcxActivity.launch(context, initialTab = 0) }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = when {
+                            sjcxData == null -> "实验与讲座"
+                            availCount > 0 -> "$availCount 场可抢"
+                            openCount > 0 -> "$openCount 场开放"
+                            else -> "${sjcxData.schedules.size} 节实验"
+                        },
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (sjcxData != null) {
+                            "排课 ${sjcxData.schedules.size} · ${String.format(Locale.ROOT, "%.1f", sjcxData.totalCredit)}学分"
+                        } else {
+                            "实验课表 · 创新学分"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                        .clickable(enabled = !isEditing) { SjcxActivity.launch(context, initialTab = 1) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (openCount > 0) "直达抢讲座 ($openCount) ›" else "查看讲座与报名 ›",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        DashboardModuleId.SCS -> {
+            val scsData = scsSlice.data
+            val displayTerm = pickDisplayScsTerm(scsData?.terms.orEmpty())
+            MediumGlassCardFrame(
+                title = "第二课堂",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { ScsActivity.launch(context, initialTab = 0) }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = when {
+                            displayTerm?.totalScore != null -> String.format(Locale.ROOT, "%.1f 分", displayTerm.totalScore)
+                            scsData != null -> "已登录"
+                            else -> "五育综测"
+                        },
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = when {
+                            displayTerm != null -> "${displayTerm.termName.ifBlank { displayTerm.yearName }} · 活动 ${scsData?.activities?.size ?: 0}"
+                            scsData?.currentWindow?.isOpen == true -> "自评开放中"
+                            else -> "德智体美劳评定"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (displayTerm != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
+                        Text(
+                            text = "德${formatCompactScore(displayTerm.moral)} · 智${formatCompactScore(displayTerm.academic)} · 体${formatCompactScore(displayTerm.physical)}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "美${formatCompactScore(displayTerm.aesthetics)} · 劳${formatCompactScore(displayTerm.labor)}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else {
+                    MediumBottomActionPill(text = "查看五育明细 ›")
+                }
+            }
+        }
+
+        DashboardModuleId.CLASSROOM -> {
+            MediumGlassCardFrame(
+                title = "空闲教室",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { onOpenClassroom(2, 0) }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "第 ${classroomSlot.week} 周",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "周${classroomDayLabel} · 第 ${classroomSlot.period} 节",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                MediumBottomActionPill(text = "查自习室 ›")
+            }
+        }
+
+        DashboardModuleId.COURSE_SELECT -> {
+            MediumGlassCardFrame(
+                title = "选课抢课",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = onOpenCourseSelect
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "全校选课",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "正方可选 · 队列自动抢",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                MediumBottomActionPill(text = "进入选课 ›")
+            }
+        }
+
+        DashboardModuleId.THEOL -> {
+            val never = theolSlice.provenance.refreshState == RefreshState.NEVER
+            val reportCount = sjcxSlice.data?.reports?.size ?: 0
+            MediumGlassCardFrame(
+                title = "北化在线",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { onNavigateTab(StartupPage.Homework) }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = if (never) "待同步" else "${pendingHomeworks.size} 项待交",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = if (pendingHomeworks.isNotEmpty()) Color(0xFFFF453A) else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = pendingHomeworks.firstOrNull()?.title
+                            ?: "测验 ${pendingTests.size} · 待办 ${activeLocalTodos.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                MediumBottomActionPill(text = "实验报告 $reportCount 项 ›")
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediumBottomActionPill(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1826,7 +2170,7 @@ private fun RenderLargeModuleCard(
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
-    onOpenClassroom: () -> Unit,
+    onOpenClassroom: (campusId: Int, periodOffset: Int) -> Unit,
     onOpenCourseSelect: () -> Unit
 ) {
     when (module) {
@@ -1859,52 +2203,73 @@ private fun RenderLargeModuleCard(
                         )
                     }
                     pendingHomeworks.isEmpty() && pendingTests.isEmpty() && activeLocalTodos.isEmpty() -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TheolMiniCounter("待交作业", "0", Modifier.weight(1f))
+                            TheolMiniCounter("在线测验", "0", Modifier.weight(1f))
+                            TheolMiniCounter("本地待办", "0", Modifier.weight(1f))
+                        }
                         Text(
-                            text = "当前没有待提交的作业或待办事项。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = "当前没有待提交的作业或待办，点击查看历史作业与实验报告",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     else -> {
-                        pendingHomeworks.take(2).forEach { hw ->
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = hw.title,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${hw.courseName} · 截止 ${hw.deadline.ifBlank { "未标注" }}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            pendingHomeworks.take(3).forEach { hw ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${hw.courseName} · ${hw.title}",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = hw.deadline.ifBlank { "待交" },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFFFF453A),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            if (pendingHomeworks.isEmpty()) {
+                                if (pendingTests.isNotEmpty()) {
+                                    Text(
+                                        text = "在线测验：${pendingTests.first().courseName} · ${pendingTests.first().title}",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                activeLocalTodos.take(2).forEach { todo ->
+                                    Text(
+                                        text = "• ${todo.title}${if (todo.courseName.isNotBlank()) "（${todo.courseName}）" else ""}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
-                        if (pendingHomeworks.isEmpty() && activeLocalTodos.isNotEmpty()) {
-                            activeLocalTodos.take(2).forEach { todo ->
-                                Text(
-                                    text = "• ${todo.title}${if (todo.courseName.isNotBlank()) "（${todo.courseName}）" else ""}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        val extraText = buildString {
-                            if (pendingHomeworks.size > 2) append("共 ${pendingHomeworks.size} 项作业 · ")
-                            if (pendingTests.isNotEmpty()) append("在线测验 ${pendingTests.size} 项")
-                        }.trim(' ', '·')
-                        if (extraText.isNotEmpty()) {
-                            Text(
-                                text = extraText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1
-                            )
-                        }
+                        Text(
+                            text = "待交 ${pendingHomeworks.size} · 测验 ${pendingTests.size} · 本地待办 ${activeLocalTodos.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1
+                        )
                     }
                 }
             }
@@ -1946,28 +2311,38 @@ private fun RenderLargeModuleCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "总分 ${displayTerm.totalScore?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "--"} · 活动 ${scsData?.activities?.size ?: 0} 项",
+                                text = "已认活动 ${scsData?.activities?.size ?: 0} 项",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1
                             )
                         }
-                        Icon(
-                            imageVector = Icons.Outlined.School,
-                            contentDescription = "第二课堂",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "总分 ${displayTerm.totalScore?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "--"}",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Icon(
+                                imageVector = Icons.Outlined.School,
+                                contentDescription = "第二课堂",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        ScsDimensionMiniBadge("德", displayTerm.moral, Modifier.weight(1f))
-                        ScsDimensionMiniBadge("智", displayTerm.academic, Modifier.weight(1f))
-                        ScsDimensionMiniBadge("体", displayTerm.physical, Modifier.weight(1f))
-                        ScsDimensionMiniBadge("美", displayTerm.aesthetics, Modifier.weight(1f))
-                        ScsDimensionMiniBadge("劳", displayTerm.labor, Modifier.weight(1f))
+                        ScsDimensionMiniBadge("德", displayTerm.moral, Color(0xFFFF6B6B), Modifier.weight(1f))
+                        ScsDimensionMiniBadge("智", displayTerm.academic, Color(0xFF4D96FF), Modifier.weight(1f))
+                        ScsDimensionMiniBadge("体", displayTerm.physical, Color(0xFF34C759), Modifier.weight(1f))
+                        ScsDimensionMiniBadge("美", displayTerm.aesthetics, Color(0xFFAF52DE), Modifier.weight(1f))
+                        ScsDimensionMiniBadge("劳", displayTerm.labor, Color(0xFFFF9F0A), Modifier.weight(1f))
                     }
                 } else {
                     Text(
@@ -2018,14 +2393,18 @@ private fun RenderLargeModuleCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.Bottom,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text(
                                 text = "¥ ${formatFenToYuan(cardData.account.balanceFen)}",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${cardData.account.cardTypeName} · ${cardData.account.statusLabel} · ${cardData.account.maskedId}",
+                                text = "${cardData.account.statusLabel} · ${cardData.account.maskedId}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -2036,28 +2415,47 @@ private fun RenderLargeModuleCard(
                             imageVector = Icons.Outlined.CreditCard,
                             contentDescription = "进入校园卡",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                    cardData.transactions.take(1).forEach { tx ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${tx.title} · ${tx.formattedTime.substringBefore(' ')}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "¥ ${formatFenToYuan(tx.amountFen)}",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                    SystemDivider(alpha = 0.28f)
+                    if (cardData.transactions.isEmpty()) {
+                        Text(
+                            text = "近期暂无消费或充值流水",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            cardData.transactions.take(3).forEach { tx ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = tx.title,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f).padding(end = 6.dp),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = shortCardDateTime(tx.formattedTime),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "¥ ${formatFenToYuan(tx.amountFen)}",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (isCardRecharge(tx)) Color(0xFF34C759) else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -2071,7 +2469,7 @@ private fun RenderLargeModuleCard(
                 RefreshState.NEVER -> "点击进入"
                 RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED -> {
                     val openCount = sjcxData?.openLectures?.size ?: 0
-                    if (openCount > 0) "${openCount}场讲座可报" else "已同步"
+                    if (openCount > 0) "${openCount}场活动开放" else "已同步"
                 }
                 RefreshState.STALE -> "历史快照"
                 RefreshState.FAILED_FALLBACK -> "离线快照"
@@ -2089,17 +2487,47 @@ private fun RenderLargeModuleCard(
                 heightDp = slotHeightDp,
                 onClick = if (isEditing) null else ({ SjcxActivity.launch(context, initialTab = 0) })
             ) {
-                Text(
-                    text = if (sjcxData != null) {
-                        "实验排课 ${sjcxData.schedules.size} 节 · 可报讲座 ${sjcxData.openLectures.size} 场 · 创新学分 ${String.format(Locale.ROOT, "%.1f", sjcxData.totalCredit)}"
-                    } else {
-                        "直连 sjcx.buct.edu.cn，一键查实验课表、抢讲座与查创新学分"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                val firstLecture = sjcxData?.openLectures?.firstOrNull()
+                if (firstLecture != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f))
+                            .clickable(enabled = !isEditing) { SjcxActivity.launch(context, initialTab = 1) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "活动：${firstLecture.projectName}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val capColor = if (firstLecture.isFull) Color(0xFFFF9F0A) else Color(0xFF34C759)
+                        Text(
+                            text = if (firstLecture.totalNum > 0) "${firstLecture.registrationNum}/${firstLecture.totalNum}" else "可报名",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = capColor,
+                            maxLines = 1
+                        )
+                    }
+                } else {
+                    Text(
+                        text = if (sjcxData != null) {
+                            "实验排课 ${sjcxData.schedules.size} 节 · 已认学分 ${String.format(Locale.ROOT, "%.1f", sjcxData.totalCredit)}"
+                        } else {
+                            "直连 sjcx.buct.edu.cn，一键查实验课表、抢讲座与查创新学分"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2127,44 +2555,28 @@ private fun RenderLargeModuleCard(
                 badge = "第 ${classroomSlot.week} 周 · 周${classroomDayLabel}",
                 badgeColor = MaterialTheme.colorScheme.primary,
                 heightDp = slotHeightDp,
-                onClick = if (isEditing) null else onOpenClassroom
+                onClick = if (isEditing) null else ({ onOpenClassroom(2, 0) })
             ) {
+                Text(
+                    text = "当前时段：第 ${classroomSlot.week} 周 · 周${classroomDayLabel} · 第 ${classroomSlot.period} 节",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                        .clickable(enabled = !isEditing, onClick = onOpenClassroom)
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.MeetingRoom,
-                        contentDescription = "查空闲教室",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "自习室 / 空闲教室查询",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "第 ${classroomSlot.week} 周 · 周${classroomDayLabel} · 第 ${classroomSlot.period} 节 · 点击切换",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    QuickActionTile("北区空教室", Icons.Outlined.MeetingRoom, Modifier.weight(1f), !isEditing) {
+                        onOpenClassroom(2, 0)
                     }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    QuickActionTile("东区空教室", Icons.Outlined.LocationOn, Modifier.weight(1f), !isEditing) {
+                        onOpenClassroom(1, 0)
+                    }
+                    QuickActionTile("下节课空闲", Icons.Outlined.Schedule, Modifier.weight(1f), !isEditing) {
+                        onOpenClassroom(2, 1)
+                    }
                 }
             }
         }
@@ -2177,44 +2589,19 @@ private fun RenderLargeModuleCard(
                 heightDp = slotHeightDp,
                 onClick = if (isEditing) null else onOpenCourseSelect
             ) {
+                Text(
+                    text = "浏览主修/通识可选课程、退课管理与定时自动抢课",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                        .clickable(enabled = !isEditing, onClick = onOpenCourseSelect)
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.LibraryAdd,
-                        contentDescription = "选课抢课",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "全校可选课程 · 队列自动抢课",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "浏览主修/通识可选课程、退课管理与定时批量抢课",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    QuickActionTile("浏览可选课程", Icons.Outlined.LibraryAdd, Modifier.weight(1f), !isEditing, onOpenCourseSelect)
+                    QuickActionTile("抢课队列与定时", Icons.Outlined.Schedule, Modifier.weight(1f), !isEditing, onOpenCourseSelect)
                 }
             }
         }
@@ -2222,12 +2609,42 @@ private fun RenderLargeModuleCard(
 }
 
 @Composable
-private fun ScsDimensionMiniBadge(label: String, score: Double?, modifier: Modifier = Modifier) {
+private fun TheolMiniCounter(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-            .padding(vertical = 6.dp, horizontal = 4.dp),
+            .padding(vertical = 8.dp, horizontal = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun ScsDimensionMiniBadge(
+    label: String,
+    score: Double?,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = 0.10f))
+            .padding(vertical = 7.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(1.dp)
     ) {
@@ -2239,7 +2656,7 @@ private fun ScsDimensionMiniBadge(label: String, score: Double?, modifier: Modif
         Text(
             text = score?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "--",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary,
+            color = if (score != null) accent else MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1
         )
     }
@@ -2282,7 +2699,7 @@ private fun DashboardGlassCard(
     badgeColor: Color,
     heightDp: Dp,
     onClick: (() -> Unit)? = null,
-    content: @Composable () -> Unit
+    content: @Composable ColumnScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(26.dp)
     Column(
@@ -2293,8 +2710,8 @@ private fun DashboardGlassCard(
             .background(glassSurfaceColor())
             .border(0.5.dp, glassBorderColor(), shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(horizontal = 15.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2326,11 +2743,12 @@ private fun DashboardGlassCard(
             }
         }
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            content()
-        }
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.SpaceBetween,
+            content = content
+        )
     }
 }
 
