@@ -1,0 +1,118 @@
+name: code-check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/check.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/check.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: code-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Static rules (package deps & TLS)
+        run: |
+          set -uo pipefail
+          SRC=app/src/main/java/com/buct/one/data
+          COURSE_SRC=app/src/main/java/com/buct/course
+          v=0
+          check() {
+            local dir="$1"
+            local pattern="$2"
+            local desc="$3"
+            [ -d "$dir" ] || return 0
+            local hits
+            hits=$(grep -rnE "$pattern" "$dir" 2>/dev/null || true)
+            if [ -n "$hits" ]; then
+              echo "::error::${desc}:"
+              echo "$hits"
+              v=1
+            fi
+          }
+
+          check "$SRC/model" "^import " "model/ 必须零依赖"
+          check "$SRC/store" "import com\.buct\.(one\.data\.(source|sync)|course\.ui)" "store/ 越层依赖"
+          check "$SRC/source" "import com\.buct\.(one\.data\.(store|sync)|course\.ui)" "source/ 越层依赖"
+          check "$SRC/sync" "import com\.buct\.(one|course)\.ui" "sync/ 禁止依赖 ui"
+          check "$COURSE_SRC" "import com\.buct\.one\.data\.source" "course/ui 禁止直接依赖 source"
+          check "app/src/main/java" "trustAllCerts|AllowAllHostnameVerifier|SSLSocketFactory\.ALLOW_ALL|hostnameVerifier.*true" "禁止绕过 TLS/主机名校验"
+
+          if [ -d "$SRC/source" ]; then
+            for subdir in "$SRC"/source/*/; do
+              [ -d "$subdir" ] || continue
+              pkg=$(basename "$subdir")
+              hits=$(grep -rnE "import com\.buct\.one\.data\.source\.[a-zA-Z0-9_]+" "$subdir" 2>/dev/null | grep -vE "import com\.buct\.one\.data\.source\.${pkg}\b" || true)
+              if [ -n "$hits" ]; then
+                echo "::error::source/${pkg} 禁止跨子包依赖其他 source 子包:"
+                echo "$hits"
+                v=1
+              fi
+            done
+          fi
+
+          if [ "$v" = 0 ]; then
+            echo "静态包依赖与 TLS 安全检查通过"
+          else
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Resolve Android SDK path
+        id: android-sdk
+        run: echo "dir=$ANDROID_HOME" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Android SDK 37
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.android-sdk.outputs.dir }}/platforms/android-37.0
+            ${{ steps.android-sdk.outputs.dir }}/build-tools/37.0.0
+            ${{ steps.android-sdk.outputs.dir }}/licenses
+          key: android-sdk-${{ runner.os }}-37.0-37.0.0-v1
+
+      - name: Install compileSdk 37 / build-tools 37
+        run: |
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ -d "$ANDROID_HOME/build-tools/37.0.0" ]; then
+            echo "Android SDK 37 命中缓存，跳过安装"
+            exit 0
+          fi
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;37.0.0" \
+            || "$SDKMANAGER" --install --channel=3 "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Setup Gradle (with build cache)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
+
+      - name: Compile Debug Sources
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:compileDebugSources --no-daemon --stacktrace --build-cache

@@ -63,22 +63,36 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Resolve Android SDK path
+        id: android-sdk
+        run: echo "dir=$ANDROID_HOME" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Android SDK 37
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.android-sdk.outputs.dir }}/platforms/android-37.0
+            ${{ steps.android-sdk.outputs.dir }}/build-tools/37.0.0
+            ${{ steps.android-sdk.outputs.dir }}/licenses
+          key: android-sdk-${{ runner.os }}-37.0-37.0.0-v1
+
       - name: Install compileSdk 37 / build-tools 37
         run: |
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ -d "$ANDROID_HOME/build-tools/37.0.0" ]; then
+            echo "Android SDK 37 命中缓存，跳过安装"
+            ls "$ANDROID_HOME/platforms"
+            exit 0
+          fi
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;37.0.0" \
             || "$SDKMANAGER" --install --channel=3 "platforms;android-37.0" "build-tools;37.0.0"
           ls "$ANDROID_HOME/platforms"
 
-      - name: Gradle cache
-        uses: actions/cache@v4
+      - name: Setup Gradle (with build cache)
+        uses: gradle/actions/setup-gradle@v4
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
 
       # 有 ANDROID_KEYSTORE_BASE64 等 secrets 则用正式签名；缺失则退回临时签名（只够自测）
       - name: Prepare signing
@@ -134,31 +148,49 @@ jobs:
           check source "import com.buct.one.data.store"
           if [ "$v" = 0 ]; then echo "包依赖检查通过"; else exit 1; fi
 
-      - name: assembleRelease & assembleDebug
+      - name: Build APK(s)
+        env:
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace
+          if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then
+            ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace --build-cache
+          else
+            ./gradlew assembleRelease --no-daemon --stacktrace --build-cache
+          fi
 
       - name: Verify APK signatures
+        env:
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
         run: |
           set -euo pipefail
-          for APK in \
-            app/build/outputs/apk/release/app-armeabi-v7a-release.apk \
-            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
-            app/build/outputs/apk/release/app-universal-release.apk \
-            app/build/outputs/apk/debug/app-universal-debug.apk; do
+          APKS=(
+            app/build/outputs/apk/release/app-armeabi-v7a-release.apk
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk
+            app/build/outputs/apk/release/app-universal-release.apk
+          )
+          if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then
+            APKS+=(app/build/outputs/apk/debug/app-universal-debug.apk)
+          fi
+          for APK in "${APKS[@]}"; do
             echo "=== Verifying $APK ==="
             "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs "$APK"
           done
 
       - name: APK size gate (100MB)
+        env:
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
         run: |
           set -euo pipefail
-          for APK in \
-            app/build/outputs/apk/release/app-armeabi-v7a-release.apk \
-            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
-            app/build/outputs/apk/release/app-universal-release.apk \
-            app/build/outputs/apk/debug/app-universal-debug.apk; do
+          APKS=(
+            app/build/outputs/apk/release/app-armeabi-v7a-release.apk
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk
+            app/build/outputs/apk/release/app-universal-release.apk
+          )
+          if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then
+            APKS+=(app/build/outputs/apk/debug/app-universal-debug.apk)
+          fi
+          for APK in "${APKS[@]}"; do
             BYTES=$(stat -c%s "$APK")
             MB=$(awk "BEGIN{printf \"%.2f\", $BYTES/1048576}")
             echo "APK: $APK  size: ${BYTES} bytes (${MB} MB)"
@@ -208,14 +240,26 @@ jobs:
             echo "::warning::本 PR 增重 >500KB，请在 PR 描述写归因（新增依赖 / 资源各占多少）"
           fi
 
+      - name: Stage CI artifacts
+        env:
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+          rm -rf ci-apks
+          mkdir -p ci-apks
+          cp \
+            app/build/outputs/apk/release/app-armeabi-v7a-release.apk \
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+            app/build/outputs/apk/release/app-universal-release.apk \
+            ci-apks/
+          if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then
+            cp app/build/outputs/apk/debug/app-universal-debug.apk ci-apks/
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: apks
-          path: |
-            app/build/outputs/apk/release/app-armeabi-v7a-release.apk
-            app/build/outputs/apk/release/app-arm64-v8a-release.apk
-            app/build/outputs/apk/release/app-universal-release.apk
-            app/build/outputs/apk/debug/app-universal-debug.apk
+          path: ci-apks/*.apk
           if-no-files-found: error
 
       - name: Prepare release APK files
