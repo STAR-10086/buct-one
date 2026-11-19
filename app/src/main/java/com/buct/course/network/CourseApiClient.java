@@ -270,7 +270,7 @@ public class CourseApiClient {
                         UserManager user = UserManager.getInstance();
                         if (!user.getSessionState().isCurrent(token)) return;
                         if (com.buct.course.utils.SessionRenewer.canRenew()) {
-                                com.buct.course.utils.SessionRenewer.request(token, false, result -> {
+                                com.buct.course.utils.SessionRenewer.INSTANCE.request(token, false, result -> {
                                         if (!(result instanceof com.buct.course.utils.SessionRecoveryResult.Recovered)) {
                                                 markSessionExpiredAndBroadcast(token);
                                         }
