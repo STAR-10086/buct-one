@@ -153,7 +153,7 @@ class ScheduleDayRemoteViewsFactory(
                 courses = emptyList()
             }
 
-            dayOffset = ScheduleDayWidget.getDayOffset(context)
+            dayOffset = ScheduleDayWidget.getDayOffset(context, appWidgetId)
             val cal = Calendar.getInstance()
             cal.add(Calendar.DAY_OF_YEAR, dayOffset)
             selectedDay = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1

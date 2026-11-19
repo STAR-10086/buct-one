@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_light"
+    android:clipToOutline="true"
+    android:padding="10dp">
+
+    <!-- 日期栏：9月23日 · 周三 · 第4周 -->
+    <TextView
+        android:id="@+id/widget_day_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="今天"
+        android:textSize="11sp"
+        android:textColor="#FFFFFF"
+        android:gravity="center"
+        android:paddingBottom="2dp" />
+
+    <!-- 日期导航：前一天 / 今天 / 后一天 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="3dp">
+
+        <ImageView
+            android:id="@+id/widget_prev_day"
+            android:layout_width="36dp"
+            android:layout_height="28dp"
+            android:src="@drawable/ic_widget_chevron_left_dark"
+            android:scaleType="centerInside"
+            android:contentDescription="前一天"
+            android:padding="4dp" />
+
+        <TextView
+            android:id="@+id/widget_back_today"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="回到今天"
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp" />
+
+        <ImageView
+            android:id="@+id/widget_next_day"
+            android:layout_width="36dp"
+            android:layout_height="28dp"
+            android:src="@drawable/ic_widget_chevron_right_dark"
+            android:scaleType="centerInside"
+            android:contentDescription="后一天"
+            android:padding="4dp" />
+
+    </LinearLayout>
+
+    <!-- 当日课程/考试列表（按高度限制每屏节数，超出可上下滑动） -->
+    <ListView
+        android:id="@+id/widget_day_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@android:color/transparent"
+        android:dividerHeight="4dp"
+        android:scrollbars="none"
+        android:clipToPadding="false"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp" />
+
+</LinearLayout>

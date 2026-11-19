@@ -24,7 +24,7 @@ object WidgetConfigStore {
         prefs(context).edit().apply {
             if (value.isNullOrBlank()) remove("title_$appWidgetId")
             else putString("title_$appWidgetId", value.trim())
-        }.apply()
+        }.commit()
     }
 
     fun accountKey(context: Context, appWidgetId: Int): String? =
@@ -34,7 +34,7 @@ object WidgetConfigStore {
         prefs(context).edit().apply {
             if (value.isNullOrBlank()) remove("account_$appWidgetId")
             else putString("account_$appWidgetId", value)
-        }.apply()
+        }.commit()
     }
 
     /** 课表来源：空 = 本机账号，`friend:<id>` = 朋友课表。 */
@@ -45,14 +45,14 @@ object WidgetConfigStore {
         prefs(context).edit().apply {
             if (value.isNullOrBlank()) remove("source_$appWidgetId")
             else putString("source_$appWidgetId", value)
-        }.apply()
+        }.commit()
     }
 
     fun hideTitle(context: Context, appWidgetId: Int): Boolean =
         prefs(context).getBoolean("hide_title_$appWidgetId", false)
 
     fun setHideTitle(context: Context, appWidgetId: Int, hide: Boolean) {
-        prefs(context).edit().putBoolean("hide_title_$appWidgetId", hide).apply()
+        prefs(context).edit().putBoolean("hide_title_$appWidgetId", hide).commit()
     }
 
     fun widgetHeightDp(context: Context, appWidgetId: Int): Int =
@@ -60,7 +60,7 @@ object WidgetConfigStore {
 
     fun setWidgetHeightDp(context: Context, appWidgetId: Int, heightDp: Int) {
         if (heightDp <= 0) return
-        prefs(context).edit().putInt("height_dp_$appWidgetId", heightDp).apply()
+        prefs(context).edit().putInt("height_dp_$appWidgetId", heightDp).commit()
     }
 
     /**
@@ -82,7 +82,7 @@ object WidgetConfigStore {
             .remove("height_dp_$appWidgetId")
             .remove("account_$appWidgetId")
             .remove("source_$appWidgetId")
-            .apply()
+            .commit()
     }
 
     /** 回收桌面上已删除实例的配置，避免 appWidgetId 被系统复用时串配置。 */

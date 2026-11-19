@@ -50,7 +50,6 @@ import com.buct.course.manager.AppThemeCoordinator
 import com.buct.course.ui.system.InsetGroupedSection
 import com.buct.course.ui.system.SystemIconButton
 import com.buct.course.ui.system.SystemTopBar
-import com.buct.course.social.FriendScheduleStore
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.SystemPrimaryButton
 import com.buct.course.ui.system.SystemSecondaryButton
@@ -82,7 +81,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 Intent(context, WidgetConfigActivity::class.java)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                     .putExtra(EXTRA_IS_DAY, isDay)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             )
         }
     }
@@ -100,14 +99,16 @@ class WidgetConfigActivity : ComponentActivity() {
             AppWidgetManager.EXTRA_APPWIDGET_ID,
             AppWidgetManager.INVALID_APPWIDGET_ID
         ) ?: AppWidgetManager.INVALID_APPWIDGET_ID
-        // 桌面「添加小组件」进来时系统只带 EXTRA_APPWIDGET_ID，不带我们的 isDay；
-        // 这里按实例所属 provider 反查，避免「今日课表」打开成周课表的配置页。
+        // 桌面「添加小组件」进来时系统只带 EXTRA_APPWIDGET_ID，不带 our EXTRA_IS_DAY；
+        // 先查 AppWidgetInfo.provider，再查 WidgetProviders.dayIds，确保精准识别今日课表。
         isDay = if (intent?.hasExtra(EXTRA_IS_DAY) == true) {
             intent.getBooleanExtra(EXTRA_IS_DAY, false)
         } else {
             runCatching {
                 val manager = AppWidgetManager.getInstance(this)
-                WidgetProviders.dayIds(this, manager).contains(appWidgetId)
+                val infoProvider = manager.getAppWidgetInfo(appWidgetId)?.provider?.className.orEmpty()
+                infoProvider.contains("ScheduleDayWidget") ||
+                    WidgetProviders.dayIds(this, manager).contains(appWidgetId)
             }.getOrDefault(false)
         }
 
@@ -187,17 +188,7 @@ private fun WidgetConfigPage(
     var accountKey by remember(appWidgetId) {
         mutableStateOf(WidgetConfigStore.accountKey(context, appWidgetId))
     }
-    // 朋友课表：好友页收到并保存到固定目录的那些
-    val friends = remember(appWidgetId) {
-        runCatching { FriendScheduleStore.list(context) }.getOrNull().orEmpty()
-    }
-    var friendId by remember(appWidgetId) {
-        mutableStateOf(WidgetScheduleSource.friendEntry(context, appWidgetId)?.id)
-    }
-    val friendLabel = friends.firstOrNull { it.id == friendId }?.label?.takeIf { it.isNotBlank() }
-    val previewTitle = title.ifBlank {
-        if (friendLabel != null) "${friendLabel}的课表" else effectiveDefault
-    }
+    val previewTitle = title.ifBlank { effectiveDefault }
 
     Column(
         modifier = Modifier
@@ -258,46 +249,8 @@ private fun WidgetConfigPage(
                     )
                 }
 
-                // 课表来源：本机账号 / 好友传来的课表
-                if (friends.isNotEmpty()) {
-                    InsetGroupedSection(
-                        header = "显示谁的课表",
-                        footer = if (friendId == null) {
-                            "好友页收到并保存的课表会列在这里，可以让这个小组件专门显示朋友的课表。"
-                        } else {
-                            "只显示课表，不含成绩和考试；朋友课表被删掉后自动回到我的课表。"
-                        }
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilterChip(
-                                    selected = friendId == null,
-                                    onClick = { friendId = null },
-                                    label = { Text("我的课表") }
-                                )
-                                friends.forEach { entry ->
-                                    FilterChip(
-                                        selected = friendId == entry.id,
-                                        onClick = { friendId = entry.id },
-                                        label = { Text("${entry.label}的课表") }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 账号选择（多账号时才值得显示；选了朋友课表就不需要）
-                if (accounts.size > 1 && friendId == null) {
+                // 账号选择（多账号时显示）
+                if (accounts.size > 1) {
                     InsetGroupedSection(
                         header = "显示哪个账号的课表",
                         footer = "选定后，切换 App 内账号不会影响这个小组件。"
@@ -336,7 +289,7 @@ private fun WidgetConfigPage(
                 // 预览：按小组件真实排版画一个缩小版，比两行文字直观
                 InsetGroupedSection(
                     header = "预览",
-                    footer = if (friendLabel != null) "内容：${friendLabel}的课表" else "内容：本机账号课表"
+                    footer = "内容：本机账号课表"
                 ) {
                     WidgetMiniPreview(
                         title = previewTitle,
@@ -365,8 +318,7 @@ private fun WidgetConfigPage(
                 SystemPrimaryButton(
                     text = "保存",
                     onClick = {
-                        val source = friendId?.let { WidgetScheduleSource.encodeFriend(it) }
-                        onSave(title, hideTitle, accountKey, source)
+                        onSave(title, hideTitle, accountKey, null)
                     },
                     modifier = Modifier.fillMaxWidth()
                 )

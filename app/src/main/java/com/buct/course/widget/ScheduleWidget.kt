@@ -27,30 +27,50 @@ open class ScheduleWidget : AppWidgetProvider() {
 
         if (intent.action == ACTION_PREV_WEEK || intent.action == ACTION_NEXT_WEEK) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
-            val ids = WidgetProviders.weekIds(context, appWidgetManager)
-            val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
-            val primaryId = ids.firstOrNull() ?: AppWidgetManager.INVALID_APPWIDGET_ID
-            var currentWeek = widgetPrefs.getInt("current_week", getDefaultWeek(context, primaryId))
+            val targetId = intent.getIntExtra(
+                AppWidgetManager.EXTRA_APPWIDGET_ID,
+                AppWidgetManager.INVALID_APPWIDGET_ID
+            )
+            val allIds = WidgetProviders.weekIds(context, appWidgetManager)
+            val ids = if (targetId != AppWidgetManager.INVALID_APPWIDGET_ID) intArrayOf(targetId) else allIds
+            if (ids.isEmpty()) return
 
-            if (intent.action == ACTION_PREV_WEEK) {
-                currentWeek = (currentWeek - 1).coerceAtLeast(1)
-            } else {
-                currentWeek = (currentWeek + 1).coerceAtMost(com.buct.course.schedule.ScheduleMaxWeeks)
+            val primaryId = ids.first()
+            val nextWeek = synchronized(WEEK_LOCK) {
+                val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+                val baseWeek = readWeek(context, widgetPrefs, primaryId)
+                val computed = if (intent.action == ACTION_PREV_WEEK) {
+                    (baseWeek - 1).coerceAtLeast(1)
+                } else {
+                    (baseWeek + 1).coerceAtMost(com.buct.course.schedule.ScheduleMaxWeeks)
+                }
+                val now = System.currentTimeMillis()
+                widgetPrefs.edit().apply {
+                    ids.forEach { id ->
+                        putInt("current_week_$id", computed)
+                        putLong("last_week_nav_$id", now)
+                    }
+                    if (targetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+                        putInt("current_week", computed)
+                        putLong("last_week_nav", now)
+                    }
+                }.commit()
+                computed
             }
 
-            widgetPrefs.edit()
-                .putInt("current_week", currentWeek)
-                .putLong("last_week_nav", System.currentTimeMillis())
-                .apply()
-
-            // 增量刷新：标题用 partialUpdate 局部更新，列表用 notify 让 Service 重读周数，
-            // 不再整卡重建（避免切换缓慢 + 按钮 PendingIntent 被重置导致点击不稳定）
+            // 增量刷新：按实例是否隐藏标题匹配对应布局做局部更新
             for (id in ids) {
                 val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, id)
-                val views = RemoteViews(context.packageName, R.layout.widget_schedule)
-                views.setTextViewText(R.id.widget_week_info, weekInfoText(currentWeek, startMillis))
-                bindWeekHeader(views, currentWeek, startMillis)
-                WidgetTextSizes.apply(views, WidgetTextSizes.WEEK_ROOT, WidgetTextSizes.scale(context))
+                val hideTitle = WidgetConfigStore.hideTitle(context, id)
+                val layoutId = if (hideTitle) R.layout.widget_schedule_notitle else R.layout.widget_schedule
+                val views = RemoteViews(context.packageName, layoutId)
+                views.setTextViewText(R.id.widget_week_info, weekInfoText(nextWeek, startMillis))
+                bindWeekHeader(views, nextWeek, startMillis)
+                WidgetTextSizes.apply(
+                    views,
+                    if (hideTitle) WidgetTextSizes.WEEK_ROOT_NO_TITLE else WidgetTextSizes.WEEK_ROOT,
+                    WidgetTextSizes.scale(context)
+                )
                 appWidgetManager.partiallyUpdateAppWidget(intArrayOf(id), views)
             }
             appWidgetManager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
@@ -67,15 +87,42 @@ open class ScheduleWidget : AppWidgetProvider() {
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
         super.onDeleted(context, appWidgetIds)
+        val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+        val editor = widgetPrefs.edit()
         for (id in appWidgetIds) {
             WidgetConfigStore.clear(context, id)
+            editor.remove("current_week_$id").remove("last_week_nav_$id")
         }
+        editor.commit()
     }
 
     companion object {
         const val ACTION_PREV_WEEK = "com.buct.course.widget.PREV_WEEK"
         const val ACTION_NEXT_WEEK = "com.buct.course.widget.NEXT_WEEK"
         const val ACTION_REFRESH = "com.buct.course.widget.REFRESH_WIDGET"
+        private val WEEK_LOCK = Any()
+
+        internal fun readWeek(
+            context: Context,
+            widgetPrefs: android.content.SharedPreferences,
+            appWidgetId: Int
+        ): Int {
+            val defaultWeek = getDefaultWeek(context, appWidgetId)
+            val navKey = "last_week_nav_$appWidgetId"
+            val weekKey = "current_week_$appWidgetId"
+            val lastNav = if (widgetPrefs.contains(navKey)) {
+                widgetPrefs.getLong(navKey, 0L)
+            } else {
+                widgetPrefs.getLong("last_week_nav", 0L)
+            }
+            val freshNav = System.currentTimeMillis() - lastNav < 86_400_000L
+            return if (freshNav) {
+                if (widgetPrefs.contains(weekKey)) widgetPrefs.getInt(weekKey, defaultWeek)
+                else widgetPrefs.getInt("current_week", defaultWeek)
+            } else {
+                defaultWeek
+            }
+        }
 
         /** 通知桌面所有课表小组件重读数据（朋友课表保存/删除后调用）。 */
         fun refreshAllWidgets(context: Context) {
@@ -129,7 +176,9 @@ open class ScheduleWidget : AppWidgetProvider() {
             appWidgetManager: AppWidgetManager,
             appWidgetId: Int
         ) {
-            val views = RemoteViews(context.packageName, R.layout.widget_schedule)
+            val hideTitle = WidgetConfigStore.hideTitle(context, appWidgetId)
+            val layoutId = if (hideTitle) R.layout.widget_schedule_notitle else R.layout.widget_schedule
+            val views = RemoteViews(context.packageName, layoutId)
 
             // 读取 APP 里的主题设置
             val themePrefs = context.getSharedPreferences("appearance_settings", Context.MODE_PRIVATE)
@@ -146,22 +195,21 @@ open class ScheduleWidget : AppWidgetProvider() {
                 else -> systemDark // system 模式
             }
 
-            // 设置标题：实例自定义 → 全局默认 → 「我的课表」（支持隐藏）
-            val hideTitle = WidgetConfigStore.hideTitle(context, appWidgetId)
-            views.setViewVisibility(R.id.widget_title, if (hideTitle) android.view.View.GONE else android.view.View.VISIBLE)
-            views.setTextViewText(
-                R.id.widget_title,
-                WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = false)
-            )
+            val textColor = if (isDarkMode) android.graphics.Color.WHITE else 0xFF1C1C1E.toInt()
+            if (!hideTitle) {
+                views.setTextViewText(
+                    R.id.widget_title,
+                    WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = false)
+                )
+                views.setTextColor(R.id.widget_title, textColor)
+            }
 
             // 根据模式设置文字颜色、圆角背景和矢量箭头
-            val textColor = if (isDarkMode) android.graphics.Color.WHITE else 0xFF1C1C1E.toInt()
             views.setInt(
                 R.id.widget_root,
                 "setBackgroundResource",
                 if (isDarkMode) R.drawable.widget_bg_dark else R.drawable.widget_bg_light
             )
-            views.setTextColor(R.id.widget_title, textColor)
             views.setTextColor(R.id.widget_week_info, textColor)
             views.setImageViewResource(
                 R.id.widget_prev_week,
@@ -181,34 +229,30 @@ open class ScheduleWidget : AppWidgetProvider() {
             views.setTextColor(R.id.widget_saturday_header, textColor)
             views.setTextColor(R.id.widget_sunday_header, textColor)
 
-            // 读取当前周数：24 小时内手动切过周则保留，否则自动回到今天所在周（与今日课表小组件统一）
+            // 读取当前周数（每实例独立）
             val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
             val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
-            val lastNav = widgetPrefs.getLong("last_week_nav", 0L)
-            val freshNav = System.currentTimeMillis() - lastNav < 86_400_000L
             val defaultWeek = getDefaultWeek(context, appWidgetId)
-            val currentWeek = if (freshNav) {
-                widgetPrefs.getInt("current_week", defaultWeek)
-            } else {
-                if (widgetPrefs.getInt("current_week", defaultWeek) != defaultWeek) {
-                    widgetPrefs.edit()
-                        .putInt("current_week", defaultWeek)
-                        .putLong("last_week_nav", 0L)
-                        .apply()
-                }
-                defaultWeek
+            val currentWeek = readWeek(context, widgetPrefs, appWidgetId)
+            if (currentWeek == defaultWeek && !widgetPrefs.contains("current_week_$appWidgetId")) {
+                widgetPrefs.edit()
+                    .putInt("current_week_$appWidgetId", defaultWeek)
+                    .putLong("last_week_nav_$appWidgetId", 0L)
+                    .apply()
             }
             views.setTextViewText(R.id.widget_week_info, weekInfoText(currentWeek, startMillis))
 
             // 星期表头带上月份和日期，跨月时每一天仍然能看懂属于哪个月。
             bindWeekHeader(views, currentWeek, startMillis)
 
-            // 设置上一周按钮点击事件：指向 AndroidManifest 实际注册的 receiver
+            // 设置上一周按钮点击事件：按 appWidgetId 隔离 PendingIntent
             val prevIntent = Intent(context, com.tyust.course.widget.ScheduleWidget::class.java).apply {
                 action = ACTION_PREV_WEEK
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                data = android.net.Uri.parse("buctwidget://week/$appWidgetId/$ACTION_PREV_WEEK")
             }
             val prevPendingIntent = PendingIntent.getBroadcast(
-                context, 0, prevIntent,
+                context, appWidgetId.coerceAtLeast(0) * 10 + 1, prevIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             views.setOnClickPendingIntent(R.id.widget_prev_week, prevPendingIntent)
@@ -216,9 +260,11 @@ open class ScheduleWidget : AppWidgetProvider() {
             // 设置下一周按钮点击事件
             val nextIntent = Intent(context, com.tyust.course.widget.ScheduleWidget::class.java).apply {
                 action = ACTION_NEXT_WEEK
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                data = android.net.Uri.parse("buctwidget://week/$appWidgetId/$ACTION_NEXT_WEEK")
             }
             val nextPendingIntent = PendingIntent.getBroadcast(
-                context, 1, nextIntent,
+                context, appWidgetId.coerceAtLeast(0) * 10 + 2, nextIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             views.setOnClickPendingIntent(R.id.widget_next_week, nextPendingIntent)
@@ -230,16 +276,19 @@ open class ScheduleWidget : AppWidgetProvider() {
             }
             views.setRemoteAdapter(R.id.widget_list, serviceIntent)
 
-            // 点击标题进「小组件配置」，点击列表项跳转到 app
+            // 点击标题/周次进「小组件配置」，点击列表项跳转到 app
             val configIntent = Intent(context, com.buct.course.ui.widget.WidgetConfigActivity::class.java).apply {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 putExtra(com.buct.course.ui.widget.WidgetConfigActivity.EXTRA_IS_DAY, false)
+                data = android.net.Uri.parse("buctwidget://config/week/$appWidgetId")
             }
             val titleClickPendingIntent = PendingIntent.getActivity(
                 context, appWidgetId + 2000, configIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            views.setOnClickPendingIntent(R.id.widget_title, titleClickPendingIntent)
+            if (!hideTitle) {
+                views.setOnClickPendingIntent(R.id.widget_title, titleClickPendingIntent)
+            }
             views.setOnClickPendingIntent(R.id.widget_week_info, titleClickPendingIntent)
 
             // 点击列表项跳转到 app
@@ -249,7 +298,11 @@ open class ScheduleWidget : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             views.setPendingIntentTemplate(R.id.widget_list, clickPendingIntent)
-            WidgetTextSizes.apply(views, WidgetTextSizes.WEEK_ROOT, WidgetTextSizes.scale(context))
+            WidgetTextSizes.apply(
+                views,
+                if (hideTitle) WidgetTextSizes.WEEK_ROOT_NO_TITLE else WidgetTextSizes.WEEK_ROOT,
+                WidgetTextSizes.scale(context)
+            )
 
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }

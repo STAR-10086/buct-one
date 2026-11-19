@@ -124,7 +124,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
     ) {
         SystemTopBar(
             title = "桌面小组件",
-            subtitle = "每个小组件都能单独设置名称、账号或朋友的课表",
+            subtitle = "每个小组件都能单独设置名称或显示账号",
             navigationIcon = { SystemIconButton(Icons.AutoMirrored.Filled.ArrowBack, "返回", onBack) }
         )
 

@@ -74,22 +74,9 @@ class ScheduleRemoteViewsFactory(
                 courses = emptyList()
             }
             // 预构建「该节次是否有课」：空行可快速返回，避免每次逐格 find
-            // 周数：24 小时内手动切过周则保留，否则自动回到今天所在周（与今日课表小组件统一）
+            // 周数：优先读取实例独立的手动切周状态（与 ScheduleWidget 保持一致）
             val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
-            val lastNav = widgetPrefs.getLong("last_week_nav", 0L)
-            val freshNav = System.currentTimeMillis() - lastNav < 86_400_000L
-            val defaultWeek = getDefaultWeek()
-            currentWeek = if (freshNav) {
-                widgetPrefs.getInt("current_week", defaultWeek)
-            } else {
-                if (widgetPrefs.getInt("current_week", defaultWeek) != defaultWeek) {
-                    widgetPrefs.edit()
-                        .putInt("current_week", defaultWeek)
-                        .putLong("last_week_nav", 0L)
-                        .apply()
-                }
-                defaultWeek
-            }
+            currentWeek = ScheduleWidget.readWeek(context, widgetPrefs, appWidgetId)
             rowHasCourse = BooleanArray(12) { false }
             for (course in courses) {
                 val parsedWeeks = ScheduleWeeks.parse(course.course.weeks)
@@ -299,10 +286,5 @@ class ScheduleRemoteViewsFactory(
         5 -> R.drawable.widget_course_bottom_red
         6 -> R.drawable.widget_course_bottom_cyan
         else -> R.drawable.widget_course_bottom_brown
-    }
-
-    private fun getDefaultWeek(): Int {
-        val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
-        return WidgetScheduleSource.weekForDate(startMillis)
     }
 }
