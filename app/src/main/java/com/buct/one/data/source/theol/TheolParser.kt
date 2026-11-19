@@ -23,8 +23,9 @@ import java.util.TimeZone
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object TheolParser {
-    const val PARSER_VERSION = 3
+    const val PARSER_VERSION = 4
     const val BASE_URL = "https://course.buct.edu.cn"
+    private const val COURSE_HOME_PATH = "/meol/jpk/course/layout/newpage/index.jsp"
 
     private val testStartRegex = Regex("""gotostart\('(\d+)'""")
     private val deadlineFormats = listOf(
@@ -85,6 +86,38 @@ object TheolParser {
             }
         }
         return homeworks to tests
+    }
+
+    /**
+     * 解析全量课程目录页（/meol/welcomepage/student/course_list.jsp 或旧版 /meol/homepage/student/index.jsp）。
+     * 用于补齐“所有作业均已交完、不再出现在 interaction_reminder_v8.jsp 待办提醒中”的已选课程，
+     * 使得用户仍能在「全部」列表中看到已完成/已截止的历史作业。
+     */
+    fun parseCatalogCourses(html: String, sourceUrl: String = BASE_URL): List<TheolCourseInfo> {
+        val doc = Jsoup.parse(html, sourceUrl)
+        val courses = mutableListOf<TheolCourseInfo>()
+        val seen = mutableSetOf<String>()
+
+        for (a in doc.select("a[href]")) {
+            val resolved = resolveHttpUrl(a.attr("href"), sourceUrl)
+            if (resolved.isEmpty()) continue
+            val path = runCatching { URI(resolved).path }.getOrNull().orEmpty()
+            if (!path.equals(COURSE_HOME_PATH, ignoreCase = true)) continue
+            val lid = extractPositiveIdParam(resolved, "courseId")
+                .ifEmpty { extractPositiveIdParam(resolved, "lid") }
+            val name = a.text().trim()
+            if (lid.isEmpty() || name.isEmpty() || !seen.add(lid)) continue
+            val cleanBase = BASE_URL.trimEnd('/')
+            courses.add(
+                TheolCourseInfo(
+                    lid = lid,
+                    courseName = name,
+                    type = "homework",
+                    url = "$cleanBase$COURSE_HOME_PATH?courseId=$lid"
+                )
+            )
+        }
+        return courses
     }
 
     /** 构造课程在线测验列表入口（MEOL 无独立的 test_start.jsp 页面，统一由列表页点击开始） */
@@ -320,7 +353,8 @@ object TheolParser {
             isGroup = isGroup,
             status = status,
             detailHref = detailHref,
-            submitHref = submitHref
+            submitHref = submitHref,
+            resultHref = resultHref
         )
     }
 

@@ -5,6 +5,7 @@ import android.webkit.MimeTypeMap
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.MatchingMemoryCookieJar
+import com.buct.one.data.model.TheolCourseInfo
 import com.buct.one.data.model.TheolDownloadedFile
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
@@ -61,7 +62,9 @@ class TheolClient {
         const val MEOL_BASE = "https://course.buct.edu.cn"
         const val MEOL_SSO_SERVICE = "https://course.buct.edu.cn/meol/homepage/common/sso_login.jsp"
         const val MEOL_WELCOME_HOME = "https://course.buct.edu.cn/meol/welcomepage/student/index.jsp"
+        const val MEOL_COURSE_CATALOG_URL = "https://course.buct.edu.cn/meol/welcomepage/student/course_list.jsp"
         const val MEOL_LEGACY_HOME_PATH = "/meol/homepage/student/index.jsp"
+        const val MEOL_LEGACY_HOME_URL = "https://course.buct.edu.cn/meol/homepage/student/index.jsp"
         const val MEOL_REMINDER_URL = "https://course.buct.edu.cn/meol/welcomepage/student/interaction_reminder_v8.jsp"
         const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
         private const val UA = USER_AGENT
@@ -606,7 +609,26 @@ class TheolClient {
         throw IOException("附件下载未完成，请稍后重试")
     }
 
-    /** 抓取北化在线所有待办作业与测验（支持复用探针已拿到的 reminderHtml 与测验页并发） */
+    /**
+     * 拉取学生全量已选课程目录（优先 /meol/welcomepage/student/course_list.jsp，兼容回退 /meol/homepage/student/index.jsp）。
+     * 用于发现“所有作业都已提交完毕、不再出现在 interaction_reminder_v8.jsp 提醒页”的课程。
+     */
+    fun fetchAllCatalogCourses(): List<TheolCourseInfo> {
+        val primary = runCatching {
+            val html = fetchHtml(MEOL_COURSE_CATALOG_URL, MEOL_WELCOME_HOME)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) emptyList()
+            else TheolParser.parseCatalogCourses(html, MEOL_COURSE_CATALOG_URL)
+        }.getOrDefault(emptyList())
+        if (primary.isNotEmpty()) return primary
+
+        return runCatching {
+            val html = fetchHtml(MEOL_LEGACY_HOME_URL, MEOL_WELCOME_HOME)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) emptyList()
+            else TheolParser.parseCatalogCourses(html, MEOL_LEGACY_HOME_URL)
+        }.getOrDefault(emptyList())
+    }
+
+    /** 抓取北化在线所有待办与已完成作业及测验（融合待办提醒页 + 全量课程目录，解决交完作业后科目消失的问题） */
     fun fetchPendingSnapshot(
         nowMillis: Long = System.currentTimeMillis(),
         prefetchedReminderHtml: String? = null
@@ -620,7 +642,39 @@ class TheolClient {
                 lastSessionVerifiedAt = System.currentTimeMillis()
             }
 
-        val (hwCourses, testCourses) = TheolParser.parsePendingCourses(reminderHtml, MEOL_BASE)
+        val (pendingHwCourses, pendingTestCourses) = TheolParser.parsePendingCourses(reminderHtml, MEOL_BASE)
+        val catalogCourses = fetchAllCatalogCourses()
+
+        // 1) 作业课程：待办提醒课程优先（保证有未交作业的科目最先抓取），随后合并全量课程目录中已交完作业的科目
+        val hwCourseMap = LinkedHashMap<String, TheolCourseInfo>()
+        for (c in pendingHwCourses) {
+            hwCourseMap[c.lid] = c
+        }
+        for (c in catalogCourses) {
+            if (!hwCourseMap.containsKey(c.lid)) {
+                hwCourseMap[c.lid] = c
+            }
+        }
+        val hwCourses = hwCourseMap.values.toList()
+
+        // 2) 测验课程：同样将全量课程目录合并进来（排除公共无效测验课程 24199 / 27215），以便看到已完成的历史测验
+        val testCourseMap = LinkedHashMap<String, TheolCourseInfo>()
+        for (c in pendingTestCourses) {
+            testCourseMap[c.lid] = c
+        }
+        for (c in catalogCourses) {
+            if (c.lid == "24199" || c.lid == "27215") continue
+            if (!testCourseMap.containsKey(c.lid)) {
+                testCourseMap[c.lid] = TheolCourseInfo(
+                    lid = c.lid,
+                    courseName = c.courseName,
+                    type = "test",
+                    url = TheolParser.buildTestListUrl(c.lid, MEOL_BASE)
+                )
+            }
+        }
+        val testCourses = testCourseMap.values.toList()
+
         val allHomeworks = mutableListOf<TheolHomeworkItem>()
         val seenHwIds = mutableSetOf<String>()
         val allTests = mutableListOf<TheolTestItem>()
@@ -687,8 +741,31 @@ class TheolClient {
             }
         }
 
-        allHomeworks.sortWith(compareBy<TheolHomeworkItem>({ !it.canSubmit }, { it.deadlineMillis ?: Long.MAX_VALUE }))
-        allTests.sortWith(compareBy<TheolTestItem>({ !it.canStart }, { it.endTimeMillis ?: Long.MAX_VALUE }))
+        // 排序：可提交的未交作业最前（按截止时间升序），其次是已完成（已提交）的作业（按截止时间降序，最近交的排前面），最后是已截止未交
+        allHomeworks.sortWith(
+            compareBy<TheolHomeworkItem> {
+                when {
+                    it.canSubmit -> 0
+                    it.hasResult || it.status == "已完成" -> 1
+                    else -> 2
+                }
+            }.thenComparator { a, b ->
+                if (a.canSubmit && b.canSubmit) {
+                    compareValues(a.deadlineMillis ?: Long.MAX_VALUE, b.deadlineMillis ?: Long.MAX_VALUE)
+                } else {
+                    compareValues(b.deadlineMillis ?: 0L, a.deadlineMillis ?: 0L)
+                }
+            }
+        )
+        allTests.sortWith(
+            compareBy<TheolTestItem> {
+                when {
+                    it.canStart -> 0
+                    it.hasResult || it.status == "已完成" -> 1
+                    else -> 2
+                }
+            }.thenBy { it.endTimeMillis ?: Long.MAX_VALUE }
+        )
 
         return TheolSnapshot(
             homeworks = allHomeworks,

@@ -418,7 +418,11 @@ fun HomeworkRoute() {
                         item { EmptyGlassHint("暂无作业记录，请点击右上角刷新或登录北化在线。") }
                     } else {
                         items(homeworks, key = { it.hwtid }) { hw ->
-                            val targetUrl = hw.submitHref.ifBlank { hw.detailHref }
+                            val targetUrl = when {
+                                hw.canSubmit -> hw.submitHref.ifBlank { hw.detailHref }
+                                hw.resultHref.isNotBlank() -> hw.resultHref
+                                else -> hw.detailHref
+                            }
                             HomeworkGlassCard(
                                 hw = hw,
                                 onOpenDetail = { selectedHomeworkForDetail = hw },
@@ -550,7 +554,11 @@ fun HomeworkRoute() {
             onDismiss = { selectedHomeworkForDetail = null },
             onGoSubmit = {
                 selectedHomeworkForDetail = null
-                val targetUrl = hw.submitHref.ifBlank { hw.detailHref }
+                val targetUrl = when {
+                    hw.canSubmit -> hw.submitHref.ifBlank { hw.detailHref }
+                    hw.resultHref.isNotBlank() -> hw.resultHref
+                    else -> hw.detailHref
+                }
                 TheolSubmitWebViewActivity.launch(
                     context = context,
                     url = targetUrl,
@@ -800,6 +808,14 @@ private fun HomeworkGlassCard(
                         if (hw.canSubmit) {
                             DropdownMenuItem(
                                 text = { Text("直接去交作业") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onOpenSubmit()
+                                }
+                            )
+                        } else if (hw.hasResult || hw.resultHref.isNotBlank()) {
+                            DropdownMenuItem(
+                                text = { Text("查看已交结果") },
                                 onClick = {
                                     menuExpanded = false
                                     onOpenSubmit()
@@ -1143,7 +1159,13 @@ private fun HomeworkDetailDialog(
                     }
                 }
                 Button(onClick = onGoSubmit) {
-                    Text(if (hw.canSubmit) "去交作业" else "打开作业页")
+                    Text(
+                        when {
+                            hw.canSubmit -> "去交作业"
+                            hw.hasResult || hw.resultHref.isNotBlank() -> "查看已交结果"
+                            else -> "打开作业页"
+                        }
+                    )
                 }
             }
         },

@@ -24,7 +24,8 @@ data class TheolHomeworkItem(
     val isGroup: Boolean = false,
     val status: String = "",
     val detailHref: String = "",
-    val submitHref: String = ""
+    val submitHref: String = "",
+    val resultHref: String = ""
 )
 
 data class TheolHomeworkAttachment(

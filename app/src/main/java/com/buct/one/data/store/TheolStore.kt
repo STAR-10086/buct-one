@@ -278,6 +278,7 @@ class TheolStore(private val rootDir: File) {
                             put("status", hw.status)
                             put("detailHref", hw.detailHref)
                             put("submitHref", hw.submitHref)
+                            put("resultHref", hw.resultHref)
                         }
                     )
                 }
@@ -330,7 +331,8 @@ class TheolStore(private val rootDir: File) {
                         isGroup = o.optBoolean("isGroup", false),
                         status = o.optString("status", ""),
                         detailHref = o.optString("detailHref", ""),
-                        submitHref = o.optString("submitHref", "")
+                        submitHref = o.optString("submitHref", ""),
+                        resultHref = o.optString("resultHref", "")
                     )
                 )
             }
