@@ -290,7 +290,7 @@ fun GradesRoute() {
                                         return
                                     }
                                     val current = workingList[detailIndex]
-                                    val jobId = jobIdMap[current.courseName]
+                                    val jobId = GradesLogic.lookupCourseJobId(jobIdMap, current.courseName, current.courseCode)
                                         ?: current.jobId.ifEmpty { current.jxbId }
                                     if (jobId.isNullOrEmpty()) {
                                         detailIndex++
@@ -310,7 +310,11 @@ fun GradesRoute() {
                                             if (!requests.isCurrent(requestAccountKey)) return
                                             val comps = GradesLogic.parseComponentsXml(detailJson)
                                             if (comps.isNotEmpty()) {
-                                                workingList[detailIndex] = workingList[detailIndex].copy(detail = comps)
+                                                workingList[detailIndex] = workingList[detailIndex].copy(
+                                                    detail = comps,
+                                                    jxbId = workingList[detailIndex].jxbId.ifEmpty { jobId },
+                                                    jobId = workingList[detailIndex].jobId.ifEmpty { jobId }
+                                                )
                                             }
                                             detailIndex++
                                             nextDetail()
@@ -339,7 +343,13 @@ fun GradesRoute() {
     // 第二阶段：总体接口部分课程只有课程代码(kch_id)而非教学班ID(jxb_id)，分项接口查不到；
     // 按学期拉 N305007 课程列表(cjcx_cxXsKcList)拿到真实 jxb_id，再逐课补分项
     fun fetchMissingJxbDetails(school: SchoolConfig) {
-        val missing = overallGrades.filter { it.detail.isBlank() }
+        val missing = overallGrades.filter {
+            it.detail.isBlank() &&
+                it.grade.isNotBlank() &&
+                it.grade != "--" &&
+                it.grade != "null" &&
+                it.year.isNotBlank()
+        }
         if (missing.isEmpty()) { Log.d("GradesRoute", "OVERALL_DETAIL_ALL_DONE"); return }
         val semGroups = missing.groupBy {
             val year = it.year.toIntOrNull() ?: 2024
@@ -368,7 +378,7 @@ fun GradesRoute() {
                         if (cIdx >= semCourses.size) { nextSemester(); return }
                         val course = semCourses[cIdx]
                         cIdx++
-                        val realJxb = jobIdMap[course.courseName]
+                        val realJxb = GradesLogic.lookupCourseJobId(jobIdMap, course.courseName, course.courseCode)
                         if (realJxb.isNullOrBlank()) { nextCourse(); return }
                         Log.d("GradesRoute", "OVERALL_REJXB: ${course.courseName} -> $realJxb ($semester)")
                         CourseApiClient.getInstance().fetchGradeDetails(school, semester, realJxb, object : Callback {
@@ -379,7 +389,9 @@ fun GradesRoute() {
                                 if (comps.isNotEmpty()) {
                                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                                         overallGrades = overallGrades.map {
-                                            if (it.courseName == course.courseName && it.detail.isBlank()) it.copy(detail = comps) else it
+                                            val sameCourse = (it.courseCode.isNotBlank() && it.courseCode == course.courseCode) ||
+                                                GradesLogic.normalizeCourseKey(it.courseName) == GradesLogic.normalizeCourseKey(course.courseName)
+                                            if (sameCourse && it.detail.isBlank()) it.copy(detail = comps, jxbId = realJxb, jobId = realJxb) else it
                                         }
                                         saveOverallLocal(context, overallGrades)
                                     }
@@ -398,7 +410,14 @@ fun GradesRoute() {
     // 总体成绩页：N105515 返回的课程行无分项（平时/期末），按 jxb_id 逐课调用 N305007 分项接口补全 detail
     fun fetchOverallGradeDetails(school: SchoolConfig) {
         if (isDemoMode) return
-        val targets = overallGrades.filter { it.detail.isBlank() && (it.jxbId.isNotBlank() || it.jobId.isNotBlank()) }
+        val targets = overallGrades.filter {
+            it.detail.isBlank() &&
+                it.grade.isNotBlank() &&
+                it.grade != "--" &&
+                it.grade != "null" &&
+                it.year.isNotBlank() &&
+                (it.jxbId.isNotBlank() || it.jobId.isNotBlank())
+        }
         Log.d("GradesRoute", "OVERALL_DETAIL: targets=${targets.size} all=${overallGrades.size}")
         targets.forEach {
             Log.d("GradesRoute", "OVERALL_DETAIL_ITEM: ${it.courseName} jxb='${it.jxbId}' job='${it.jobId}' year='${it.year}' term='${it.term}'")
@@ -553,8 +572,9 @@ fun GradesRoute() {
                                      saveCurriculumLocal(context, enrichedNodes)
                                  }
                                  // 显示全部课程（含未出分/在读，像学业情况页那样信息全）；未出分的在分布区单列「未出分」
-                                 // 网络返回不带分项，必须先把缓存里已有的分项接过来，否则每次刷新都会把「成绩构成」抹掉
-                                 val carried = carryDetails(cachedOverall + overallGrades, resultGrades)
+                                 // 网络返回不带分项，必须先把缓存里已有的分项（含已查询过的单学期成绩缓存）接过来，否则每次刷新都会把「成绩构成」抹掉
+                                 val cachedSemesterGrades = semesters.flatMap { loadGradesLocal(context, it).orEmpty() }
+                                 val carried = carryDetails(cachedOverall + overallGrades + semesterGrades + cachedSemesterGrades, resultGrades)
                                  overallGrades = carried
                                  overallLoaded = true
                                  overallStats = GradesLogic.calculateStats(carried, gpa, credits, count)
@@ -565,7 +585,12 @@ fun GradesRoute() {
                                      overallStats = GradesLogic.calculateStats(list, gpa, credits, count)
                                      saveOverallLocal(context, list)
                                  }
-                                 fun needsDetail(item: GradeItemUi) = item.detail.isBlank() && item.grade.isNotBlank()
+                                 fun needsDetail(item: GradeItemUi) =
+                                     item.detail.isBlank() &&
+                                         item.grade.isNotBlank() &&
+                                         item.grade != "--" &&
+                                         item.grade != "null" &&
+                                         item.year.isNotBlank()
 
                                  // 已出分但连 jxbId 都没有的，才需要走全学期发现通道（最重的一段）；
                                  // 其余缺口逐课补分项即可；完全没缺口就直接收工——这是加载慢的主因
@@ -575,13 +600,19 @@ fun GradesRoute() {
                                      // 融合：后台用 N305007「全部」通道覆盖同课程的明细，未出分的课程保持原样
                                      fetchAllSemestersGrades(school) { allMerged ->
                                          if (allMerged.isEmpty()) { fetchOverallGradeDetails(school); return@fetchAllSemestersGrades }
-                                         val mergedByName = allMerged.associateBy { it.courseName }
+                                         val mergedByCode = allMerged.filter { it.courseCode.isNotBlank() }.associateBy { it.courseCode }
+                                         val mergedByName = allMerged.associateBy { GradesLogic.normalizeCourseKey(it.courseName) }
                                          val merged = workList.map { g ->
-                                             val m = mergedByName[g.courseName]
+                                             val m = (if (g.courseCode.isNotBlank()) mergedByCode[g.courseCode] else null)
+                                                 ?: mergedByName[GradesLogic.normalizeCourseKey(g.courseName)]
                                              if (m != null) m.copy(
                                                  detail = m.detail.ifBlank { g.detail },
-                                                 grade = m.grade, jxbId = m.jxbId, jobId = m.jobId,
-                                                 year = m.year, term = m.term, gpa = m.gpa
+                                                 grade = m.grade,
+                                                 jxbId = m.jxbId.ifBlank { g.jxbId },
+                                                 jobId = m.jobId.ifBlank { g.jobId },
+                                                 year = m.year.ifBlank { g.year },
+                                                 term = m.term.ifBlank { g.term },
+                                                 gpa = m.gpa.ifBlank { g.gpa }
                                              ) else g
                                          }.toMutableList()
                                          Log.d("GradesRoute", "ALLSEM_MERGED: ${allMerged.size} merged=${merged.size}")
@@ -891,7 +922,8 @@ val termDisplay = when (item.term) {
 }
 /**
  * 总体页拿到的新成绩不含「成绩构成」，直接覆盖会把之前补好的分项冲掉。
- * 以**课程代码**为准匹配（同一门课跨学期代码不变），代码为空时退回课程名。
+ * 以**课程代码**为准匹配（同一门课跨学期代码不变），代码为空时退回规范化课程名。
+ * 同时只在缓存里的 jxbId 确实不是 kch_id（即非 N105515 伪教学班 ID）时才继承 jxbId。
  */
 private fun carryDetails(
     previous: List<com.buct.course.ui.screen.GradeItemUi>,
@@ -900,13 +932,19 @@ private fun carryDetails(
     val withDetail = previous.filter { it.detail.isNotBlank() }
     if (withDetail.isEmpty()) return incoming
     val byCode = withDetail.filter { it.courseCode.isNotBlank() }.groupBy { it.courseCode }
-    val byName = withDetail.groupBy { it.courseName }
+    val byName = withDetail.groupBy { GradesLogic.normalizeCourseKey(it.courseName) }
     val result = incoming.map { item ->
         if (item.detail.isNotBlank()) return@map item
-        val candidates = byCode[item.courseCode] ?: byName[item.courseName] ?: return@map item
+        val candidates = (if (item.courseCode.isNotBlank()) byCode[item.courseCode] else null)
+            ?: byName[GradesLogic.normalizeCourseKey(item.courseName)]
+            ?: return@map item
         val sameTerm = candidates.firstOrNull { it.year == item.year && it.term == item.term }
         val picked = sameTerm ?: candidates.first()
-        item.copy(detail = picked.detail)
+        item.copy(
+            detail = picked.detail,
+            jxbId = item.jxbId.ifBlank { picked.jxbId },
+            jobId = item.jobId.ifBlank { picked.jobId }
+        )
     }
     Log.d("GradesRoute", "CARRY_DETAIL: prev=${previous.size} withDetail=${withDetail.size} incoming=${incoming.size} out=${result.count { it.detail.isNotBlank() }}")
     return result
@@ -947,7 +985,14 @@ private fun escapeCsv(value: String): String {
 
 // Logic Object
 private object GradesLogic {
-    /** 解析 N305007 课程列表响应：按课程名提取 jxb_id（页面用于逐课查分项） */
+    /** 规范化课程名用于跨接口对齐（统一全角/半角括号与空白） */
+    fun normalizeCourseKey(name: String): String =
+        name.trim()
+            .replace('（', '(')
+            .replace('）', ')')
+            .replace(" ", "")
+
+    /** 解析 N305007 课程列表响应：同时按原课程名、规范化课程名、课程代码提取真实 jxb_id（用于逐课查分项） */
     fun parseCourseJobIds(json: String): Map<String, String> {
         val map = mutableMapOf<String, String>()
         try {
@@ -956,13 +1001,31 @@ private object GradesLogic {
             for (i in 0 until items.length()) {
                 val it = items.getJSONObject(i)
                 val name = it.optString("kcmc", "").trim()
+                val code = it.optString("kch", "").trim()
+                    .ifEmpty { it.optString("kch_id", "").trim() }
                 val job = it.optString("jxb_id", "").trim()
                     .ifEmpty { it.optString("job_id", "").trim() }
                     .ifEmpty { it.optString("JOB_ID", "").trim() }
-                if (name.isNotEmpty() && job.isNotEmpty()) map[name] = job
+                if (job.isEmpty()) continue
+                if (name.isNotEmpty()) {
+                    map[name] = job
+                    map["norm:${normalizeCourseKey(name)}"] = job
+                }
+                if (code.isNotEmpty()) {
+                    map["code:$code"] = job
+                }
             }
         } catch (e: Exception) {}
         return map
+    }
+
+    fun lookupCourseJobId(jobIdMap: Map<String, String>, courseName: String, courseCode: String): String? {
+        if (courseCode.isNotBlank()) {
+            jobIdMap["code:${courseCode.trim()}"]?.let { if (it.isNotBlank()) return it }
+        }
+        jobIdMap[courseName]?.let { if (it.isNotBlank()) return it }
+        jobIdMap["norm:${normalizeCourseKey(courseName)}"]?.let { if (it.isNotBlank()) return it }
+        return null
     }
 
     /** 解析 N305007 分项接口响应：行字段 xmlInc（含占比）+ xmoJ（分数） */
@@ -1043,10 +1106,9 @@ private object GradesLogic {
                                  else singleRowComponents.joinToString(" | ")
                 Log.e("GradesRoute", "GRADE_DETAIL_FIRST: " + detailText)
 
-                val jxbId = first.optString("jxb_id", first.optString("JXB_ID", ""))
-                    .ifEmpty { first.optString("kch_id", first.optString("KCH_ID", "")) }
-                val jobId = first.optString("job_id", first.optString("JOB_ID", ""))
-                    .ifEmpty { first.optString("jxb_id", first.optString("JXB_ID", "")) }
+                val jxbId = first.optString("jxb_id", first.optString("JXB_ID", "")).trim()
+                val jobId = first.optString("job_id", first.optString("JOB_ID", "")).trim()
+                    .ifEmpty { jxbId }
 
                 result.add(
                     GradeItemUi(
