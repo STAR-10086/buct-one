@@ -479,30 +479,14 @@ fun DashboardRoute(
             }
         }
 
-        // 卡片 4：企微风格工作台应用卡片（已移除与底部 TabBar 重复的课表/成绩/北化在线/设置按钮）
+        // 卡片 4：查空闲教室独立卡片（已移除与上方大卡片重复的校园卡/实验课表/抢讲座小卡片）
         item {
             DashboardGlassCard(
-                title = "工作台服务",
-                badge = "快捷直达",
-                badgeColor = MaterialTheme.colorScheme.primary
+                title = "查空闲教室",
+                badge = "第 ${classroomSlot.week} 周 · 周${classroomDayLabel}",
+                badgeColor = MaterialTheme.colorScheme.primary,
+                onClick = { showEmptyClassroomDialog = true }
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    QuickActionTile("校园卡", Icons.Outlined.CreditCard, Modifier.weight(1f)) {
-                        context.startActivity(Intent(context, EcardActivity::class.java))
-                    }
-                    QuickActionTile("实验课表", Icons.Outlined.Science, Modifier.weight(1f)) {
-                        SjcxActivity.launch(context, initialTab = 0)
-                    }
-                    QuickActionTile("抢讲座", Icons.Outlined.Campaign, Modifier.weight(1f)) {
-                        SjcxActivity.launch(context, initialTab = 1)
-                    }
-                    QuickActionTile("空闲教室", Icons.Outlined.MeetingRoom, Modifier.weight(1f)) {
-                        showEmptyClassroomDialog = true
-                    }
-                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -521,12 +505,12 @@ fun DashboardRoute(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "查空闲教室",
+                            text = "自习室 / 空闲教室查询",
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "第 ${classroomSlot.week} 周 · 周${classroomDayLabel} · 第 ${classroomSlot.period} 节 · 可自由切换",
+                            text = "当前定位：第 ${classroomSlot.week} 周 · 周${classroomDayLabel} · 第 ${classroomSlot.period} 节 · 点击自由切换",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
