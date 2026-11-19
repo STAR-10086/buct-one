@@ -61,7 +61,7 @@ object BottomNavPreferences {
     }
 
     fun isVisible(page: StartupPage): Boolean =
-        page == StartupPage.Settings || page !in hidden()
+        page in defaultOrder && (page == StartupPage.Settings || page !in hidden())
 
     /** 底栏实际渲染的页面，按用户顺序。 */
     fun visiblePages(): List<StartupPage> = order().filter { isVisible(it) }

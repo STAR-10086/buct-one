@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.buct.course.ui.system.SystemCompactSegmentedControl
+import com.buct.course.ui.system.SystemIconButton
 
 /**
  * 「课程」页 = 课程 + 抢课 两个二级目录。
@@ -36,7 +39,7 @@ import com.buct.course.ui.system.SystemCompactSegmentedControl
  * 就不会再叠一层，不会出现顶栏下面多一条空白。
  */
 @Composable
-fun CourseSectionRoute() {
+fun CourseSectionRoute(onBack: (() -> Unit)? = null) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -44,8 +47,12 @@ fun CourseSectionRoute() {
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (onBack != null) {
+                SystemIconButton(Icons.AutoMirrored.Filled.ArrowBack, "返回", onBack)
+            }
             SystemCompactSegmentedControl(
                 options = listOf("课程", "抢课"),
                 selectedIndex = tab,

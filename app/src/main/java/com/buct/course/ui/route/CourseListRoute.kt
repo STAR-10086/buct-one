@@ -1787,7 +1787,28 @@ private class CourseListLogicHelper(
             tabParamsList.clear()
             tabParamsList.addAll(parseCourseTabParamsFromIndexHtml(html, indexParams))
             onTabParams?.invoke(tabParamsList.toList())
-            
+
+            val hasValidXkkz = tabParamsList.any { it.xkkzId.isNotBlank() }
+            if (!hasValidXkkz) {
+                val rawAlert = Regex(
+                    """<div[^>]*class=["'][^"']*(?:alert|nodata|error_text)[^"']*["'][^>]*>(.*?)</div>""",
+                    setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+                ).find(html)?.groupValues?.getOrNull(1)
+                    ?.replace(Regex("<[^>]+>"), " ")
+                    ?.replace(Regex("\\s+"), " ")
+                    ?.trim()
+                    .orEmpty()
+                val notice = when {
+                    rawAlert.isNotBlank() -> rawAlert
+                    html.contains("不属于选课") || html.contains("非选课时间") ||
+                        html.contains("不在选课时间") || html.contains("未开放选课") ->
+                        "当前不在选课开放时间，暂无法拉取可选课程"
+                    else -> "当前暂无可选课程数据或选课未开放"
+                }
+                onError("$notice（仍可切换顶部「抢课」页管理队列与定时任务）")
+                return
+            }
+
             fetchDisplayPage()
         } catch (e: Exception) {
             onError("解析Index失败: ${e.message}")
