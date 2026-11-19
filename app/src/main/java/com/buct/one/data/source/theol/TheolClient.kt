@@ -4,6 +4,7 @@ import android.util.Base64
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.MatchingMemoryCookieJar
+import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.model.TheolTestItem
@@ -71,20 +72,25 @@ class TheolClient {
         .followSslRedirects(true)
         .build()
 
-    /** 从持久化存储注入历史 Cookie（例如已登录的 sidportal 或 course.buct.edu.cn 会话） */
+    /** 从持久化存储注入历史 Cookie（MEOL 的 JSESSIONID 默认作用域为 /meol，避免与根路径冲突） */
     fun importCookies(host: String, cookieHeader: String) {
-        val url = "https://$host/".toHttpUrl()
+        val pathForHost = if (host.equals("course.buct.edu.cn", ignoreCase = true)) "/meol" else "/"
+        val url = "https://$host$pathForHost".toHttpUrl()
         val parsed = cookieHeader.split(';').mapNotNull { part ->
             val trimmed = part.trim()
             val eq = trimmed.indexOf('=')
             if (eq <= 0) return@mapNotNull null
             val name = trimmed.substring(0, eq).trim()
             val value = trimmed.substring(eq + 1).trim()
+            if (value.isEmpty()) return@mapNotNull null
+            val domain = if (name == "_zte_cid_") "buct.edu.cn" else host
+            val path = if (name == "_zte_cid_") "/" else pathForHost
             Cookie.Builder()
                 .name(name)
                 .value(value)
-                .domain(host)
-                .path("/")
+                .domain(domain)
+                .path(path)
+                .expiresAt(Long.MAX_VALUE)
                 .build()
         }
         if (parsed.isNotEmpty()) {
@@ -92,10 +98,23 @@ class TheolClient {
         }
     }
 
-    /** 导出指定域名的 Cookie 字符串以便加密保存 */
+    /** 导出指定域名的 Cookie 字符串以便加密保存（course.buct.edu.cn 按 /meol/ 路径检索） */
     fun exportCookieHeader(host: String): String {
-        val cookies = cookieJar.loadForRequest("https://$host/".toHttpUrl())
-        return cookies.joinToString("; ") { "${it.name}=${it.value}" }
+        val probeUrl = if (host.equals("course.buct.edu.cn", ignoreCase = true)) {
+            "https://$host/meol/homepage/student/index.jsp".toHttpUrl()
+        } else {
+            "https://$host/login".toHttpUrl()
+        }
+        val merged = LinkedHashMap<String, String>()
+        cookieJar.loadForRequest(probeUrl).forEach { cookie ->
+            merged[cookie.name] = cookie.value
+        }
+        cookieJar.cookiesSetBy(host, 443).forEach { cookie ->
+            if (!merged.containsKey(cookie.name) && cookie.value.isNotBlank()) {
+                merged[cookie.name] = cookie.value
+            }
+        }
+        return merged.entries.joinToString("; ") { "${it.key}=${it.value}" }
     }
 
     /** 检查当前会话是否可直接访问北化在线（或通过已有 TGT 自动换票） */
@@ -226,13 +245,61 @@ class TheolClient {
         }
     }
 
+    /** 在服务端 Tomcat HttpSession 中激活当前课程上下文，防止直达作业详情/提交页报 Permission Denied */
+    fun enterCourseContext(courseLid: String): Boolean {
+        val lid = courseLid.trim()
+        if (lid.isEmpty()) return true
+        val courseHome = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=${URLEncoder.encode(lid, "UTF-8")}"
+        val courseHtml = fetchHtml(courseHome, "$MEOL_BASE/meol/homepage/student/index.jsp")
+        if (TheolParser.isPermissionDeniedOrExpired(courseHtml)) {
+            return false
+        }
+        val hwEntry = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
+        runCatching {
+            val req = Request.Builder()
+                .url(hwEntry)
+                .header("User-Agent", UA)
+                .header("Referer", courseHome)
+                .get()
+                .build()
+            meolClient.newCall(req).execute().use { /* 同步激活作业栏目上下文 */ }
+        }
+        return true
+    }
+
+    /** 拉取单条作业详情（要求、附件等），自动建立课程上下文并在失效时尝试换票重试一次 */
+    fun fetchHomeworkDetail(
+        item: TheolHomeworkItem,
+        nowMillis: Long = System.currentTimeMillis()
+    ): TheolHomeworkDetail {
+        val rawDetailUrl = item.detailHref.ifBlank { "$MEOL_BASE/meol/common/hw/student/hwtask.view.jsp?hwtid=${item.hwtid}" }
+        val normalized = normalizeUrl(MEOL_BASE, rawDetailUrl) ?: rawDetailUrl
+        val secureUrl = if (normalized.startsWith("http://course.buct.edu.cn", ignoreCase = true)) {
+            "https://" + normalized.removePrefix("http://")
+        } else {
+            normalized
+        }
+        val referer = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
+
+        enterCourseContext(item.lid)
+        var html = fetchHtml(secureUrl, referer)
+        if (TheolParser.isPermissionDeniedOrExpired(html)) {
+            if (!ensureSessionActive() || !enterCourseContext(item.lid)) {
+                throw IOException("北化在线会话已过期，请刷新或重新登录")
+            }
+            html = fetchHtml(secureUrl, referer)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) {
+                throw IOException("北化在线提示权限不足或登录超时，请重新登录后重试")
+            }
+        }
+        return TheolParser.parseHomeworkDetail(html, secureUrl, item.hwtid, nowMillis)
+    }
+
     /** 抓取北化在线所有待办作业与测验 */
     fun fetchPendingSnapshot(nowMillis: Long = System.currentTimeMillis()): TheolSnapshot {
         val reminderUrl = "$MEOL_BASE/meol/welcomepage/student/interaction_reminder_v8.jsp"
         val reminderHtml = fetchHtml(reminderUrl, "$MEOL_BASE/meol/homepage/student/index.jsp")
-        if (reminderHtml.contains("type=\"password\"", ignoreCase = true) ||
-            reminderHtml.contains("login-page-flowkey")
-        ) {
+        if (TheolParser.isPermissionDeniedOrExpired(reminderHtml)) {
             throw IOException("北化在线会话已过期，请重新登录")
         }
 
@@ -326,7 +393,7 @@ class TheolClient {
                 }
                 if (!resp.isSuccessful) return@use
                 val html = decodeResponseBody(resp)
-                if (html.contains("type=\"password\"", ignoreCase = true)) {
+                if (TheolParser.isPermissionDeniedOrExpired(html)) {
                     throw IOException("课程会话已过期")
                 }
 

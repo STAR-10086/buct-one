@@ -27,6 +27,22 @@ data class TheolHomeworkItem(
     val submitHref: String = ""
 )
 
+data class TheolHomeworkAttachment(
+    val name: String,
+    val url: String
+)
+
+data class TheolHomeworkDetail(
+    val hwtid: String,
+    val title: String = "",
+    val deadline: String = "",
+    val score: String = "",
+    val publisher: String = "",
+    val contentText: String = "",
+    val attachments: List<TheolHomeworkAttachment> = emptyList(),
+    val fetchedAt: Long = 0L
+)
+
 data class TheolTestItem(
     val testId: String,
     val lid: String,

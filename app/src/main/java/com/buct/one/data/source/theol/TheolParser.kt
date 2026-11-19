@@ -1,11 +1,14 @@
 package com.buct.one.data.source.theol
 
 import com.buct.one.data.model.TheolCourseInfo
+import com.buct.one.data.model.TheolHomeworkAttachment
+import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolTestItem
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.jsoup.parser.Parser
 import java.net.URI
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -18,7 +21,7 @@ import java.util.TimeZone
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object TheolParser {
-    const val PARSER_VERSION = 1
+    const val PARSER_VERSION = 2
     const val BASE_URL = "https://course.buct.edu.cn"
 
     private val testStartRegex = Regex("""gotostart\('(\d+)'""")
@@ -298,6 +301,142 @@ object TheolParser {
             status = status,
             detailHref = detailHref,
             submitHref = submitHref
+        )
+    }
+
+    /** 判断页面是否因登录超时、权限拒绝或跳转统一认证页导致无法访问内容 */
+    fun isPermissionDeniedOrExpired(html: String): Boolean {
+        val lower = html.lowercase(Locale.ROOT)
+        return lower.contains("permission denied") ||
+            html.contains("登录时间超时") ||
+            html.contains("请重新登录") ||
+            lower.contains("type=\"password\"") ||
+            html.contains("login-page-flowkey")
+    }
+
+    /** 解析单个作业详情页（任务说明、截止时间、评分、发布人与附件链接） */
+    fun parseHomeworkDetail(
+        html: String,
+        detailUrl: String,
+        hwtid: String,
+        nowMillis: Long
+    ): TheolHomeworkDetail {
+        val doc = Jsoup.parse(html, detailUrl)
+        var title = ""
+        var deadline = ""
+        var score = ""
+        var publisher = ""
+
+        for (tr in doc.select("table.infotable tr, table.valuelist tr")) {
+            val ths = tr.select("> th")
+            val tds = tr.select("> td")
+            if (ths.size != 1 || tds.size != 1) continue
+            val label = ths.text().trim()
+            val value = tds.text().trim()
+            when {
+                label.contains("标题") && title.isEmpty() -> title = value
+                label.contains("截止") && deadline.isEmpty() -> deadline = value
+                (label.contains("评分") || label.contains("分数")) && score.isEmpty() -> score = value
+                label.contains("发布人") && publisher.isEmpty() -> publisher = value
+            }
+        }
+        if (title.isEmpty()) {
+            title = doc.selectFirst("h1, h2, h3, .title")?.text()?.trim().orEmpty()
+        }
+
+        val paragraphs = mutableListOf<String>()
+        val attachments = linkedMapOf<String, TheolHomeworkAttachment>()
+
+        fun normalizeDetailHref(rawHref: String): String {
+            val trimmed = rawHref.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("javascript:", true)) return ""
+            return runCatching {
+                val resolved = URL(URL(detailUrl), trimmed)
+                if (resolved.protocol != "http" && resolved.protocol != "https") return ""
+                val str = resolved.toString()
+                if (str.startsWith("http://course.buct.edu.cn", ignoreCase = true)) {
+                    "https://" + str.removePrefix("http://")
+                } else {
+                    str
+                }
+            }.getOrDefault("")
+        }
+
+        fun collectFromFragment(container: Element) {
+            val blocks = container.select("p, li, tr")
+            if (blocks.isEmpty()) {
+                val text = container.text().trim()
+                if (text.isNotEmpty() && paragraphs.lastOrNull() != text) {
+                    paragraphs.add(text)
+                }
+            } else {
+                for (block in blocks) {
+                    // 避免外层 tr/p 与内层重复收集
+                    if (block.tagName() == "tr" && block.select("p, li").isNotEmpty()) continue
+                    val text = block.text().trim()
+                    if (text.isNotEmpty() && paragraphs.lastOrNull() != text) {
+                        paragraphs.add(text)
+                    }
+                }
+            }
+            for (a in container.select("a[href]")) {
+                val resolved = normalizeDetailHref(a.attr("href"))
+                if (resolved.isEmpty()) continue
+                val label = a.text().trim().ifEmpty {
+                    resolved.substringAfterLast('/').substringBefore('?').ifEmpty { "附件" }
+                }
+                attachments.putIfAbsent(resolved, TheolHomeworkAttachment(name = label, url = resolved))
+            }
+        }
+
+        for (hidden in doc.select("input[type=hidden]")) {
+            val name = hidden.attr("name")
+            if (!name.contains("content", ignoreCase = true)) continue
+            val raw = hidden.attr("value").trim()
+            if (raw.isEmpty()) continue
+            val decoded = if (raw.contains("&lt;") || raw.contains("&gt;") || raw.contains("&amp;")) {
+                Parser.unescapeEntities(raw, false)
+            } else {
+                raw
+            }
+            val fragment = Jsoup.parseBodyFragment(decoded, detailUrl)
+            collectFromFragment(fragment.body())
+        }
+
+        if (paragraphs.isEmpty()) {
+            val fallbackBlocks = doc.select("div.content, div.description, div#body, td.text, table.infotable td.text")
+            for (block in fallbackBlocks) {
+                collectFromFragment(block)
+            }
+        }
+
+        for (a in doc.select("a[href]")) {
+            val resolved = normalizeDetailHref(a.attr("href"))
+            if (resolved.isEmpty()) continue
+            val lower = resolved.lowercase(Locale.ROOT)
+            val isAttachment = lower.contains("download") ||
+                lower.contains("attach") ||
+                lower.contains("common/script/") ||
+                lower.contains("upload") ||
+                lower.contains("file=") ||
+                lower.contains("preview")
+            if (isAttachment) {
+                val label = a.text().trim().ifEmpty {
+                    resolved.substringAfterLast('/').substringBefore('?').ifEmpty { "附件" }
+                }
+                attachments.putIfAbsent(resolved, TheolHomeworkAttachment(name = label, url = resolved))
+            }
+        }
+
+        return TheolHomeworkDetail(
+            hwtid = hwtid,
+            title = title,
+            deadline = deadline,
+            score = score,
+            publisher = publisher,
+            contentText = paragraphs.joinToString("\n\n").trim(),
+            attachments = attachments.values.toList(),
+            fetchedAt = nowMillis
         )
     }
 

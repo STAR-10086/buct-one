@@ -5,6 +5,8 @@ import com.buct.one.data.model.BlacklistedCourse
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.TheolFilterPrefs
+import com.buct.one.data.model.TheolHomeworkDetail
+import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.one.data.source.theol.TheolClient
@@ -18,6 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 北化在线（THEOL）与本地待办同步服务。
@@ -30,6 +33,7 @@ class TheolSyncService private constructor(
     private val client: TheolClient
 ) {
     private val syncMutex = Mutex()
+    private val detailCache = ConcurrentHashMap<String, TheolHomeworkDetail>()
 
     private val _theolState = MutableStateFlow(store.readTheol(TheolParser.PARSER_VERSION))
     val theolState: StateFlow<DomainSlice<TheolSnapshot>> = _theolState.asStateFlow()
@@ -116,6 +120,64 @@ class TheolSyncService private constructor(
                     Result.failure(e)
                 } finally {
                     _syncing.value = false
+                }
+            }
+        }
+
+    /** 原生拉取单条作业详情（自动激活课程上下文、持久化刷新后的 Cookie 并做内存缓存） */
+    suspend fun fetchHomeworkDetail(
+        item: TheolHomeworkItem,
+        forceRefresh: Boolean = false
+    ): Result<TheolHomeworkDetail> {
+        if (!forceRefresh) {
+            detailCache[item.hwtid]?.let { return Result.success(it) }
+        }
+        return withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                try {
+                    restoreEncryptedSession()
+                    if (!client.ensureSessionActive()) {
+                        return@withContext Result.failure(
+                            IllegalStateException("北化在线会话未建立，请重新登录教务系统或点击右上角登录")
+                        )
+                    }
+                    val detail = client.fetchHomeworkDetail(item, System.currentTimeMillis())
+                    persistEncryptedSession()
+                    detailCache[item.hwtid] = detail
+                    Result.success(detail)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+        }
+    }
+
+    /**
+     * 为即将打开的 WebView 准备干净的会话并激活指定课程上下文，
+     * 返回新鲜的 (sidportalCookie, meolCookie)。
+     */
+    suspend fun prepareCourseWebSession(courseLid: String): Result<Pair<String, String>> =
+        withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                try {
+                    restoreEncryptedSession()
+                    if (!client.ensureSessionActive()) {
+                        return@withContext Result.failure(
+                            IllegalStateException("北化在线会话未建立，请先同步或重新登录")
+                        )
+                    }
+                    if (!client.enterCourseContext(courseLid)) {
+                        return@withContext Result.failure(
+                            IllegalStateException("无法进入课程上下文，请重新登录后重试")
+                        )
+                    }
+                    persistEncryptedSession()
+                    Result.success(
+                        client.exportCookieHeader("sidportal.buct.edu.cn") to
+                            client.exportCookieHeader("course.buct.edu.cn")
+                    )
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
             }
         }
