@@ -26,13 +26,16 @@ open class ScheduleWidget : AppWidgetProvider() {
         super.onReceive(context, intent)
 
         if (intent.action == ACTION_PREV_WEEK || intent.action == ACTION_NEXT_WEEK) {
+            val appWidgetManager = AppWidgetManager.getInstance(context)
+            val ids = WidgetProviders.weekIds(context, appWidgetManager)
             val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
-            var currentWeek = widgetPrefs.getInt("current_week", getDefaultWeek())
+            val primaryId = ids.firstOrNull() ?: AppWidgetManager.INVALID_APPWIDGET_ID
+            var currentWeek = widgetPrefs.getInt("current_week", getDefaultWeek(context, primaryId))
 
             if (intent.action == ACTION_PREV_WEEK) {
                 currentWeek = (currentWeek - 1).coerceAtLeast(1)
             } else {
-                currentWeek += 1
+                currentWeek = (currentWeek + 1).coerceAtMost(com.buct.course.schedule.ScheduleMaxWeeks)
             }
 
             widgetPrefs.edit()
@@ -42,12 +45,11 @@ open class ScheduleWidget : AppWidgetProvider() {
 
             // 增量刷新：标题用 partialUpdate 局部更新，列表用 notify 让 Service 重读周数，
             // 不再整卡重建（避免切换缓慢 + 按钮 PendingIntent 被重置导致点击不稳定）
-            val appWidgetManager = AppWidgetManager.getInstance(context)
-            val ids = WidgetProviders.weekIds(context, appWidgetManager)
             for (id in ids) {
+                val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, id)
                 val views = RemoteViews(context.packageName, R.layout.widget_schedule)
-                views.setTextViewText(R.id.widget_week_info, weekInfoText(currentWeek))
-                bindWeekHeader(views, currentWeek)
+                views.setTextViewText(R.id.widget_week_info, weekInfoText(currentWeek, startMillis))
+                bindWeekHeader(views, currentWeek, startMillis)
                 WidgetTextSizes.apply(views, WidgetTextSizes.WEEK_ROOT, WidgetTextSizes.scale(context))
                 appWidgetManager.partiallyUpdateAppWidget(intArrayOf(id), views)
             }
@@ -82,15 +84,13 @@ open class ScheduleWidget : AppWidgetProvider() {
             WidgetProviders.refreshAll(context)
         }
 
-        private const val semesterStartDate = 1788192000000L
-
-        private fun weekMonday(week: Int): java.util.Calendar =
-            com.buct.course.schedule.ScheduleDates.mondayOfWeek(semesterStartDate).apply {
+        private fun weekMonday(week: Int, startMillis: Long): java.util.Calendar =
+            com.buct.course.schedule.ScheduleDates.mondayOfWeek(startMillis).apply {
                 add(java.util.Calendar.DAY_OF_YEAR, (week - 1) * 7)
             }
 
-        private fun weekInfoText(week: Int): String {
-            val monday = weekMonday(week)
+        private fun weekInfoText(week: Int, startMillis: Long): String {
+            val monday = weekMonday(week, startMillis)
             val sunday = (monday.clone() as java.util.Calendar).apply {
                 add(java.util.Calendar.DAY_OF_YEAR, 6)
             }
@@ -100,8 +100,8 @@ open class ScheduleWidget : AppWidgetProvider() {
             return "第${week}周 · $monthText"
         }
 
-        private fun bindWeekHeader(views: RemoteViews, week: Int) {
-            val monday = weekMonday(week)
+        private fun bindWeekHeader(views: RemoteViews, week: Int, startMillis: Long) {
+            val monday = weekMonday(week, startMillis)
             val weekdayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
             val headerIds = listOf(
                 R.id.widget_monday_header, R.id.widget_tuesday_header, R.id.widget_wednesday_header,
@@ -119,11 +119,9 @@ open class ScheduleWidget : AppWidgetProvider() {
             }
         }
 
-        private fun getDefaultWeek(): Int {
-            val now = System.currentTimeMillis()
-            val diffMillis = now - semesterStartDate
-            val diffDays = java.util.concurrent.TimeUnit.MILLISECONDS.toDays(diffMillis)
-            return com.buct.course.schedule.ScheduleDates.weekNumber(diffDays, semesterStartDate)
+        private fun getDefaultWeek(context: Context, appWidgetId: Int): Int {
+            val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
+            return WidgetScheduleSource.weekForDate(startMillis)
         }
 
         fun updateAppWidget(
@@ -176,10 +174,11 @@ open class ScheduleWidget : AppWidgetProvider() {
             views.setTextColor(R.id.widget_sunday_header, textColor)
 
             // 读取当前周数：24 小时内手动切过周则保留，否则自动回到今天所在周（与今日课表小组件统一）
+            val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
             val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
             val lastNav = widgetPrefs.getLong("last_week_nav", 0L)
             val freshNav = System.currentTimeMillis() - lastNav < 86_400_000L
-            val defaultWeek = getDefaultWeek()
+            val defaultWeek = getDefaultWeek(context, appWidgetId)
             val currentWeek = if (freshNav) {
                 widgetPrefs.getInt("current_week", defaultWeek)
             } else {
@@ -191,10 +190,10 @@ open class ScheduleWidget : AppWidgetProvider() {
                 }
                 defaultWeek
             }
-            views.setTextViewText(R.id.widget_week_info, weekInfoText(currentWeek))
+            views.setTextViewText(R.id.widget_week_info, weekInfoText(currentWeek, startMillis))
 
             // 星期表头带上月份和日期，跨月时每一天仍然能看懂属于哪个月。
-            bindWeekHeader(views, currentWeek)
+            bindWeekHeader(views, currentWeek, startMillis)
 
             // 设置上一周按钮点击事件：指向 AndroidManifest 实际注册的 receiver
             val prevIntent = Intent(context, com.tyust.course.widget.ScheduleWidget::class.java).apply {

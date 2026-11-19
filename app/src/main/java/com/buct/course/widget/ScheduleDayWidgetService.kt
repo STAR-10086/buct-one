@@ -16,9 +16,7 @@ import com.buct.course.schedule.NetworkScheduleCourse
 import com.buct.course.schedule.ScheduleJson
 import com.buct.course.schedule.ScheduleWeeks
 import org.json.JSONArray
-import org.json.JSONObject
 import java.util.Calendar
-import java.util.concurrent.TimeUnit
 
 /**
  * 桌面「今日课表」小组件的 RemoteViewsService。
@@ -40,8 +38,6 @@ class ScheduleDayRemoteViewsFactory(
         AppWidgetManager.EXTRA_APPWIDGET_ID,
         AppWidgetManager.INVALID_APPWIDGET_ID
     )
-
-    private val semesterStartDate = 1788192000000L
 
     private var courses: List<NetworkScheduleCourse> = emptyList()
     private var courseColorMap = mutableMapOf<String, Int>()
@@ -81,7 +77,7 @@ class ScheduleDayRemoteViewsFactory(
         try {
             UserManager.getInstance().init(context)
             val friendJson = WidgetScheduleSource.loadFriendJson(context, appWidgetId)
-            val scheduleJson = friendJson ?: loadOwnScheduleJson()
+            val scheduleJson = friendJson ?: WidgetScheduleSource.loadOwnScheduleJson(context, appWidgetId)
 
             if (scheduleJson != null) {
                 courses = ScheduleJson.parse(scheduleJson) ?: emptyList()
@@ -100,11 +96,11 @@ class ScheduleDayRemoteViewsFactory(
             selectedDay = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
             selectedDate = String.format(
                 java.util.Locale.US, "%04d-%02d-%02d",
-                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)
+                cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH)
             )
 
-            val diffDays = TimeUnit.MILLISECONDS.toDays(cal.timeInMillis - semesterStartDate)
-            val currentWeek = com.buct.course.schedule.ScheduleDates.weekNumber(diffDays, semesterStartDate)
+            val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
+            val currentWeek = WidgetScheduleSource.weekForDate(startMillis, cal)
 
             val todayCourses = courses
                 .filter {
@@ -160,28 +156,6 @@ class ScheduleDayRemoteViewsFactory(
             merged = emptyList()
             dayExams = emptyList()
         }
-    }
-
-    private fun loadOwnScheduleJson(): String? {
-        val instanceAccount = WidgetConfigStore.accountKey(context, appWidgetId)
-        val account = instanceAccount ?: UserManager.getInstance().currentAccountStorageKey
-        val school = UserManager.getInstance().currentSchool?.id ?: "buct"
-
-        val prefs = context.getSharedPreferences("schedule_cache", Context.MODE_PRIVATE)
-        val baseKey = "schedule_${account}_${school}"
-
-        val currentJson = prefs.getString("${baseKey}_current", null)
-        var termId = "2026-2027-1"
-        if (currentJson != null) {
-            val obj = JSONObject(currentJson)
-            termId = obj.optString("term", termId)
-        }
-
-        return prefs.getString("${baseKey}_${termId}", null)
-            ?: com.buct.course.manager.LocalStore.load(
-                context,
-                "schedule_${account}_${school}_${termId}.json"
-            )
     }
 
     private fun formatExamTime(time: String): String {

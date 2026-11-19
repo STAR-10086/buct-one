@@ -73,6 +73,9 @@ class ScheduleSettingsDialog : DialogFragment() {
             // We want to store this timestamp directly as the start date.
             // The ScheduleScreen logic will use this timestamp to calculate weeks.
             settingsManager.semesterStartDate = selectionUtc
+            requireContext().getSharedPreferences("widget_prefs", android.content.Context.MODE_PRIVATE)
+                .edit().putLong("last_week_nav", 0L).apply()
+            com.buct.course.widget.WidgetProviders.refreshAll(requireContext())
             
             // Note: Since we are updating the manager directly, 
             // the Compose UI (ScheduleSettingsScreen) checking manager.semesterStartDate 

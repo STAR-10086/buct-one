@@ -10,8 +10,6 @@ import com.buct.course.manager.UserManager
 import com.buct.course.schedule.NetworkScheduleCourse
 import com.buct.course.schedule.ScheduleJson
 import com.buct.course.schedule.ScheduleWeeks
-import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 /**
  * 桌面课表小组件的 RemoteViewsService
@@ -38,9 +36,6 @@ class ScheduleRemoteViewsFactory(
         "08:00", "08:50", "09:45", "10:40", "11:30", "13:30",
         "14:20", "15:15", "16:05", "18:00", "18:50", "19:40"
     )
-
-    // 开学日期：2026-09-01
-    private val semesterStartDate = 1788192000000L
 
     // 课程颜色（更柔和的版本）
     private val courseColors = listOf(
@@ -113,27 +108,8 @@ class ScheduleRemoteViewsFactory(
     override fun onDestroy() {}
 
     /** 本机账号课表：实例配置的账号优先，否则跟随当前账号。 */
-    private fun loadOwnScheduleJson(): String? {
-        val instanceAccount = WidgetConfigStore.accountKey(context, appWidgetId)
-        val account = instanceAccount ?: UserManager.getInstance().currentAccountStorageKey
-        val school = UserManager.getInstance().currentSchool?.id ?: "buct"
-
-        val prefs = context.getSharedPreferences("schedule_cache", Context.MODE_PRIVATE)
-        val baseKey = "schedule_${account}_${school}"
-
-        val currentJson = prefs.getString("${baseKey}_current", null)
-        var termId = "2026-2027-1"
-        if (currentJson != null) {
-            val obj = JSONObject(currentJson)
-            termId = obj.optString("term", termId)
-        }
-
-        return prefs.getString("${baseKey}_${termId}", null)
-            ?: com.buct.course.manager.LocalStore.load(
-                context,
-                "schedule_${account}_${school}_${termId}.json"
-            )
-    }
+    private fun loadOwnScheduleJson(): String? =
+        WidgetScheduleSource.loadOwnScheduleJson(context, appWidgetId)
 
     override fun getCount(): Int = 12
 
@@ -326,9 +302,7 @@ class ScheduleRemoteViewsFactory(
     }
 
     private fun getDefaultWeek(): Int {
-        val now = System.currentTimeMillis()
-        val diffMillis = now - semesterStartDate
-        val diffDays = TimeUnit.MILLISECONDS.toDays(diffMillis)
-        return com.buct.course.schedule.ScheduleDates.weekNumber(diffDays, semesterStartDate)
+        val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
+        return WidgetScheduleSource.weekForDate(startMillis)
     }
 }

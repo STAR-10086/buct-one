@@ -13,7 +13,6 @@ import android.widget.RemoteViews
 import com.buct.course.R
 import com.buct.course.manager.UserManager
 import java.util.Calendar
-import java.util.concurrent.TimeUnit
 
 /**
  * 桌面「今日课表」小组件：可左右切换查看任意一天（含考试），一键回到今天。
@@ -28,7 +27,6 @@ open class ScheduleDayWidget : AppWidgetProvider() {
         const val ACTION_DAY_TODAY = "com.buct.course.widget.DAY_TODAY"
         private const val PREFS = "day_widget_prefs"
         private const val KEY_OFFSET = "day_offset"
-        private const val semesterStartDate = 1788192000000L
 
         fun getDayOffset(context: Context): Int {
             val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -110,8 +108,8 @@ open class ScheduleDayWidget : AppWidgetProvider() {
             val day = cal.get(Calendar.DAY_OF_MONTH)
             val weekdayIndex = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
             val weekdayText = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[weekdayIndex - 1]
-            val diffDays = TimeUnit.MILLISECONDS.toDays(cal.timeInMillis - semesterStartDate)
-            val week = com.buct.course.schedule.ScheduleDates.weekNumber(diffDays, semesterStartDate)
+            val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
+            val week = WidgetScheduleSource.weekForDate(startMillis, cal)
             views.setTextViewText(R.id.widget_day_info, "${month}月${day}日 · $weekdayText · 第${week}周")
 
             views.setTextViewText(R.id.widget_back_today, if (offset == 0) "今天" else "回到今天")
