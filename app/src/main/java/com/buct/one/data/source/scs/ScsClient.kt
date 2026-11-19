@@ -1,6 +1,7 @@
 package com.buct.one.data.source.scs
 
 import com.buct.course.login.BuctAesCrypto
+import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.ScsSnapshot
@@ -15,7 +16,12 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.URLEncoder
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -42,8 +48,9 @@ class ScsClient {
             .followRedirects(false)
             .followSslRedirects(false)
             .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(25, TimeUnit.SECONDS)
+            .dns(BuctDns)
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
             .build()
     }
 
@@ -198,9 +205,24 @@ class ScsClient {
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.failure(mapCampusError(e))
         } finally {
             passwordChars.fill('\u0000')
+        }
+    }
+
+    private fun mapCampusError(e: Exception): Exception = when (e) {
+        is SocketTimeoutException, is ConnectException, is UnknownHostException,
+        is NoRouteToHostException, is SocketException ->
+            IOException("无法连接第二课堂（scs.buct.edu.cn），该系统仅支持校园网或北化 VPN 访问，请切换校园网/开启 VPN 后重试", e)
+        else -> e
+    }
+
+    private inline fun <T> runCampusCall(block: () -> T): T {
+        return try {
+            block()
+        } catch (e: Exception) {
+            throw mapCampusError(e)
         }
     }
 
@@ -351,7 +373,7 @@ class ScsClient {
     }
 
     /** 拉取第二课堂完整快照（个人信息、自评窗口、五育维度满分、历年各学期明细、历史记录、校园二课活动） */
-    fun fetchFullSnapshot(): ScsSnapshot {
+    fun fetchFullSnapshot(): ScsSnapshot = runCampusCall {
         val userJson = executeApiGet("/sysAccount/getLoginUserInfo")
         val userInfo = ScsParser.parseUserInfo(userJson)
 
@@ -406,7 +428,7 @@ class ScsClient {
         }.getOrDefault("")
         val activities = if (actsJson.isNotBlank()) ScsParser.parseActivities(actsJson) else emptyList()
 
-        return ScsSnapshot(
+        return@runCampusCall ScsSnapshot(
             studentName = userInfo.name,
             studentId = userInfo.studentId,
             collegeName = classInfo.collegeName,

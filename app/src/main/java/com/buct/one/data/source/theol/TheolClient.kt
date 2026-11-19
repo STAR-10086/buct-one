@@ -3,6 +3,7 @@ package com.buct.one.data.source.theol
 import android.util.Base64
 import android.webkit.MimeTypeMap
 import com.buct.course.login.BuctAesCrypto
+import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.TheolCourseInfo
@@ -122,6 +123,7 @@ class TheolClient {
     private val noRedirectClient: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(cookieJar)
         .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
+        .dns(BuctDns)
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(20, TimeUnit.SECONDS)

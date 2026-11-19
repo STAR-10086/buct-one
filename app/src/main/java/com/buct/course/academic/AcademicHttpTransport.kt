@@ -159,6 +159,7 @@ class AcademicHttpTransport(
         private const val MAX_BODY_BYTES = 5 * 1024 * 1024
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         private fun defaultClient(cookieJar: okhttp3.CookieJar) = OkHttpClient.Builder().cookieJar(cookieJar)
+            .dns(com.buct.course.login.BuctDns)
             .retryOnConnectionFailure(false)
             .followRedirects(false).followSslRedirects(false).connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS).build()

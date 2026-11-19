@@ -2,6 +2,7 @@ package com.buct.one.data.source.sjcx
 
 import android.util.Base64
 import com.buct.course.login.BuctAesCrypto
+import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.SjcxDownloadedFile
@@ -80,6 +81,7 @@ class SjcxClient {
             .followRedirects(false)
             .followSslRedirects(false)
             .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
+            .dns(BuctDns)
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

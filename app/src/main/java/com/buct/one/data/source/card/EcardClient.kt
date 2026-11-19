@@ -1,6 +1,7 @@
 package com.buct.one.data.source.card
 
 import android.util.Base64
+import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.one.data.model.CardAccountInfo
 import com.buct.one.data.model.CardTransaction
@@ -49,6 +50,7 @@ internal class EcardClient {
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
+        .dns(BuctDns)
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(15, TimeUnit.SECONDS)

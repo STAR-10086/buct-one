@@ -331,7 +331,7 @@ class BuctSmsLoginManager private constructor() {
             .followRedirects(false)
             .followSslRedirects(false)
             .sslSocketFactory(BuctTlsTrustManager().sslSocketFactory(), BuctTlsTrustManager())
-            .dns(BuctDns())
+            .dns(BuctDns)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -434,22 +434,6 @@ class BuctSmsLoginManager private constructor() {
             val md = MessageDigest.getInstance("MD5")
             val bytes = md.digest(input.toByteArray(Charsets.UTF_8))
             return bytes.joinToString("") { "%02x".format(it) }
-        }
-    }
-
-    private class BuctDns : okhttp3.Dns {
-        private val fallback = mapOf(
-            "sidportal.buct.edu.cn" to listOf("222.199.255.33", "222.199.255.34"),
-            "jwglxt.buct.edu.cn" to listOf("121.195.154.238")
-        )
-        override fun lookup(hostname: String): List<java.net.InetAddress> {
-            try {
-                val resolved = okhttp3.Dns.SYSTEM.lookup(hostname)
-                if (resolved.isNotEmpty()) return resolved
-            } catch (_: java.net.UnknownHostException) {
-            }
-            val ips = fallback[hostname] ?: throw java.net.UnknownHostException(hostname)
-            return ips.map { java.net.InetAddress.getByName(it) }
         }
     }
 

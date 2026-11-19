@@ -191,6 +191,7 @@ public class CourseApiClient {
                 } catch (Exception e) {
                         Log.e(TAG, "Failed to setup BuctTlsTrustManager: " + e.getMessage());
                 }
+                builder.dns(com.buct.course.login.BuctDns.INSTANCE);
 
                 client = builder.build();
         }

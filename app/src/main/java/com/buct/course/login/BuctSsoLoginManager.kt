@@ -83,7 +83,7 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
             .followRedirects(true)
             .followSslRedirects(true)
             .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
-            .dns(BuctDns())
+            .dns(BuctDns)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -93,7 +93,7 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
             .followRedirects(false)
             .followSslRedirects(false)
             .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
-            .dns(BuctDns())
+            .dns(BuctDns)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -164,7 +164,7 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
             .followRedirects(true)
             .followSslRedirects(true)
             .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
-            .dns(BuctDns())
+            .dns(BuctDns)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -175,7 +175,7 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
             .followRedirects(false)
             .followSslRedirects(false)
             .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
-            .dns(BuctDns())
+            .dns(BuctDns)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -890,28 +890,6 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
     private fun isAllowed(url: HttpUrl): Boolean =
         (url.host == BuctSsoEndpoints.authPortal.host && url.scheme == "https") ||
             (url.host == BuctSsoEndpoints.teachingBase.host && url.scheme == "https")
-
-    /**
-     * 北化域名专用 DNS：系统解析失败时回退到内置 IP
-     * （sidportal.buct.edu.cn CNAME → ztc.buct.edu.cn）。
-     */
-    private class BuctDns : Dns {
-        private val fallback = mapOf(
-            "sidportal.buct.edu.cn" to listOf("222.199.255.33", "222.199.255.34"),
-            "jwglxt.buct.edu.cn" to listOf("121.195.154.238")
-        )
-
-        override fun lookup(hostname: String): List<InetAddress> {
-            try {
-                val resolved = Dns.SYSTEM.lookup(hostname)
-                if (resolved.isNotEmpty()) return resolved
-            } catch (_: UnknownHostException) {
-                // 继续走内置回退
-            }
-            val ips = fallback[hostname] ?: throw UnknownHostException(hostname)
-            return ips.map { InetAddress.getByName(it) }
-        }
-    }
 
     private fun sidPortalSucceed(attempt: LoginAttempt) {
         val cookieUrl = attempt.portalUrl.newBuilder()
