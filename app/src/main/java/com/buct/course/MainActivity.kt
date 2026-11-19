@@ -708,7 +708,7 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
             if (!session.expired && startupUpdateState.showDialog() && startupAvailableUpdate != null) {
                 com.buct.course.update.UpdateDialog(
                     updateInfo = startupAvailableUpdate,
-                    currentVersion = startupUpdateState.currentVersionName(),
+                    currentVersion = startupUpdateState.getCurrentVersion(),
                     onDismiss = { startupUpdateState.dismiss() },
                     onUpdate = { url -> startupUpdateState.startDownload(url) },
                     downloadProgress = startupUpdateState.downloadProgress(),
