@@ -19,6 +19,21 @@
     <!-- 搴旂敤鏇存柊鏉冮檺 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Android 11+ 包可见性：允许检测并拉起企业微信 / 微信 / 支付宝以完成校园卡充值扫码 -->
+    <queries>
+        <package android:name="com.tencent.wework" />
+        <package android:name="com.tencent.mm" />
+        <package android:name="com.eg.android.AlipayGphone" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="wxwork" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="weixin" />
+        </intent>
+    </queries>
+
     <application
         android:name=".CourseApplication"
         android:allowBackup="true"

@@ -319,6 +319,21 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
     val noticeModel: SessionNoticeViewModel = viewModel()
     val sessionNotice by noticeModel.notices.state.collectAsState()
     var foreground by remember { mutableStateOf(fragmentActivity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted && !prefs.getBoolean("asked_notification_perm", false)) {
+                prefs.edit().putBoolean("asked_notification_perm", true).apply()
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
     val relogin = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             SessionRenewer.sessionChanged()

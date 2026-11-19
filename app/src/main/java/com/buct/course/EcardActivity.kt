@@ -335,11 +335,23 @@ class EcardActivity : ComponentActivity() {
             val intent = context.packageManager.getLaunchIntentForPackage(pkg)
             if (intent != null) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                runCatching {
+                val launched = runCatching {
                     context.startActivity(intent)
-                    return
-                }
+                    true
+                }.getOrDefault(false)
+                if (launched) return
             }
+        }
+        val schemes = listOf("wxwork://", "weixin://")
+        for (uriText in schemes) {
+            val schemeIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uriText)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val launched = runCatching {
+                context.startActivity(schemeIntent)
+                true
+            }.getOrDefault(false)
+            if (launched) return
         }
         Toast.makeText(
             context,
