@@ -44,11 +44,14 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Assignment
+import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.DashboardCustomize
+import androidx.compose.material.icons.outlined.DirectionsRun
+import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.LibraryAdd
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.MeetingRoom
@@ -106,6 +109,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.buct.course.EcardActivity
 import com.buct.course.ScsActivity
 import com.buct.course.SjcxActivity
+import com.buct.course.TyglActivity
 import com.buct.course.manager.BottomNavPreferences
 import com.buct.course.manager.ScheduleSettingsManager
 import com.buct.course.manager.StartupPage
@@ -133,11 +137,13 @@ import com.buct.one.data.model.SjcxSnapshot
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.model.TheolTestItem
+import com.buct.one.data.model.TyglSnapshot
 import com.buct.one.data.model.formatFenToYuan
 import com.buct.one.data.sync.CardSyncService
 import com.buct.one.data.sync.ScsSyncService
 import com.buct.one.data.sync.SjcxSyncService
 import com.buct.one.data.sync.TheolSyncService
+import com.buct.one.data.sync.TyglSyncService
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -237,6 +243,15 @@ private enum class DashboardModuleId(
         defaultSize = CardSize.MEDIUM,
         defaultCol = 2,
         defaultRow = 6
+    ),
+    TYGL(
+        id = "tygl",
+        title = "体测与阳光跑",
+        shortTitle = "体测体育",
+        icon = Icons.Outlined.FitnessCenter,
+        defaultSize = CardSize.MEDIUM,
+        defaultCol = 0,
+        defaultRow = 8
     );
 
     val supportedSizes: List<CardSize>
@@ -508,6 +523,10 @@ fun DashboardRoute(
     val scsSlice by scsService.scsState.collectAsState()
     val scsSyncing by scsService.syncing.collectAsState()
 
+    val tyglService = remember(context) { TyglSyncService.getInstance(context) }
+    val tyglSlice by tyglService.tyglState.collectAsState()
+    val tyglSyncing by tyglService.syncing.collectAsState()
+
     var showEmptyClassroomDialog by remember { mutableStateOf(false) }
     var emptyClassroomInitialCampus by remember { mutableIntStateOf(2) }
     var emptyClassroomPeriodOffset by remember { mutableIntStateOf(0) }
@@ -634,7 +653,7 @@ fun DashboardRoute(
     }
     val bottomInset = LocalAppOverlayBottomInset.current
     val scrollState = rememberScrollState()
-    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing
+    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing
 
     val latestDraftState by rememberUpdatedState(draftConfigs)
 
@@ -708,6 +727,9 @@ fun DashboardRoute(
                             scope.launch { sjcxService.refresh() }
                             if (scsService.hasSavedSsoSession()) {
                                 scope.launch { scsService.refresh() }
+                            }
+                            if (tyglService.hasSavedSsoSession()) {
+                                scope.launch { tyglService.refresh() }
                             }
                             if (cardHasSession) {
                                 scope.launch { cardService.refresh() }
@@ -1023,6 +1045,7 @@ fun DashboardRoute(
                                     cardHasSession = cardHasSession,
                                     sjcxSlice = sjcxSlice,
                                     scsSlice = scsSlice,
+                                    tyglSlice = tyglSlice,
                                     classroomSlot = classroomSlot,
                                     classroomDayLabel = classroomDayLabel,
                                     onNavigateTab = ::navigateToPageOrWarn,
@@ -1528,6 +1551,7 @@ private fun RenderModuleCard(
     cardHasSession: Boolean,
     sjcxSlice: DomainSlice<SjcxSnapshot>,
     scsSlice: DomainSlice<ScsSnapshot>,
+    tyglSlice: DomainSlice<TyglSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1548,6 +1572,7 @@ private fun RenderModuleCard(
             cardHasSession = cardHasSession,
             sjcxSlice = sjcxSlice,
             scsSlice = scsSlice,
+            tyglSlice = tyglSlice,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1568,6 +1593,7 @@ private fun RenderModuleCard(
             cardHasSession = cardHasSession,
             sjcxSlice = sjcxSlice,
             scsSlice = scsSlice,
+            tyglSlice = tyglSlice,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1586,6 +1612,7 @@ private fun RenderModuleCard(
                 cardSlice = cardSlice,
                 sjcxSlice = sjcxSlice,
                 scsSlice = scsSlice,
+                tyglSlice = tyglSlice,
                 classroomSlot = classroomSlot,
                 classroomDayLabel = classroomDayLabel,
                 onNavigateTab = onNavigateTab,
@@ -1622,6 +1649,7 @@ private fun buildCompactSummary(
     cardSlice: DomainSlice<CardSnapshot>,
     sjcxSlice: DomainSlice<SjcxSnapshot>,
     scsSlice: DomainSlice<ScsSnapshot>,
+    tyglSlice: DomainSlice<TyglSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1710,6 +1738,19 @@ private fun buildCompactSummary(
         miniValue = "抢课",
         onClick = onOpenCourseSelect
     )
+
+    DashboardModuleId.TYGL -> {
+        val tyglData = tyglSlice.data
+        val latestFitness = tyglData?.fitnessRecords?.firstOrNull()
+        val valText = latestFitness?.totalScoreText?.takeIf { it.isNotBlank() }?.let { "$it 分" } ?: "体测成绩"
+        val miniText = latestFitness?.totalScoreText?.takeIf { it.isNotBlank() }?.let { "${it}分" } ?: "体测"
+        val sub = latestFitness?.let {
+            "${it.testYear.ifBlank { it.yearLabel }} · ${it.level.ifBlank { "已测" }}"
+        } ?: "体测 · 阳光跑 · 算分"
+        ModuleCompactSummary("体测与体育", valText, sub, miniText) {
+            TyglActivity.launch(context, initialTab = 0)
+        }
+    }
 }
 
 @Composable
@@ -1785,6 +1826,7 @@ private fun RenderMediumModuleCard(
     cardHasSession: Boolean,
     sjcxSlice: DomainSlice<SjcxSnapshot>,
     scsSlice: DomainSlice<ScsSnapshot>,
+    tyglSlice: DomainSlice<TyglSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -2076,6 +2118,57 @@ private fun RenderMediumModuleCard(
                 MediumBottomActionPill(text = "实验报告 $reportCount 项 ›")
             }
         }
+
+        DashboardModuleId.TYGL -> {
+            val tyglData = tyglSlice.data
+            val latestFitness = tyglData?.fitnessRecords?.firstOrNull()
+            val latestTerm = tyglData?.exerciseTerms?.firstOrNull()
+            val runSummary = if (tyglData != null && latestTerm != null) {
+                tyglData.exerciseColumns.firstNotNullOfOrNull { col ->
+                    val raw = latestTerm.countsByCode[col.code].orEmpty()
+                    val num = raw.toDoubleOrNull() ?: 0.0
+                    if (num > 0.0) "${col.label} ${raw}次" else null
+                }
+            } else {
+                null
+            }
+            MediumGlassCardFrame(
+                title = "体测体育",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { TyglActivity.launch(context, initialTab = 0) }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = latestFitness?.totalScoreText?.takeIf { it.isNotBlank() }?.let { "$it 分" }
+                            ?: "体测成绩",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = when {
+                            latestFitness?.level?.contains("不及格") == true -> Color(0xFFFF453A)
+                            latestFitness?.level?.contains("及格") == true -> Color(0xFFFF9F0A)
+                            latestFitness != null && latestFitness.totalScore != null -> Color(0xFF34C759)
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = 1
+                    )
+                    Text(
+                        text = when {
+                            latestFitness != null -> "${latestFitness.testYear.ifBlank { latestFitness.yearLabel }} · ${latestFitness.level.ifBlank { "已测" }}"
+                            tyglData?.runPlan != null -> "${tyglData.runPlan.projectName} · 点击查看"
+                            else -> "历年体测 · 阳光跑"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                MediumBottomActionPill(
+                    text = runSummary?.let { "$it ›" } ?: "体测 · 阳光跑 · 算分 ›"
+                )
+            }
+        }
     }
 }
 
@@ -2167,6 +2260,7 @@ private fun RenderLargeModuleCard(
     cardHasSession: Boolean,
     sjcxSlice: DomainSlice<SjcxSnapshot>,
     scsSlice: DomainSlice<ScsSnapshot>,
+    tyglSlice: DomainSlice<TyglSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -2602,6 +2696,102 @@ private fun RenderLargeModuleCard(
                 ) {
                     QuickActionTile("浏览可选课程", Icons.Outlined.LibraryAdd, Modifier.weight(1f), !isEditing, onOpenCourseSelect)
                     QuickActionTile("抢课队列与定时", Icons.Outlined.Schedule, Modifier.weight(1f), !isEditing, onOpenCourseSelect)
+                }
+            }
+        }
+
+        DashboardModuleId.TYGL -> {
+            val tyglData = tyglSlice.data
+            val latestFitness = tyglData?.fitnessRecords?.firstOrNull()
+            val latestTerm = tyglData?.exerciseTerms?.firstOrNull()
+            val runSummary = if (tyglData != null && latestTerm != null) {
+                tyglData.exerciseColumns.firstNotNullOfOrNull { col ->
+                    val raw = latestTerm.countsByCode[col.code].orEmpty()
+                    val num = raw.toDoubleOrNull() ?: 0.0
+                    if (num > 0.0) "${latestTerm.academicYear}(${latestTerm.term}) ${col.label} ${raw}次" else null
+                }
+            } else {
+                null
+            }
+            val tyglBadge = when {
+                tyglSlice.provenance.refreshState == RefreshState.NEVER -> "点击进入"
+                tyglSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK -> "同步失败"
+                latestFitness?.level?.isNotBlank() == true ->
+                    "${latestFitness.testYear.ifBlank { latestFitness.yearLabel }} · ${latestFitness.level}"
+                else -> "公网直连"
+            }
+            val tyglBadgeColor = when {
+                tyglSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK -> Color(0xFFFF453A)
+                latestFitness?.level?.contains("不及格") == true -> Color(0xFFFF453A)
+                latestFitness?.level?.contains("及格") == true -> Color(0xFFFF9F0A)
+                latestFitness != null && latestFitness.totalScore != null -> Color(0xFF34C759)
+                else -> MaterialTheme.colorScheme.primary
+            }
+            DashboardGlassCard(
+                title = "体测与阳光跑",
+                badge = tyglBadge,
+                badgeColor = tyglBadgeColor,
+                heightDp = slotHeightDp,
+                onClick = if (isEditing) null else ({ TyglActivity.launch(context, initialTab = 0) })
+            ) {
+                if (latestFitness != null) {
+                    val bodyMeta = listOf(latestFitness.heightText, latestFitness.weightText)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" · ")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "体测总分 ${latestFitness.totalScoreText.ifBlank { "--" }} 分",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = runSummary
+                                    ?: bodyMeta.ifBlank { "更新于 ${latestFitness.updatedAt.take(10)}" },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (bodyMeta.isNotBlank() && runSummary != null) {
+                            Text(
+                                text = bodyMeta,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = runSummary
+                            ?: "公网直连 tygl.buct.edu.cn，查询历年体测成绩、阳光跑计划与离线《国标》算分",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickActionTile("体测成绩", Icons.Outlined.FitnessCenter, Modifier.weight(1f), !isEditing) {
+                        TyglActivity.launch(context, initialTab = 0)
+                    }
+                    QuickActionTile("课外锻炼", Icons.Outlined.DirectionsRun, Modifier.weight(1f), !isEditing) {
+                        TyglActivity.launch(context, initialTab = 1)
+                    }
+                    QuickActionTile("国标算分", Icons.Outlined.Calculate, Modifier.weight(1f), !isEditing) {
+                        TyglActivity.launch(context, initialTab = 3)
+                    }
                 }
             }
         }

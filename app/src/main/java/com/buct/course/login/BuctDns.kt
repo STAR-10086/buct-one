@@ -38,6 +38,7 @@ object BuctDns : Dns {
         "course.buct.edu.cn" to listOf("121.195.154.229"),
         "sjcx.buct.edu.cn" to listOf("222.199.255.27"),
         "ecard.buct.edu.cn" to listOf("222.199.255.27"),
+        "tygl.buct.edu.cn" to listOf("222.199.255.27"),
         "gmis.buct.edu.cn" to listOf("121.195.148.197")
     )
 
