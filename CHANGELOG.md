@@ -1,17 +1,30 @@
-# CHANGELOG
+# Changelog
 
-## [0.1.0] · 未发布
+所有面向用户的实质性功能新增、问题修复与架构演进记录如下，版本格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
+
+## [Unreleased]
 
 ### 新增
-- 仓库建立：BUCT One（`com.buct.one`），规划先行的空仓库
-- `docs/规划.md`：总规划 v2（定位、四阶段里程碑、验收标准、Top 8 风险）
-- `docs/plan-1-data-layer.md`：数据层详设（SSO 会话复用、CampusSource、provenance、存储、同步、迁移五步）
-- `docs/plan-2-roadmap.md`：功能路线图（模块分级、里程碑、企业微信双链路、首屏 IA、不做清单）
-- `docs/plan-3-engineering.md`：工程与风险（模块化、CI 体积门禁、凭据、TLS 三级、灰度、回滚）
-- `docs/签名接入.md`：正式签名 secrets 配置
-- CI 骨架：100MB 体积门禁（80MB 预警）、PR 体积 delta、包依赖规则检查、签名分支（path 过滤，代码就位后启用）
+- **工作台 2D 自由栅格自定义**：工作台升级为 4 列 × N 行真实 2D 坐标骨架，支持 `2×1` 大卡片、`1×1` 中卡片、`0.5×0.5` 迷你小卡片自由混排（可单列竖排并保留空白格位），长按弹簧拖拽与右上角箭头拖动/点按调尺寸；编辑态顶栏固定置于屏幕上方（纯图标撤回/重置 + 完整取消/保存），隐藏/缩放角标外置至边角，移除遮挡与半透灰边。
+- **选课与抢课集成**：工作台新增直达「选课抢课」入口，补全子页返回按钮并优化非选课开放阶段的教务提示。
+- **第二课堂（`scs.buct.edu.cn`）原生接入**：通过 `sidportal` CAS 换取 JWT `App-Token`，原生查看五育（德/智/体/美/劳）综测成绩、分类明细、自评窗口状态与二课活动记录。
+- **智能混合校内 DNS（`BuctDns`）**：`scs.buct.edu.cn` / `eapi.buct.edu.cn` 优先直连校内 DNS `202.4.130.100:53` 并在超时后回退系统 DNS，其余校内域优先走系统 DNS 并保留校内 DNS 与内置 IP 兜底，全端统一接入。
+- **「我的」个人名片与权限管理**：顶部卡片支持系统相册自定义头像（居中裁剪压缩存储于应用私有目录）、自定义个性签名与可选展示昵称（同步工作台问候语）；底栏「我的」同步更换为 Phosphor 风格双色人像动画图标；新增系统通知与精确闹钟权限自检弹窗。
+- **一卡通与企微/微信包可见性**：补充 `<queries>` 声明（`com.tencent.wework`、`com.tencent.mm`、`com.eg.android.AlipayGphone` 及对应 Scheme），修复 Android 11+ 跳转误报未安装企业微信的问题。
 
-### 说明
-- 代码从零重写，不复用前身「北化课表」的 497 个 Kotlin 文件；只参考其 SSO 与 zf 教务协议实现
-- 包名 `com.buct.one`，与旧版 `com.tyust.course` 完全独立，可并存安装
-- 版本线从 0.1.0 / versionCode 1 起算
+### 优化与修复
+- **HyperOS 4 桌面小组件修复**：新增物理不含标题节点的 `widget_schedule_day_notitle.xml` / `widget_schedule_notitle.xml` 彻底解决部分启动器无法隐藏标题的问题；改为按 `appWidgetId` 独立持久化日/周偏移与隔离 `PendingIntent`，翻页使用局部增量刷新（`partiallyUpdateAppWidget`）解决点击箭头来回跳的问题；新增 20dp 圆角背景与 `clipToOutline` 裁剪及矢量翻页图标。
+- **北化在线两阶段后台静默同步（`parserVersion: 4 → 5`）**：第一阶段快速刷新待交作业与测验，第二阶段在后台按课单通道补齐全部在修课程作业，消除已提交课程在个人中心提醒消失后不可见的问题，同时不阻塞作业详情与附件下载。
+- **「我的」页面精简与架构整理**：将「更新 Cookie」迁入「数据与同步」分组，移除上游遗留配额/超级用户文案，将教务切换更名为「教务系统（本科 / 研究生）」，并清理多余工作台重复入口与好友相关界面入口。
+
+---
+
+## [0.2.0] - 2026-11-19
+
+### 新增
+- **北化一站（BUCT One）架构成型**：确立 `com.buct.one` 单 module 分层数据内核（`model / session / source / store / sync`），遵循失败保留旧快照、`NEVER ≠ EMPTY_CONFIRMED` 等四条数据铁律，落地 `code-check` 静态包依赖与 TLS 门禁以及 `build-apk`（100MB 体积门禁 + 正式发布签名）云端工作流。
+- **全原生统一身份认证**：原生 Kotlin 实现 `sidportal.buct.edu.cn` 登录（SM2/AES + 短信二次验证 + Passkey/WebAuthn，无 WebView 登录），支持本科（`jwglxt.buct.edu.cn`）与研究生（`gmis.buct.edu.cn`）教务，并由 `Android Keystore`（AES-GCM）隔离存储凭据。
+- **教务核心体验**：周视图/日视图课表、自定义课程与课前提醒、ICS 日历导出、分学期/培养方案成绩与考试倒计时、空闲教室查询。
+- **桌面小组件**：支持周课表与可滚动的今日课表小组件（最小 `2×2`），同步用户设置的开学第一周与三学期配置，今日课表按当前时间自动隐藏已结束课程。
+- **北化在线（THEOL/MEOL）**：免二次登录拉取待办作业与测验，支持原生预览作业要求、原生下载打开附件及复用会话的 WebView 交作业。
+- **实践教学（`sjcx.buct.edu.cn`）与校园一卡通（`ecard.buct.edu.cn`）**：接入实验课表、抢讲座/写心得与创新学分，以及独立登录的校园卡余额与消费流水查询。
