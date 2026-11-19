@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -869,7 +870,10 @@ private fun EcardHomePane(
                 }
             }
         } else {
-            items(snapshot.transactions, key = { it.id }) { tx ->
+            itemsIndexed(
+                items = snapshot.transactions,
+                key = { index, tx -> "${index}_${tx.id}_${tx.txCode}_${tx.amountFen}" }
+            ) { _, tx ->
                 EcardTransactionCard(tx = tx, hideAmount = hideBalance)
             }
 

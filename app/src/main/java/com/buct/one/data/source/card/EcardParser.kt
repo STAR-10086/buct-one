@@ -18,7 +18,7 @@ import javax.crypto.spec.SecretKeySpec
  * 新中新校园卡查询平台（ecard.buct.edu.cn）响应解密与数据解析器。
  */
 internal object EcardParser {
-    const val PARSER_VERSION = 1
+    const val PARSER_VERSION = 2
 
     private val RESULT_AES_KEY = "abcdef0123456789".toByteArray(Charsets.ISO_8859_1)
     private val RESULT_AES_IV = "0123456789abcdef".toByteArray(Charsets.ISO_8859_1)
@@ -167,7 +167,9 @@ internal object EcardParser {
 
             val serverId = row.optString("journo", "").trim()
                 .ifBlank { row.optString("id", "").trim() }
-            val id = serverId.ifBlank {
+            val id = if (serverId.isNotBlank()) {
+                "${serverId}_${txCode}_${amountFen}_${balanceAfterFen}_${posCode}"
+            } else {
                 "${tsMillis}_${txCode}_${amountFen}_${balanceAfterFen}_${posCode}"
             }
 

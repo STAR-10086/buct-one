@@ -801,58 +801,65 @@ private fun GradeDistributionCard(
             )
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            DistributionItem(
-                label = "优",
-                count = stats.excellent,
-                tone = SystemTone.Success,
-                selected = selectedBucket == GradeBucket.Excellent,
-                onClick = { onBucketClick?.invoke(GradeBucket.Excellent) },
-                modifier = Modifier.weight(1f)
-            )
-            DistributionItem(
-                label = "良",
-                count = stats.good,
-                tone = SystemTone.Info,
-                selected = selectedBucket == GradeBucket.Good,
-                onClick = { onBucketClick?.invoke(GradeBucket.Good) },
-                modifier = Modifier.weight(1f)
-            )
-            DistributionItem(
-                label = "中",
-                count = stats.medium,
-                tone = SystemTone.Warning,
-                selected = selectedBucket == GradeBucket.Medium,
-                onClick = { onBucketClick?.invoke(GradeBucket.Medium) },
-                modifier = Modifier.weight(1f)
-            )
-            DistributionItem(
-                label = "及格",
-                count = stats.pass,
-                tone = SystemTone.Warning,
-                selected = selectedBucket == GradeBucket.Pass,
-                onClick = { onBucketClick?.invoke(GradeBucket.Pass) },
-                modifier = Modifier.weight(1f)
-            )
-            DistributionItem(
-                label = "不及格",
-                count = stats.fail,
-                tone = SystemTone.Danger,
-                selected = selectedBucket == GradeBucket.Fail,
-                onClick = { onBucketClick?.invoke(GradeBucket.Fail) },
-                modifier = Modifier.weight(1f)
-            )
-            DistributionItem(
-                label = "未出分",
-                count = stats.notGraded,
-                tone = SystemTone.Neutral,
-                selected = selectedBucket == GradeBucket.NotGraded,
-                onClick = { onBucketClick?.invoke(GradeBucket.NotGraded) },
-                modifier = Modifier.weight(1f)
-            )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DistributionItem(
+                    label = "优",
+                    count = stats.excellent,
+                    tone = SystemTone.Success,
+                    selected = selectedBucket == GradeBucket.Excellent,
+                    onClick = { onBucketClick?.invoke(GradeBucket.Excellent) },
+                    modifier = Modifier.weight(1f)
+                )
+                DistributionItem(
+                    label = "良",
+                    count = stats.good,
+                    tone = SystemTone.Info,
+                    selected = selectedBucket == GradeBucket.Good,
+                    onClick = { onBucketClick?.invoke(GradeBucket.Good) },
+                    modifier = Modifier.weight(1f)
+                )
+                DistributionItem(
+                    label = "中",
+                    count = stats.medium,
+                    tone = SystemTone.Warning,
+                    selected = selectedBucket == GradeBucket.Medium,
+                    onClick = { onBucketClick?.invoke(GradeBucket.Medium) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DistributionItem(
+                    label = "及格",
+                    count = stats.pass,
+                    tone = SystemTone.Warning,
+                    selected = selectedBucket == GradeBucket.Pass,
+                    onClick = { onBucketClick?.invoke(GradeBucket.Pass) },
+                    modifier = Modifier.weight(1f)
+                )
+                DistributionItem(
+                    label = "不及格",
+                    count = stats.fail,
+                    tone = SystemTone.Danger,
+                    selected = selectedBucket == GradeBucket.Fail,
+                    onClick = { onBucketClick?.invoke(GradeBucket.Fail) },
+                    modifier = Modifier.weight(1f)
+                )
+                DistributionItem(
+                    label = "未出分",
+                    count = stats.notGraded,
+                    tone = SystemTone.Neutral,
+                    selected = selectedBucket == GradeBucket.NotGraded,
+                    onClick = { onBucketClick?.invoke(GradeBucket.NotGraded) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
