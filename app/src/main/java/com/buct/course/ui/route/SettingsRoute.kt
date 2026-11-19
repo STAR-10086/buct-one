@@ -53,7 +53,17 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.buct.course.manager.UserProfile
+import com.buct.course.manager.UserProfileStore
+import com.buct.course.ui.system.GlassTextField
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
@@ -140,11 +150,32 @@ fun SettingsRoute(
     var showFeedback by remember { mutableStateOf(false) }
     var feedbackUnread by remember { mutableIntStateOf(0) }
     var showWidgetSettings by remember { mutableStateOf(false) }
-    var showFriends by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
     var showPermissionDialog by remember { mutableStateOf(false) }
     var permissionRefreshTick by remember { mutableIntStateOf(0) }
     var widgetCount by remember {
         mutableIntStateOf(com.buct.course.ui.screen.listWidgetInstances(context).size)
+    }
+    var userProfile by remember {
+        mutableStateOf(UserProfileStore.load(context, UserManager.getInstance().currentAccountKey))
+    }
+    val scope = rememberCoroutineScope()
+    val pickAvatarLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val targetKey = UserManager.getInstance().currentAccountKey
+        scope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                UserProfileStore.saveAvatarFromUri(context, targetKey, uri)
+            }
+            if (updated != null) {
+                userProfile = updated
+                GlassToaster.show("头像已更新")
+            } else {
+                GlassToaster.show("读取图片失败，请换一张重试")
+            }
+        }
     }
 
     val notificationGranted = remember(permissionRefreshTick, showPermissionDialog) {
@@ -225,6 +256,7 @@ fun SettingsRoute(
             allAccounts = emptyList()
             accountsWithPassword = emptySet()
             currentAccountKey = userManager.currentAccountKey
+            userProfile = UserProfileStore.load(context, currentAccountKey)
             canRefreshCookie = false
             quotaInfo = "本地演示"
             return
@@ -248,6 +280,7 @@ fun SettingsRoute(
             .map { it.key }
             .toSet()
         currentAccountKey = userManager.currentAccountKey
+        userProfile = UserProfileStore.load(context, currentAccountKey)
         canRefreshCookie = userManager.loginMode == "password"
         quotaInfo = if (isSuper) {
             "无限制"
@@ -404,15 +437,38 @@ fun SettingsRoute(
         },
         widgetCount = widgetCount,
         onWidgetManage = { showWidgetSettings = true },
-        onFriendsClick = { showFriends = true },
         permissionSummary = permissionSummary,
-        onPermissionClick = { showPermissionDialog = true }
+        onPermissionClick = { showPermissionDialog = true },
+        customNickname = userProfile.nickname,
+        signature = userProfile.signature,
+        avatarPath = userProfile.avatarPath,
+        avatarUpdatedAt = userProfile.avatarUpdatedAt,
+        onEditProfileClick = { showProfileDialog = true }
     )
 
-    if (showFriends) {
-        com.buct.course.ui.system.GlassSubpage(onDismiss = { showFriends = false }) { close ->
-            com.buct.course.ui.route.FriendsRoute(onBack = close)
-        }
+    if (showProfileDialog) {
+        ProfileEditDialog(
+            initialNickname = userProfile.nickname,
+            fallbackName = studentName,
+            initialSignature = userProfile.signature,
+            avatarPath = userProfile.avatarPath,
+            avatarUpdatedAt = userProfile.avatarUpdatedAt,
+            onPickAvatar = {
+                pickAvatarLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+            onResetAvatar = {
+                userProfile = UserProfileStore.clearAvatar(context, currentAccountKey)
+                GlassToaster.show("已恢复默认文字头像")
+            },
+            onSave = { nick, sig ->
+                userProfile = UserProfileStore.saveText(context, currentAccountKey, nick, sig)
+                showProfileDialog = false
+                GlassToaster.show("个人资料已保存")
+            },
+            onDismiss = { showProfileDialog = false }
+        )
     }
 
     if (showWidgetSettings) {
@@ -1239,6 +1295,147 @@ fun SimpleConfirmDialog(
         confirmText = confirmText,
         showCancel = showCancel
     )
+}
+
+@Composable
+private fun ProfileEditDialog(
+    initialNickname: String,
+    fallbackName: String,
+    initialSignature: String,
+    avatarPath: String,
+    avatarUpdatedAt: Long,
+    onPickAvatar: () -> Unit,
+    onResetAvatar: () -> Unit,
+    onSave: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var nickname by remember { mutableStateOf(initialNickname) }
+    var signature by remember { mutableStateOf(initialSignature) }
+    val hasAvatar = remember(avatarPath, avatarUpdatedAt) {
+        avatarPath.isNotBlank() && File(avatarPath).isFile
+    }
+    val previewName = nickname.trim().ifBlank { fallbackName }.ifBlank { "同" }
+
+    SystemDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "个人名片设置",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SystemSecondaryButton(
+                    text = "取消",
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                )
+                SystemPrimaryButton(
+                    text = "保存",
+                    onClick = { onSave(nickname, signature) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Box(modifier = Modifier.size(64.dp)) {
+                    if (hasAvatar) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(File(avatarPath))
+                                .memoryCacheKey("${avatarPath}_$avatarUpdatedAt")
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "当前头像",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = previewName.take(1),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    SystemPrimaryButton(
+                        text = "从相册选头像",
+                        onClick = onPickAvatar,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (hasAvatar) {
+                        TextButton(
+                            onClick = onResetAvatar,
+                            modifier = Modifier.align(Alignment.Start)
+                        ) {
+                            Text("恢复默认文字头像")
+                        }
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "展示昵称（留空则显示教务姓名：$fallbackName）",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                GlassTextField(
+                    value = nickname,
+                    onValueChange = { if (it.length <= 16) nickname = it },
+                    placeholder = fallbackName.ifBlank { "北化同学" },
+                    singleLine = true
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "个性签名（最多 60 字）",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                GlassTextField(
+                    value = signature,
+                    onValueChange = { if (it.length <= 60) signature = it },
+                    placeholder = "写一句校园备忘或个性签名…",
+                    singleLine = false,
+                    minHeight = 72.dp
+                )
+            }
+        }
+    }
 }
 
 

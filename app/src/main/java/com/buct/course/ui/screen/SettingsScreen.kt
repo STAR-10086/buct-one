@@ -24,22 +24,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Fingerprint
-import androidx.compose.material.icons.outlined.AssignmentInd
-import androidx.compose.material.icons.outlined.Assignment
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.ContentPasteSearch
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.ManageAccounts
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.People
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.FormatSize
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.ViewWeek
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.SystemUpdate
@@ -56,8 +53,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import java.io.File
 import com.buct.course.ui.system.InsetGroupedRow
 import com.buct.course.ui.system.InsetGroupedSection
 import com.buct.course.ui.system.LiquidSwitch
@@ -109,9 +112,13 @@ fun SettingsScreen(
     onFeedbackClick: () -> Unit = {},
     widgetCount: Int = 0,
     onWidgetManage: () -> Unit = {},
-    onFriendsClick: () -> Unit = {},
     permissionSummary: String = "通知与定时提醒权限",
-    onPermissionClick: () -> Unit = {}
+    onPermissionClick: () -> Unit = {},
+    customNickname: String = "",
+    signature: String = "",
+    avatarPath: String = "",
+    avatarUpdatedAt: Long = 0L,
+    onEditProfileClick: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
     // 折叠进度随滚动偏移连续变化（约 96px 行程），全程跟手
@@ -144,15 +151,12 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(SectionSpacing)
         ) {
             SettingsHeader(
-                name = studentName,
-                studentId = studentId,
+                displayName = customNickname.ifBlank { studentName.ifBlank { "同学" } },
                 school = schoolName,
-                isSuper = isSuper,
-                quotaInfo = quotaInfo,
-                canRefreshCookie = canRefreshCookie,
-                isRefreshingCookie = isRefreshingCookie,
-                onQuotaClick = onQuotaClick,
-                onRefreshCookieClick = onRefreshCookieClick
+                signature = signature,
+                avatarPath = avatarPath,
+                avatarUpdatedAt = avatarUpdatedAt,
+                onEditProfileClick = onEditProfileClick
             )
 
             InsetGroupedSection(Modifier.moduleEntrance(1), header = "数据与同步") {
@@ -165,7 +169,7 @@ fun SettingsScreen(
                     } else {
                         "已关闭：仅使用本地数据，避免教务账号被顶号；抢课等在线功能需先开启"
                     },
-                    showDivider = false,
+                    showDivider = canRefreshCookie,
                     trailing = {
                         LiquidSwitch(
                             checked = onlineSyncEnabled,
@@ -173,6 +177,26 @@ fun SettingsScreen(
                         )
                     }
                 )
+                if (canRefreshCookie) {
+                    InsetGroupedRow(
+                        icon = Icons.Outlined.Refresh,
+                        iconTint = Color(0xFF0A84FF),
+                        title = "更新 Cookie",
+                        subtitle = if (isRefreshingCookie) "正在刷新教务与统一身份会话…" else "手动续期当前登录态与教务 Cookie",
+                        showDivider = false,
+                        onClick = {
+                            if (!isRefreshingCookie) onRefreshCookieClick()
+                        },
+                        trailing = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    )
+                }
             }
 
             InsetGroupedSection(Modifier.moduleEntrance(2), header = "账号与教务") {
@@ -321,20 +345,21 @@ fun SettingsScreen(
 }
 
 @Composable
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun SettingsHeader(
-    name: String,
-    studentId: String,
+    displayName: String,
     school: String,
-    isSuper: Boolean,
-    quotaInfo: String,
-    canRefreshCookie: Boolean,
-    isRefreshingCookie: Boolean,
-    onQuotaClick: () -> Unit,
-    onRefreshCookieClick: () -> Unit
+    signature: String,
+    avatarPath: String,
+    avatarUpdatedAt: Long,
+    onEditProfileClick: () -> Unit
 ) {
+    val context = LocalContext.current
     // 裸玻璃容器（不走 Surface，避免 elevation 阴影在半透色下泛白）
     val heroShape = RoundedCornerShape(24.dp)
+    val hasAvatarFile = remember(avatarPath, avatarUpdatedAt) {
+        avatarPath.isNotBlank() && File(avatarPath).isFile
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -342,26 +367,62 @@ private fun SettingsHeader(
             .clip(heroShape)
             .background(com.buct.course.ui.system.glassSurfaceColor())
             .border(0.5.dp, com.buct.course.ui.system.glassBorderColor(), heroShape)
+            .clickable(onClick = onEditProfileClick)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Box(
-                modifier = Modifier.size(40.dp).background(
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape
-                ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = name.take(1).ifBlank { "同" },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+            Box(modifier = Modifier.size(60.dp)) {
+                if (hasAvatarFile) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(File(avatarPath))
+                            .memoryCacheKey("${avatarPath}_$avatarUpdatedAt")
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "用户头像",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), CircleShape)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = displayName.take(1).ifBlank { "同" },
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.PhotoCamera,
+                        contentDescription = "更换头像",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(11.dp)
+                    )
+                }
             }
 
             Column(
@@ -369,37 +430,55 @@ private fun SettingsHeader(
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Text(
-                    text = name.ifBlank { "同学" },
+                    text = displayName.ifBlank { "同学" },
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = school.ifBlank { "未选择学校" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = school.ifBlank { "未选择系统" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Edit,
+                    contentDescription = "编辑资料",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(13.dp)
+                )
+                Text(
+                    text = "编辑资料",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
 
-        if (canRefreshCookie) {
-            androidx.compose.foundation.layout.FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier.clickable(
-                        enabled = !isRefreshingCookie,
-                        onClick = onRefreshCookieClick
-                    )
-                ) {
-                    SystemStatusBadge(
-                        text = if (isRefreshingCookie) "更新中" else "更新 Cookie",
-                        tone = SystemTone.Info
-                    )
-                }
-            }
-        }
+        Text(
+            text = signature.ifBlank { "点击编辑个性签名与头像…" },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (signature.isBlank()) {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+            },
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
