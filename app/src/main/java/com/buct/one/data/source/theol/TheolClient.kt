@@ -63,6 +63,7 @@ class TheolClient {
         const val MEOL_SSO_SERVICE = "https://course.buct.edu.cn/meol/homepage/common/sso_login.jsp"
         const val MEOL_WELCOME_HOME = "https://course.buct.edu.cn/meol/welcomepage/student/index.jsp"
         const val MEOL_COURSE_CATALOG_URL = "https://course.buct.edu.cn/meol/welcomepage/student/course_list.jsp"
+        const val MEOL_LESSON_LIST_URL = "https://course.buct.edu.cn/meol/lesson/blen.student.lesson.list.jsp"
         const val MEOL_LEGACY_HOME_PATH = "/meol/homepage/student/index.jsp"
         const val MEOL_LEGACY_HOME_URL = "https://course.buct.edu.cn/meol/homepage/student/index.jsp"
         const val MEOL_REMINDER_URL = "https://course.buct.edu.cn/meol/welcomepage/student/interaction_reminder_v8.jsp"
@@ -609,9 +610,22 @@ class TheolClient {
         throw IOException("附件下载未完成，请稍后重试")
     }
 
+    /** 强制清空服务端激活课程上下文记录（切换课程扫描后调用，防止后续点详情时误用旧上下文） */
+    fun invalidateCourseContext() {
+        activeCourseLid = ""
+        activeCourseActivatedAt = 0L
+    }
+
+    /** Phase-1 快照与 Phase-2 待补齐的在修课程目录 */
+    data class PendingPhaseResult(
+        val snapshot: TheolSnapshot,
+        val remainingHwCourses: List<TheolCourseInfo>,
+        val remainingTestCourses: List<TheolCourseInfo>
+    )
+
     /**
-     * 拉取学生全量已选课程目录（优先 /meol/welcomepage/student/course_list.jsp，兼容回退 /meol/homepage/student/index.jsp）。
-     * 用于发现“所有作业都已提交完毕、不再出现在 interaction_reminder_v8.jsp 提醒页”的课程。
+     * 拉取学生当前在修课程目录（优先 /meol/welcomepage/student/course_list.jsp 约 20 门在修课；
+     * 若为空再依次回退 blen.student.lesson.list.jsp 与旧版首页）。
      */
     fun fetchAllCatalogCourses(): List<TheolCourseInfo> {
         val primary = runCatching {
@@ -621,6 +635,13 @@ class TheolClient {
         }.getOrDefault(emptyList())
         if (primary.isNotEmpty()) return primary
 
+        val lessonList = runCatching {
+            val html = fetchHtml(MEOL_LESSON_LIST_URL, MEOL_WELCOME_HOME)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) emptyList()
+            else TheolParser.parseCatalogCourses(html, MEOL_LESSON_LIST_URL).take(30)
+        }.getOrDefault(emptyList())
+        if (lessonList.isNotEmpty()) return lessonList
+
         return runCatching {
             val html = fetchHtml(MEOL_LEGACY_HOME_URL, MEOL_WELCOME_HOME)
             if (TheolParser.isPermissionDeniedOrExpired(html)) emptyList()
@@ -628,11 +649,13 @@ class TheolClient {
         }.getOrDefault(emptyList())
     }
 
-    /** 抓取北化在线所有待办与已完成作业及测验（融合待办提醒页 + 全量课程目录，解决交完作业后科目消失的问题） */
-    fun fetchPendingSnapshot(
+    /**
+     * 第一阶段（前台秒出）：仅抓取 reminder 页中「待办作业/测验」所属课程，同时拿到待补齐的其余在修课程目录。
+     */
+    fun fetchPendingPhaseSnapshot(
         nowMillis: Long = System.currentTimeMillis(),
         prefetchedReminderHtml: String? = null
-    ): TheolSnapshot {
+    ): PendingPhaseResult {
         val reminderHtml = prefetchedReminderHtml
             ?.takeIf { !TheolParser.isPermissionDeniedOrExpired(it) }
             ?: fetchHtml(MEOL_REMINDER_URL, MEOL_WELCOME_HOME).also { html ->
@@ -645,46 +668,14 @@ class TheolClient {
         val (pendingHwCourses, pendingTestCourses) = TheolParser.parsePendingCourses(reminderHtml, MEOL_BASE)
         val catalogCourses = fetchAllCatalogCourses()
 
-        // 1) 作业课程：待办提醒课程优先（保证有未交作业的科目最先抓取），随后合并全量课程目录中已交完作业的科目
-        val hwCourseMap = LinkedHashMap<String, TheolCourseInfo>()
-        for (c in pendingHwCourses) {
-            hwCourseMap[c.lid] = c
-        }
-        for (c in catalogCourses) {
-            if (!hwCourseMap.containsKey(c.lid)) {
-                hwCourseMap[c.lid] = c
-            }
-        }
-        val hwCourses = hwCourseMap.values.toList()
-
-        // 2) 测验课程：同样将全量课程目录合并进来（排除公共无效测验课程 24199 / 27215），以便看到已完成的历史测验
-        val testCourseMap = LinkedHashMap<String, TheolCourseInfo>()
-        for (c in pendingTestCourses) {
-            testCourseMap[c.lid] = c
-        }
-        for (c in catalogCourses) {
-            if (c.lid == "24199" || c.lid == "27215") continue
-            if (!testCourseMap.containsKey(c.lid)) {
-                testCourseMap[c.lid] = TheolCourseInfo(
-                    lid = c.lid,
-                    courseName = c.courseName,
-                    type = "test",
-                    url = TheolParser.buildTestListUrl(c.lid, MEOL_BASE)
-                )
-            }
-        }
-        val testCourses = testCourseMap.values.toList()
-
         val allHomeworks = mutableListOf<TheolHomeworkItem>()
         val seenHwIds = mutableSetOf<String>()
         val allTests = mutableListOf<TheolTestItem>()
         val seenTestIds = mutableSetOf<String>()
         var failedCourses = 0
 
-        // 抓取多门课程作业会切换 Tomcat session 中的当前课程，因此顺序执行并在结束后重置课程上下文缓存
-        activeCourseLid = ""
-        activeCourseActivatedAt = 0L
-        for (course in hwCourses) {
+        invalidateCourseContext()
+        for (course in pendingHwCourses) {
             try {
                 val items = walkHomeworkPages(course.url, course.lid, course.courseName, nowMillis)
                 for (hw in items) {
@@ -698,11 +689,10 @@ class TheolClient {
                 failedCourses++
             }
         }
-        activeCourseLid = ""
-        activeCourseActivatedAt = 0L
+        invalidateCourseContext()
 
-        if (testCourses.size <= 1) {
-            for (course in testCourses) {
+        if (pendingTestCourses.size <= 1) {
+            for (course in pendingTestCourses) {
                 try {
                     for (t in fetchCourseTests(course.lid, course.courseName, course.url)) {
                         if (seenTestIds.add("${t.lid}:${t.testId}")) {
@@ -716,9 +706,9 @@ class TheolClient {
                 }
             }
         } else {
-            val pool = Executors.newFixedThreadPool(minOf(3, testCourses.size))
+            val pool = Executors.newFixedThreadPool(minOf(3, pendingTestCourses.size))
             try {
-                val futures = testCourses.map { course ->
+                val futures = pendingTestCourses.map { course ->
                     pool.submit(Callable {
                         fetchCourseTests(course.lid, course.courseName, course.url)
                     })
@@ -741,8 +731,85 @@ class TheolClient {
             }
         }
 
-        // 排序：可提交的未交作业最前（按截止时间升序），其次是已完成（已提交）的作业（按截止时间降序，最近交的排前面），最后是已截止未交
-        allHomeworks.sortWith(
+        val pendingHwLids = pendingHwCourses.mapTo(HashSet()) { it.lid }
+        val pendingTestLids = pendingTestCourses.mapTo(HashSet()) { it.lid }
+
+        val remainingHwCourses = catalogCourses.filter { it.lid !in pendingHwLids }
+        val remainingTestCourses = catalogCourses
+            .filter { it.lid !in pendingTestLids && it.lid != "24199" && it.lid != "27215" }
+            .map {
+                TheolCourseInfo(
+                    lid = it.lid,
+                    courseName = it.courseName,
+                    type = "test",
+                    url = TheolParser.buildTestListUrl(it.lid, MEOL_BASE)
+                )
+            }
+
+        return PendingPhaseResult(
+            snapshot = TheolSnapshot(
+                homeworks = sortHomeworks(allHomeworks),
+                tests = sortTests(allTests),
+                failedCourseCount = failedCourses
+            ),
+            remainingHwCourses = remainingHwCourses,
+            remainingTestCourses = remainingTestCourses
+        )
+    }
+
+    /**
+     * 快速扫描单门目录课程的作业列表：
+     * 1) 打开课程首页激活 Tomcat 上下文并提取「课程作业」专属栏目链接；
+     * 2) 只走作业栏目链接 + 默认 hwtask.jsp 兜底（最多 8 页，不漫游其它无关栏目），单科约 0.3s。
+     */
+    fun fetchSingleCatalogCourseHomeworksFast(
+        course: TheolCourseInfo,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<TheolHomeworkItem> {
+        val courseHomeUrl = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=${URLEncoder.encode(course.lid, "UTF-8")}"
+        val courseHtml = fetchHtml(courseHomeUrl, MEOL_WELCOME_HOME)
+        if (TheolParser.isPermissionDeniedOrExpired(courseHtml)) {
+            throw IOException("北化在线会话已过期，请重新登录")
+        }
+
+        val columnUrls = TheolParser.extractHomeworkColumnUrls(courseHtml, courseHomeUrl)
+        val fallbackHwUrl = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
+        val targets = buildList {
+            addAll(columnUrls)
+            if (columnUrls.none { it.contains("hwtask.jsp", ignoreCase = true) }) {
+                add(fallbackHwUrl)
+            }
+        }
+
+        val found = mutableListOf<TheolHomeworkItem>()
+        val seenIds = mutableSetOf<String>()
+        for (targetUrl in targets) {
+            val items = try {
+                walkHomeworkPages(targetUrl, course.lid, course.courseName, nowMillis, maxPages = 8, followOnlyHomeworkAndPaging = true)
+            } catch (e: SessionExpiredSignal) {
+                throw IOException(e.message ?: "北化在线会话已过期，请重新登录", e)
+            }
+            for (hw in items) {
+                if (seenIds.add(hw.hwtid)) {
+                    found.add(hw)
+                }
+            }
+            if (found.isNotEmpty() && columnUrls.isNotEmpty()) break
+        }
+        invalidateCourseContext()
+        return found
+    }
+
+    fun fetchSingleCourseTestsSafe(course: TheolCourseInfo): List<TheolTestItem> {
+        return try {
+            fetchCourseTests(course.lid, course.courseName, course.url)
+        } catch (e: SessionExpiredSignal) {
+            throw IOException(e.message ?: "北化在线会话已过期，请重新登录", e)
+        }
+    }
+
+    fun sortHomeworks(list: List<TheolHomeworkItem>): List<TheolHomeworkItem> =
+        list.sortedWith(
             compareBy<TheolHomeworkItem> {
                 when {
                     it.canSubmit -> 0
@@ -757,7 +824,9 @@ class TheolClient {
                 }
             }
         )
-        allTests.sortWith(
+
+    fun sortTests(list: List<TheolTestItem>): List<TheolTestItem> =
+        list.sortedWith(
             compareBy<TheolTestItem> {
                 when {
                     it.canStart -> 0
@@ -767,10 +836,46 @@ class TheolClient {
             }.thenBy { it.endTimeMillis ?: Long.MAX_VALUE }
         )
 
+    /** 兼容同步完整抓取（先执行 Phase-1，再顺序快速补齐 Phase-2 在修课程） */
+    fun fetchPendingSnapshot(
+        nowMillis: Long = System.currentTimeMillis(),
+        prefetchedReminderHtml: String? = null
+    ): TheolSnapshot {
+        val phase1 = fetchPendingPhaseSnapshot(nowMillis, prefetchedReminderHtml)
+        val mergedHw = phase1.snapshot.homeworks.toMutableList()
+        val seenHw = mergedHw.mapTo(HashSet()) { it.hwtid }
+        val mergedTests = phase1.snapshot.tests.toMutableList()
+        val seenTests = mergedTests.mapTo(HashSet()) { "${it.lid}:${it.testId}" }
+        var failed = phase1.snapshot.failedCourseCount
+
+        for (c in phase1.remainingHwCourses) {
+            try {
+                for (hw in fetchSingleCatalogCourseHomeworksFast(c, nowMillis)) {
+                    if (seenHw.add(hw.hwtid)) mergedHw.add(hw)
+                }
+            } catch (e: IOException) {
+                if (e.message?.contains("过期") == true) throw e
+                failed++
+            } catch (_: Exception) {
+                failed++
+            }
+        }
+        for (c in phase1.remainingTestCourses) {
+            try {
+                for (t in fetchSingleCourseTestsSafe(c)) {
+                    if (seenTests.add("${t.lid}:${t.testId}")) mergedTests.add(t)
+                }
+            } catch (e: IOException) {
+                if (e.message?.contains("过期") == true) throw e
+                failed++
+            } catch (_: Exception) {
+                failed++
+            }
+        }
         return TheolSnapshot(
-            homeworks = allHomeworks,
-            tests = allTests,
-            failedCourseCount = failedCourses
+            homeworks = sortHomeworks(mergedHw),
+            tests = sortTests(mergedTests),
+            failedCourseCount = failed
         )
     }
 
@@ -787,7 +892,9 @@ class TheolClient {
         startUrl: String,
         lid: String,
         courseName: String,
-        nowMillis: Long
+        nowMillis: Long,
+        maxPages: Int = MAX_COURSE_PAGES,
+        followOnlyHomeworkAndPaging: Boolean = false
     ): List<TheolHomeworkItem> {
         data class QueueEntry(val url: String, val referer: String, val depth: Int)
 
@@ -803,7 +910,7 @@ class TheolClient {
         visited.add(normalizedStart)
 
         var fetched = 0
-        while (queue.isNotEmpty() && fetched < MAX_COURSE_PAGES) {
+        while (queue.isNotEmpty() && fetched < maxPages) {
             val current = queue.removeFirst()
             if (current.depth > MAX_COURSE_DEPTH) continue
             fetched++
@@ -876,24 +983,32 @@ class TheolClient {
                     if (href.isNotEmpty()) {
                         val targetPath = normalizeUrl(current.url, href)
                             ?.let { u -> runCatching { u.toHttpUrl().encodedPath }.getOrNull() }
-                        if (targetPath == currentPath) {
-                            if (!repeated) enqueue(href, sameDepth = true)
-                        } else {
-                            enqueue(href)
+                        val allowLink = !followOnlyHomeworkAndPaging ||
+                            href.contains("pagingPage=", ignoreCase = true) ||
+                            href.contains("hwtask", ignoreCase = true) ||
+                            (a.text().contains("作业") && !a.text().contains("测试"))
+                        if (allowLink) {
+                            if (targetPath == currentPath) {
+                                if (!repeated) enqueue(href, sameDepth = true)
+                            } else {
+                                enqueue(href)
+                            }
                         }
                     }
-                    val onclick = a.attr("onclick")
-                    if (onclick.isNotEmpty()) {
-                        LOCATION_REGEX.findAll(onclick).forEach { m ->
-                            val target = m.groupValues[1].ifEmpty { m.groupValues[2] }
-                            if (target.isNotEmpty()) enqueue(target)
-                        }
-                        QUOTED_URL_REGEX.findAll(onclick).forEach { m ->
-                            val quoted = m.groupValues[1]
-                            if (quoted.contains("columnId=") || quoted.contains("pagingPage=")) {
-                                if (!repeated) enqueue(quoted, sameDepth = true)
-                            } else {
-                                enqueue(quoted)
+                    if (!followOnlyHomeworkAndPaging) {
+                        val onclick = a.attr("onclick")
+                        if (onclick.isNotEmpty()) {
+                            LOCATION_REGEX.findAll(onclick).forEach { m ->
+                                val target = m.groupValues[1].ifEmpty { m.groupValues[2] }
+                                if (target.isNotEmpty()) enqueue(target)
+                            }
+                            QUOTED_URL_REGEX.findAll(onclick).forEach { m ->
+                                val quoted = m.groupValues[1]
+                                if (quoted.contains("columnId=") || quoted.contains("pagingPage=")) {
+                                    if (!repeated) enqueue(quoted, sameDepth = true)
+                                } else {
+                                    enqueue(quoted)
+                                }
                             }
                         }
                     }

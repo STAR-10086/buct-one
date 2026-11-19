@@ -4,6 +4,7 @@ import android.content.Context
 import com.buct.one.data.model.BlacklistedCourse
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
+import com.buct.one.data.model.TheolCourseInfo
 import com.buct.one.data.model.TheolDownloadedFile
 import com.buct.one.data.model.TheolFilterPrefs
 import com.buct.one.data.model.TheolHomeworkDetail
@@ -15,15 +16,23 @@ import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.one.data.source.theol.TheolClient
 import com.buct.one.data.source.theol.TheolParser
 import com.buct.one.data.store.TheolStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 北化在线（THEOL）与本地待办同步服务。
@@ -36,6 +45,9 @@ class TheolSyncService private constructor(
     private val client: TheolClient
 ) {
     private val syncMutex = Mutex()
+    private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var backgroundJob: Job? = null
+    private val syncGeneration = AtomicLong(0L)
     private val detailCache = ConcurrentHashMap<String, TheolHomeworkDetail>()
     private val testDetailCache = ConcurrentHashMap<String, TheolTestDetail>()
     @Volatile
@@ -53,6 +65,9 @@ class TheolSyncService private constructor(
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
 
+    private val _backgroundSyncing = MutableStateFlow(false)
+    val backgroundSyncing: StateFlow<Boolean> = _backgroundSyncing.asStateFlow()
+
     init {
         restoreEncryptedSession()
         detailCache.putAll(store.readHomeworkDetails())
@@ -61,9 +76,17 @@ class TheolSyncService private constructor(
 
     fun hasSavedSsoSession(): Boolean = SidPortalSessionVault.hasAnyCookie(appContext)
 
-    /** 尝试复用已存统一身份认证（sidportal）或 MEOL 会话静默同步北化在线作业 */
+    /**
+     * 尝试复用已有统一身份认证（sidportal）或 MEOL 会话静默同步北化在线作业：
+     * 阶段一（前台秒出）：优先拉取待办提醒页课程，立刻展示未交作业与测验；
+     * 阶段二（后台静默）：在后台逐门补齐在修课程列表中的已提交历史作业与测验，期间不阻塞查看详情或下载附件。
+     */
     suspend fun refreshIfSessionValid(): Result<DomainSlice<TheolSnapshot>> = withContext(Dispatchers.IO) {
-        syncMutex.withLock {
+        backgroundJob?.cancel()
+        val gen = syncGeneration.incrementAndGet()
+        _backgroundSyncing.value = false
+        var pendingPhase: TheolClient.PendingPhaseResult? = null
+        val phase1Result = syncMutex.withLock {
             _syncing.value = true
             try {
                 // 每次同步前检查加密库是否有来自教务登录页的最新凭证
@@ -72,23 +95,15 @@ class TheolSyncService private constructor(
                 if (probedReminder == null && !client.ensureSessionActive(forceSso = true)) {
                     val failed = store.commitFailure("北化在线会话未建立，请重新登录教务系统或点击右上角登录", TheolParser.PARSER_VERSION)
                     _theolState.value = failed
-                    return@withContext Result.failure(IllegalStateException(failed.lastError))
+                    return@withLock Result.failure(IllegalStateException(failed.lastError))
                 }
                 persistEncryptedSession()
-                val snapshot = client.fetchPendingSnapshot(
+                val phase = client.fetchPendingPhaseSnapshot(
                     nowMillis = System.currentTimeMillis(),
                     prefetchedReminderHtml = probedReminder
                 )
-                val complete = snapshot.failedCourseCount == 0
-                val reason = if (complete) null else "${snapshot.failedCourseCount} 门课程抓取失败"
-                val committed = store.commitSuccess(
-                    snapshot = snapshot,
-                    parserVersion = TheolParser.PARSER_VERSION,
-                    nowMillis = System.currentTimeMillis(),
-                    complete = complete,
-                    incompleteReason = reason
-                )
-                _theolState.value = committed
+                pendingPhase = phase
+                val committed = commitMergedPhase1(phase.snapshot)
                 Result.success(committed)
             } catch (e: Exception) {
                 val failed = store.commitFailure(e.message ?: "同步失败", TheolParser.PARSER_VERSION)
@@ -98,12 +113,23 @@ class TheolSyncService private constructor(
                 _syncing.value = false
             }
         }
+        val phase = pendingPhase
+        if (phase1Result.isSuccess && phase != null &&
+            (phase.remainingHwCourses.isNotEmpty() || phase.remainingTestCourses.isNotEmpty())
+        ) {
+            launchBackgroundCatalogSync(gen, phase.remainingHwCourses, phase.remainingTestCourses)
+        }
+        phase1Result
     }
 
     /** 原生登录北化在线并立刻同步一次（密码使用 CharArray，登录完即清零） */
     suspend fun loginAndSync(username: String, passwordChars: CharArray): Result<DomainSlice<TheolSnapshot>> =
         withContext(Dispatchers.IO) {
-            syncMutex.withLock {
+            backgroundJob?.cancel()
+            val gen = syncGeneration.incrementAndGet()
+            _backgroundSyncing.value = false
+            var pendingPhase: TheolClient.PendingPhaseResult? = null
+            val phase1Result = syncMutex.withLock {
                 _syncing.value = true
                 try {
                     val loginResult = client.loginWithCredentials(username, passwordChars)
@@ -111,20 +137,12 @@ class TheolSyncService private constructor(
                         val msg = loginResult.exceptionOrNull()?.message ?: "北化在线登录失败"
                         val failed = store.commitFailure(msg, TheolParser.PARSER_VERSION)
                         _theolState.value = failed
-                        return@withContext Result.failure(loginResult.exceptionOrNull() ?: IllegalStateException(msg))
+                        return@withLock Result.failure(loginResult.exceptionOrNull() ?: IllegalStateException(msg))
                     }
                     persistEncryptedSession()
-                    val snapshot = client.fetchPendingSnapshot(System.currentTimeMillis())
-                    val complete = snapshot.failedCourseCount == 0
-                    val reason = if (complete) null else "${snapshot.failedCourseCount} 门课程抓取失败"
-                    val committed = store.commitSuccess(
-                        snapshot = snapshot,
-                        parserVersion = TheolParser.PARSER_VERSION,
-                        nowMillis = System.currentTimeMillis(),
-                        complete = complete,
-                        incompleteReason = reason
-                    )
-                    _theolState.value = committed
+                    val phase = client.fetchPendingPhaseSnapshot(System.currentTimeMillis())
+                    pendingPhase = phase
+                    val committed = commitMergedPhase1(phase.snapshot)
                     Result.success(committed)
                 } catch (e: Exception) {
                     val failed = store.commitFailure(e.message ?: "同步失败", TheolParser.PARSER_VERSION)
@@ -134,7 +152,153 @@ class TheolSyncService private constructor(
                     _syncing.value = false
                 }
             }
+            val phase = pendingPhase
+            if (phase1Result.isSuccess && phase != null &&
+                (phase.remainingHwCourses.isNotEmpty() || phase.remainingTestCourses.isNotEmpty())
+            ) {
+                launchBackgroundCatalogSync(gen, phase.remainingHwCourses, phase.remainingTestCourses)
+            }
+            phase1Result
         }
+
+    private fun commitMergedPhase1(phase1Snapshot: TheolSnapshot): DomainSlice<TheolSnapshot> {
+        val complete = phase1Snapshot.failedCourseCount == 0
+        val reason = if (complete) null else "${phase1Snapshot.failedCourseCount} 门课程抓取失败"
+        val committed = store.commitSuccess(
+            snapshot = phase1Snapshot,
+            parserVersion = TheolParser.PARSER_VERSION,
+            nowMillis = System.currentTimeMillis(),
+            complete = complete,
+            incompleteReason = reason
+        )
+        _theolState.value = committed
+        return committed
+    }
+
+    /**
+     * 后台串行静默补齐在修课程目录里的已提交作业与历史测验：
+     * 每处理一门课短时持锁后立刻释放，确保用户在 UI 点看作业详情或下载附件时零卡顿。
+     */
+    private fun launchBackgroundCatalogSync(
+        gen: Long,
+        remainingHwCourses: List<TheolCourseInfo>,
+        remainingTestCourses: List<TheolCourseInfo>
+    ) {
+        backgroundJob?.cancel()
+        backgroundJob = backgroundScope.launch {
+            _backgroundSyncing.value = true
+            try {
+                var dirty = false
+                var processed = 0
+                val prefsSnapshot = _filterPrefs.value
+
+                for (course in remainingHwCourses) {
+                    if (!isActive || syncGeneration.get() != gen) return@launch
+                    if (prefsSnapshot.isCourseBlacklisted(course.lid, course.courseName)) continue
+
+                    val fetchedItems = syncMutex.withLock {
+                        if (syncGeneration.get() != gen) return@withLock null
+                        runCatching {
+                            restoreEncryptedSession()
+                            client.fetchSingleCatalogCourseHomeworksFast(course, System.currentTimeMillis())
+                        }.getOrNull()
+                    }
+
+                    if (syncGeneration.get() != gen) return@launch
+                    if (!fetchedItems.isNullOrEmpty()) {
+                        mergeBackgroundResult(newHomeworks = fetchedItems, newTests = emptyList())
+                        dirty = true
+                    }
+                    processed++
+                    if (dirty && processed % 3 == 0) {
+                        persistCurrentBackgroundSnapshot()
+                        dirty = false
+                    }
+                    delay(40)
+                }
+
+                for (course in remainingTestCourses) {
+                    if (!isActive || syncGeneration.get() != gen) return@launch
+                    if (prefsSnapshot.isCourseBlacklisted(course.lid, course.courseName)) continue
+
+                    val fetchedTests = syncMutex.withLock {
+                        if (syncGeneration.get() != gen) return@withLock null
+                        runCatching {
+                            restoreEncryptedSession()
+                            client.fetchSingleCourseTestsSafe(course)
+                        }.getOrNull()
+                    }
+
+                    if (syncGeneration.get() != gen) return@launch
+                    if (!fetchedTests.isNullOrEmpty()) {
+                        mergeBackgroundResult(newHomeworks = emptyList(), newTests = fetchedTests)
+                        dirty = true
+                    }
+                    processed++
+                    if (dirty && processed % 4 == 0) {
+                        persistCurrentBackgroundSnapshot()
+                        dirty = false
+                    }
+                    delay(30)
+                }
+
+                if (dirty && syncGeneration.get() == gen) {
+                    persistCurrentBackgroundSnapshot()
+                }
+            } catch (_: CancellationException) {
+            } finally {
+                if (syncGeneration.get() == gen) {
+                    _backgroundSyncing.value = false
+                }
+            }
+        }
+    }
+
+    private fun mergeBackgroundResult(
+        newHomeworks: List<TheolHomeworkItem>,
+        newTests: List<TheolTestItem>
+    ) {
+        val currentSlice = _theolState.value
+        val cur = currentSlice.data ?: return
+        val hwMap = LinkedHashMap<String, TheolHomeworkItem>()
+        for (hw in cur.homeworks) hwMap[hw.hwtid] = hw
+        var changed = false
+        for (hw in newHomeworks) {
+            val prev = hwMap.put(hw.hwtid, hw)
+            if (prev != hw) changed = true
+        }
+        val testMap = LinkedHashMap<String, TheolTestItem>()
+        for (t in cur.tests) testMap["${t.lid}:${t.testId}"] = t
+        for (t in newTests) {
+            val prev = testMap.put("${t.lid}:${t.testId}", t)
+            if (prev != t) changed = true
+        }
+        if (!changed) return
+
+        val nextSnapshot = TheolSnapshot(
+            homeworks = client.sortHomeworks(hwMap.values.toList()),
+            tests = client.sortTests(testMap.values.toList()),
+            failedCourseCount = cur.failedCourseCount
+        )
+        _theolState.value = currentSlice.copy(data = nextSnapshot)
+    }
+
+    private suspend fun persistCurrentBackgroundSnapshot() {
+        syncMutex.withLock {
+            val cur = _theolState.value.data ?: return@withLock
+            val complete = cur.failedCourseCount == 0
+            val reason = if (complete) null else "${cur.failedCourseCount} 门课程抓取失败"
+            val committed = store.commitSuccess(
+                snapshot = cur,
+                parserVersion = TheolParser.PARSER_VERSION,
+                nowMillis = System.currentTimeMillis(),
+                complete = complete,
+                incompleteReason = reason
+            )
+            _theolState.value = committed
+            persistEncryptedSession()
+        }
+    }
 
     /** 原生拉取单条作业详情（自动激活课程上下文、持久化刷新后的 Cookie 并做内存+磁盘缓存） */
     suspend fun fetchHomeworkDetail(

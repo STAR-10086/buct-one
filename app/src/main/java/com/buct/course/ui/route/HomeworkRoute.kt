@@ -117,6 +117,7 @@ fun HomeworkRoute() {
     val localTodos by service.todosState.collectAsState()
     val filterPrefs by service.filterPrefs.collectAsState()
     val theolSyncing by service.syncing.collectAsState()
+    val theolBgSyncing by service.backgroundSyncing.collectAsState()
     val sjcxSlice by sjcxService.sjcxState.collectAsState()
     val sjcxSyncing by sjcxService.syncing.collectAsState()
     val syncing = theolSyncing || sjcxSyncing
@@ -226,7 +227,7 @@ fun HomeworkRoute() {
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onBackground
                 )
-                val subtitle = when (theolSlice.provenance.refreshState) {
+                val baseSubtitle = when (theolSlice.provenance.refreshState) {
                     RefreshState.NEVER -> "北化在线尚未同步"
                     RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED ->
                         "更新于 ${timeFormatter.format(Date(theolSlice.provenance.capturedAt))}"
@@ -235,6 +236,7 @@ fun HomeworkRoute() {
                     RefreshState.FAILED_FALLBACK ->
                         "同步失败（已保留旧快照）"
                 }
+                val subtitle = if (theolBgSyncing) "$baseSubtitle · 后台补齐已交课程中…" else baseSubtitle
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.labelSmall,

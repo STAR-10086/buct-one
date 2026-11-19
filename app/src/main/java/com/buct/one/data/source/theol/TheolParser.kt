@@ -23,9 +23,10 @@ import java.util.TimeZone
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object TheolParser {
-    const val PARSER_VERSION = 4
+    const val PARSER_VERSION = 5
     const val BASE_URL = "https://course.buct.edu.cn"
     private const val COURSE_HOME_PATH = "/meol/jpk/course/layout/newpage/index.jsp"
+    private val COURSE_ONCLICK_ID_REGEX = Regex("""(?:courseId|lid)\s*=\s*(\d+)""")
 
     private val testStartRegex = Regex("""gotostart\('(\d+)'""")
     private val deadlineFormats = listOf(
@@ -89,35 +90,80 @@ object TheolParser {
     }
 
     /**
-     * 解析全量课程目录页（/meol/welcomepage/student/course_list.jsp 或旧版 /meol/homepage/student/index.jsp）。
-     * 用于补齐“所有作业均已交完、不再出现在 interaction_reminder_v8.jsp 待办提醒中”的已选课程，
-     * 使得用户仍能在「全部」列表中看到已完成/已截止的历史作业。
+     * 解析全量课程目录页（/meol/welcomepage/student/course_list.jsp 的 init_course.jsp?lid=...，
+     * 以及 /meol/lesson/blen.student.lesson.list.jsp 的 onclick course_index.jsp?courseId=... 或主页链接）。
+     * 用于补齐“所有作业均已交完、不再出现在 interaction_reminder_v8.jsp 待办提醒中”的在修课程。
      */
     fun parseCatalogCourses(html: String, sourceUrl: String = BASE_URL): List<TheolCourseInfo> {
         val doc = Jsoup.parse(html, sourceUrl)
         val courses = mutableListOf<TheolCourseInfo>()
         val seen = mutableSetOf<String>()
+        val cleanBase = BASE_URL.trimEnd('/')
 
-        for (a in doc.select("a[href]")) {
-            val resolved = resolveHttpUrl(a.attr("href"), sourceUrl)
-            if (resolved.isEmpty()) continue
-            val path = runCatching { URI(resolved).path }.getOrNull().orEmpty()
-            if (!path.equals(COURSE_HOME_PATH, ignoreCase = true)) continue
-            val lid = extractPositiveIdParam(resolved, "courseId")
-                .ifEmpty { extractPositiveIdParam(resolved, "lid") }
-            val name = a.text().trim()
-            if (lid.isEmpty() || name.isEmpty() || !seen.add(lid)) continue
-            val cleanBase = BASE_URL.trimEnd('/')
+        fun addCourse(lid: String, rawName: String) {
+            val cleanLid = lid.trim()
+            val name = rawName.trim()
+            if (cleanLid.isEmpty() || !cleanLid.all(Char::isDigit) || cleanLid.all { it == '0' }) return
+            if (name.isEmpty() || !seen.add(cleanLid)) return
             courses.add(
                 TheolCourseInfo(
-                    lid = lid,
+                    lid = cleanLid,
                     courseName = name,
                     type = "homework",
-                    url = "$cleanBase$COURSE_HOME_PATH?courseId=$lid"
+                    url = "$cleanBase$COURSE_HOME_PATH?courseId=$cleanLid"
                 )
             )
         }
+
+        for (a in doc.select("a[href]")) {
+            val resolved = resolveHttpUrl(a.attr("href"), sourceUrl)
+            if (resolved.isNotEmpty()) {
+                val path = runCatching { URI(resolved).path }.getOrNull().orEmpty()
+                val isCourseLink = path.equals(COURSE_HOME_PATH, ignoreCase = true) ||
+                    path.endsWith("/lesson/init_course.jsp", ignoreCase = true) ||
+                    path.endsWith("/homepage/course/course_index.jsp", ignoreCase = true)
+                if (isCourseLink) {
+                    val lid = extractPositiveIdParam(resolved, "lid")
+                        .ifEmpty { extractPositiveIdParam(resolved, "courseId") }
+                    if (lid.isNotEmpty()) {
+                        addCourse(lid, a.text())
+                        continue
+                    }
+                }
+            }
+            val onclick = a.attr("onclick")
+            if (onclick.contains("courseId=") || onclick.contains("lid=")) {
+                val match = COURSE_ONCLICK_ID_REGEX.find(onclick)
+                val lid = match?.groupValues?.getOrNull(1).orEmpty()
+                if (lid.isNotEmpty()) {
+                    addCourse(lid, a.text())
+                }
+            }
+        }
         return courses
+    }
+
+    /**
+     * 从课程主页 HTML 中精确定位“课程作业 / 作业提交”相关栏目链接，避免无意义遍历所有教学栏目。
+     */
+    fun extractHomeworkColumnUrls(courseHomeHtml: String, sourceUrl: String): List<String> {
+        val doc = Jsoup.parse(courseHomeHtml, sourceUrl)
+        val urls = LinkedHashSet<String>()
+        for (a in doc.select("a[href]")) {
+            val rawHref = a.attr("href").trim()
+            if (rawHref.isEmpty() || rawHref.startsWith("#") || rawHref.startsWith("javascript:", true)) continue
+            val text = a.text().trim()
+            val hrefLower = rawHref.lowercase(Locale.ROOT)
+            val isHwText = text.contains("作业") && !text.contains("测试")
+            val isHwHref = hrefLower.contains("hwtask")
+            if (!isHwText && !isHwHref) continue
+            val resolved = resolveHttpUrl(rawHref, sourceUrl)
+            if (resolved.isNotEmpty()) {
+                urls.add(resolved)
+                if (urls.size >= 3) break
+            }
+        }
+        return urls.toList()
     }
 
     /** 构造课程在线测验列表入口（MEOL 无独立的 test_start.jsp 页面，统一由列表页点击开始） */
