@@ -250,6 +250,9 @@ sealed class BottomNavItem(
     }
 }
 
+@Volatile
+private var hasCheckedStartupUpdate = false
+
 @Composable
 fun MainScreen(fragmentActivity: FragmentActivity) {
     val context = LocalContext.current
@@ -268,6 +271,15 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
     val shouldShowStarDialog = false
     var showStarDialog by rememberSaveable { mutableStateOf(false) }
     var startupOverlaysReady by remember { mutableStateOf(false) }
+    val startupUpdateState = com.buct.course.update.rememberUpdateState(context)
+
+    LaunchedEffect(startupOverlaysReady, isDemoMode) {
+        if (startupOverlaysReady && !isDemoMode && !hasCheckedStartupUpdate) {
+            hasCheckedStartupUpdate = true
+            kotlinx.coroutines.delay(2500L)
+            startupUpdateState.checkForUpdate()
+        }
+    }
 
     val sessionStore = UserManager.getInstance().sessionState
     val session by sessionStore.state.collectAsState()
@@ -689,6 +701,18 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
                     modifier = Modifier
                         .matchParentSize()
                         .debugPiracyWatermark(true)
+                )
+            }
+
+            val startupAvailableUpdate = startupUpdateState.updateInfo()
+            if (!session.expired && startupUpdateState.showDialog() && startupAvailableUpdate != null) {
+                com.buct.course.update.UpdateDialog(
+                    updateInfo = startupAvailableUpdate,
+                    currentVersion = startupUpdateState.currentVersionName(),
+                    onDismiss = { startupUpdateState.dismiss() },
+                    onUpdate = { url -> startupUpdateState.startDownload(url) },
+                    downloadProgress = startupUpdateState.downloadProgress(),
+                    isDownloading = startupUpdateState.isDownloading()
                 )
             }
 

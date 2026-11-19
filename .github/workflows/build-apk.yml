@@ -271,10 +271,19 @@ jobs:
           rm -rf release-dist
           mkdir -p release-dist
           TAG="${{ inputs.release_tag }}"
+          VER_NAME=$(sed -n 's/^VERSION_NAME=//p' app/version.properties | tr -d '\r' | head -1)
+          if [[ "$TAG" != *-* ]] && [ "v${VER_NAME}" != "$TAG" ]; then
+            echo "::error::正式发版 tag ($TAG) 与 app/version.properties VERSION_NAME (${VER_NAME}) 不一致，请先更新 version.properties"
+            exit 1
+          fi
           cp "app/build/outputs/apk/release/app-armeabi-v7a-release.apk" "release-dist/buct-one-${TAG}-armeabi-v7a.apk"
           cp "app/build/outputs/apk/release/app-arm64-v8a-release.apk"   "release-dist/buct-one-${TAG}-arm64-v8a.apk"
           cp "app/build/outputs/apk/release/app-universal-release.apk"   "release-dist/buct-one-${TAG}-universal.apk"
           cp "app/build/outputs/apk/debug/app-universal-debug.apk"       "release-dist/buct-one-${TAG}-debug.apk"
+          for ARCH in arm64-v8a armeabi-v7a universal; do
+            FILE="release-dist/buct-one-${TAG}-${ARCH}.apk"
+            sha256sum "$FILE" | awk '{print $1}' > "${FILE}.sha256"
+          done
           ls -lh release-dist/
 
       - name: Generate release notes
@@ -345,6 +354,121 @@ jobs:
             echo "- **正式签名证书 SHA-256 指纹**：\`${CERT_SHA}\`"
           } > "$OUT"
 
+      - name: Generate R2 manifests (update.json & latest.json)
+        if: inputs.publish_release == true && inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REPO_FULL_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          rm -rf r2-dist
+          mkdir -p r2-dist
+          python3 - <<'PY'
+          import datetime, hashlib, json, os, re
+
+          tag = os.environ["RELEASE_TAG"].strip()
+          repo = os.environ.get("REPO_FULL_NAME", "STAR-10086/buct-one")
+          version = tag[1:] if tag.startswith("v") else tag
+          channel = "beta" if "-" in tag else "stable"
+
+          props = {}
+          with open("app/version.properties", encoding="utf-8") as f:
+              for line in f:
+                  if "=" in line:
+                      k, v = line.strip().split("=", 1)
+                      props[k.strip()] = v.strip()
+          version_code = int(props.get("VERSION_CODE", "1"))
+          version_name = props.get("VERSION_NAME", version)
+
+          gradle_txt = open("app/build.gradle", encoding="utf-8").read()
+          min_m = re.search(r"\bminSdk\s+(\d+)", gradle_txt)
+          tgt_m = re.search(r"\btargetSdk\s+(\d+)", gradle_txt)
+          min_sdk = int(min_m.group(1)) if min_m else 24
+          target_sdk = int(tgt_m.group(1)) if tgt_m else 34
+
+          notes = ""
+          if os.path.exists("release-dist/release-notes.md"):
+              notes = open("release-dist/release-notes.md", encoding="utf-8").read().strip()
+
+          dl_domain = "https://dl.buctone.cc.cd"
+          update_domain = "https://update.buctone.cc.cd"
+          gh_rel_url = f"https://github.com/{repo}/releases/tag/{tag}"
+          now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+          apks = {}
+          for arch, obj_name in [
+              ("arm64-v8a", f"buct-one-{tag}-arm64-v8a.apk"),
+              ("armeabi-v7a", f"buct-one-{tag}-armeabi-v7a.apk"),
+              ("universal", f"buct-one-{tag}.apk"),
+          ]:
+              local_path = f"release-dist/buct-one-{tag}-{arch}.apk"
+              data = open(local_path, "rb").read()
+              size_bytes = len(data)
+              sha = hashlib.sha256(data).hexdigest().lower()
+              assert 0 < size_bytes <= 104857600, f"Invalid size for {local_path}: {size_bytes}"
+              assert re.fullmatch(r"[a-f0-9]{64}", sha), f"Invalid sha256 for {local_path}"
+              key = f"apk/{tag}/{obj_name}"
+              apks[arch] = {
+                  "apkKey": key,
+                  "downloadUrl": f"{update_domain}/{key}",
+                  "dlUrl": f"{dl_domain}/{key}",
+                  "githubUrl": f"https://github.com/{repo}/releases/download/{tag}/buct-one-{tag}-{arch}.apk",
+                  "sizeBytes": size_bytes,
+                  "sha256": sha,
+              }
+
+          uni = apks["universal"]
+          latest_manifest = {
+              "schemaVersion": 1,
+              "channel": channel,
+              "version": version,
+              "tag": tag,
+              "apkUrl": uni["dlUrl"],
+              "apkKey": uni["apkKey"],
+              "sizeBytes": uni["sizeBytes"],
+              "sha256": uni["sha256"],
+              "publishedAt": now_iso,
+              "changelogMd": notes,
+              "minSdk": min_sdk,
+              "targetSdk": target_sdk,
+              "abi": "universal",
+              "githubReleaseUrl": gh_rel_url,
+              "updatedAt": now_iso,
+          }
+
+          update_manifest = {
+              "schemaVersion": 1,
+              "channel": channel,
+              "versionCode": version_code,
+              "versionName": version_name,
+              "version": version,
+              "tag": tag,
+              "forceUpdate": False,
+              "minSdk": min_sdk,
+              "targetSdk": target_sdk,
+              "publishedAt": now_iso,
+              "updatedAt": now_iso,
+              "releaseNotes": notes,
+              "changelogMd": notes,
+              "downloadUrl": uni["downloadUrl"],
+              "apkUrl": uni["dlUrl"],
+              "sizeBytes": uni["sizeBytes"],
+              "sha256": uni["sha256"],
+              "githubReleaseUrl": gh_rel_url,
+              "apks": apks,
+              "downloadSources": [
+                  {"name": "官方加速源（Cloudflare R2）", "url": uni["downloadUrl"]},
+                  {"name": "GitHub Release 备用源", "url": uni["githubUrl"]},
+              ],
+          }
+
+          with open("r2-dist/latest.json", "w", encoding="utf-8") as f:
+              json.dump(latest_manifest, f, ensure_ascii=False, indent=2)
+          with open("r2-dist/update.json", "w", encoding="utf-8") as f:
+              json.dump(update_manifest, f, ensure_ascii=False, indent=2)
+          print(f"Generated R2 manifests for {tag} (channel={channel}, versionCode={version_code})")
+          PY
+
       - name: Publish to Release
         if: inputs.publish_release == true && inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
@@ -353,5 +477,75 @@ jobs:
           name: "BUCT One ${{ inputs.release_tag }}"
           prerelease: ${{ contains(inputs.release_tag, '-') }}
           body_path: release-dist/release-notes.md
-          files: release-dist/*.apk
+          files: |
+            release-dist/*.apk
+            release-dist/*.sha256
           fail_on_unmatched_files: true
+
+      - name: Upload release to Cloudflare R2
+        if: inputs.publish_release == true && inputs.release_tag != ''
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REPO_FULL_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${RELEASE_TAG}"
+          BUCKET="${R2_BUCKET:-buct-one}"
+
+          if [ -z "${R2_ENDPOINT:-}" ] || [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ]; then
+            if [ "${REPO_FULL_NAME}" = "STAR-10086/buct-one" ] && [[ "${TAG}" != *-* ]]; then
+              echo "::error::正式版发布缺少 R2_ENDPOINT / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY secrets"
+              exit 1
+            fi
+            echo "::warning::未配置 Cloudflare R2 secrets，跳过 R2 上传"
+            exit 0
+          fi
+
+          CLEAN_ENDPOINT="${R2_ENDPOINT%/}"
+          CLEAN_ENDPOINT="${CLEAN_ENDPOINT%/${BUCKET}}"
+
+          export AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"
+          export AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}"
+          export AWS_DEFAULT_REGION="auto"
+          export AWS_EC2_METADATA_DISABLED="true"
+          export AWS_REQUEST_CHECKSUM_CALCULATION="when_required"
+          export AWS_RESPONSE_CHECKSUM_VALIDATION="when_required"
+
+          IMMUTABLE_CACHE="public, max-age=31536000, immutable"
+          POINTER_CACHE="public, max-age=60, stale-while-revalidate=300"
+
+          upload_obj() {
+            local src="$1"
+            local key="$2"
+            local ctype="$3"
+            local cache="$4"
+            echo "Uploading -> s3://${BUCKET}/${key}"
+            aws s3 cp "$src" "s3://${BUCKET}/${key}" \
+              --endpoint-url "${CLEAN_ENDPOINT}" \
+              --no-progress \
+              --content-type "${ctype}" \
+              --cache-control "${cache}"
+          }
+
+          # 1. 先上传不可变版本化 APK 与 .sha256（确保指针切换时文件均已就绪）
+          upload_obj "release-dist/buct-one-${TAG}-universal.apk"        "apk/${TAG}/buct-one-${TAG}.apk"              "application/vnd.android.package-archive" "${IMMUTABLE_CACHE}"
+          upload_obj "release-dist/buct-one-${TAG}-universal.apk.sha256" "apk/${TAG}/buct-one-${TAG}.apk.sha256"       "text/plain; charset=utf-8"               "${IMMUTABLE_CACHE}"
+          upload_obj "release-dist/buct-one-${TAG}-arm64-v8a.apk"        "apk/${TAG}/buct-one-${TAG}-arm64-v8a.apk"    "application/vnd.android.package-archive" "${IMMUTABLE_CACHE}"
+          upload_obj "release-dist/buct-one-${TAG}-arm64-v8a.apk.sha256" "apk/${TAG}/buct-one-${TAG}-arm64-v8a.apk.sha256" "text/plain; charset=utf-8"           "${IMMUTABLE_CACHE}"
+          upload_obj "release-dist/buct-one-${TAG}-armeabi-v7a.apk"        "apk/${TAG}/buct-one-${TAG}-armeabi-v7a.apk"    "application/vnd.android.package-archive" "${IMMUTABLE_CACHE}"
+          upload_obj "release-dist/buct-one-${TAG}-armeabi-v7a.apk.sha256" "apk/${TAG}/buct-one-${TAG}-armeabi-v7a.apk.sha256" "text/plain; charset=utf-8"           "${IMMUTABLE_CACHE}"
+
+          # 2. 最后更新版本清单指针
+          if [[ "$TAG" == *-* ]]; then
+            upload_obj "r2-dist/latest.json" "meta/beta.json"        "application/json; charset=utf-8" "${POINTER_CACHE}"
+            upload_obj "r2-dist/update.json" "meta/update-beta.json" "application/json; charset=utf-8" "${POINTER_CACHE}"
+          else
+            upload_obj "r2-dist/latest.json" "meta/${TAG}.json"      "application/json; charset=utf-8" "${IMMUTABLE_CACHE}"
+            upload_obj "r2-dist/latest.json" "meta/latest.json"      "application/json; charset=utf-8" "${POINTER_CACHE}"
+            upload_obj "r2-dist/update.json" "update.json"           "application/json; charset=utf-8" "${POINTER_CACHE}"
+          fi
+          echo "Cloudflare R2 release upload complete for ${TAG}!"

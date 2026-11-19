@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Environment
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.buct.course.login.BuctTlsTrustManager
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -29,12 +30,14 @@ class UpdateManager(private val context: Context) {
     companion object {
         private const val TAG = "UpdateManager"
         
-        private val VERSION_URLS: List<String> = emptyList()
+        private val VERSION_URLS: List<String> = listOf(
+            "https://update.buctone.cc.cd/update.json"
+        )
 
         private val DEFAULT_DOWNLOAD_SOURCES: List<DownloadSource> = emptyList()
         
         // 下载文件名
-        private const val APK_FILE_NAME = "zhengfang_update.apk"
+        private const val APK_FILE_NAME = "buct_one_update.apk"
         
         @Volatile
         private var instance: UpdateManager? = null
@@ -60,10 +63,14 @@ class UpdateManager(private val context: Context) {
         }
     }
     
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        .build()
+    private val client: OkHttpClient by lazy {
+        val trustManager = BuctTlsTrustManager()
+        OkHttpClient.Builder()
+            .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
     
     private var downloadId: Long = -1
     private var downloadReceiver: BroadcastReceiver? = null
@@ -164,42 +171,69 @@ class UpdateManager(private val context: Context) {
                             val localVersionCode = getLocalVersionCode()
                             Log.d(TAG, "本地版本: $localVersionCode, 服务器版本: $serverVersionCode")
                             if (serverVersionCode > localVersionCode) {
-                                // 只用 HTTPS 下载地址；downloadUrlIp 是明文 HTTP，已弃用
-                                val downloadUrl = obj.optString("downloadUrl", "")
-                                if (downloadUrl.isBlank()) {
-                                    Log.e(TAG, "更新清单缺少 downloadUrl: $url")
-                                    tryUrl(index + 1)
-                                    return
-                                }
-                                // 下载源列表（App 内选择下载通道用）：只收 HTTPS 源，防止被降级或替换
-                                val sources = buildList {
-                                    val arr = obj.optJSONArray("downloadSources")
-                                    if (arr != null) {
-                                        for (i in 0 until arr.length()) {
-                                            val item = arr.optJSONObject(i) ?: continue
-                                            val name = item.optString("name").trim()
-                                            val srcUrl = item.optString("url").trim()
-                                            if (name.isNotEmpty() && srcUrl.startsWith("https://")) {
-                                                add(DownloadSource(name, srcUrl))
+                                val abiObj = selectAbiApk(obj.optJSONObject("apks"))
+                                val resolvedDownloadUrl: String
+                                val resolvedSha256: String
+                                val resolvedSources: List<DownloadSource>
+
+                                if (abiObj != null) {
+                                    resolvedDownloadUrl = abiObj.optString("downloadUrl", "").trim()
+                                        .ifBlank { abiObj.optString("dlUrl", "").trim() }
+                                    resolvedSha256 = abiObj.optString("sha256", "").trim()
+                                        .ifBlank { obj.optString("sha256", "").trim() }
+                                    val ghUrl = abiObj.optString("githubUrl", "").trim()
+                                    resolvedSources = buildList {
+                                        if (resolvedDownloadUrl.startsWith("https://")) {
+                                            add(DownloadSource("官方加速源（Cloudflare R2）", resolvedDownloadUrl))
+                                        }
+                                        if (ghUrl.startsWith("https://") && ghUrl != resolvedDownloadUrl) {
+                                            add(DownloadSource("GitHub Release 备用源", ghUrl))
+                                        }
+                                    }
+                                } else {
+                                    // 只用 HTTPS 下载地址；downloadUrlIp 是明文 HTTP，已弃用
+                                    resolvedDownloadUrl = obj.optString("downloadUrl", "").trim()
+                                        .ifBlank { obj.optString("apkUrl", "").trim() }
+                                    resolvedSha256 = obj.optString("sha256", "").trim()
+                                    // 下载源列表（App 内选择下载通道用）：只收 HTTPS 源，防止被降级或替换
+                                    val sources = buildList {
+                                        val arr = obj.optJSONArray("downloadSources")
+                                        if (arr != null) {
+                                            for (i in 0 until arr.length()) {
+                                                val item = arr.optJSONObject(i) ?: continue
+                                                val name = item.optString("name").trim()
+                                                val srcUrl = item.optString("url").trim()
+                                                if (name.isNotEmpty() && srcUrl.startsWith("https://")) {
+                                                    add(DownloadSource(name, srcUrl))
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                // 清单未给多源时补上内置默认源（过渡期兼容），已有 2 个及以上则以清单为准
-                                val effectiveSources = if (sources.size > 1) sources else buildList {
-                                    addAll(sources)
-                                    DEFAULT_DOWNLOAD_SOURCES.forEach { def ->
-                                        if (this.none { it.url == def.url }) add(def)
+                                    // 清单未给多源时补上内置默认源（过渡期兼容），已有 2 个及以上则以清单为准
+                                    resolvedSources = if (sources.size > 1) sources else buildList {
+                                        addAll(sources)
+                                        DEFAULT_DOWNLOAD_SOURCES.forEach { def ->
+                                            if (this.none { it.url == def.url }) add(def)
+                                        }
                                     }
                                 }
+
+                                if (!resolvedDownloadUrl.startsWith("https://")) {
+                                    Log.e(TAG, "更新清单缺少合法 HTTPS downloadUrl: $url")
+                                    tryUrl(index + 1)
+                                    return
+                                }
+
                                 val updateInfo = UpdateInfo(
                                     versionCode = serverVersionCode,
-                                    versionName = obj.optString("versionName", ""),
-                                    releaseNotes = obj.optString("releaseNotes", ""),
-                                    downloadUrl = downloadUrl,
+                                    versionName = obj.optString("versionName", "")
+                                        .ifBlank { obj.optString("version", "") },
+                                    releaseNotes = obj.optString("releaseNotes", "")
+                                        .ifBlank { obj.optString("changelogMd", "") },
+                                    downloadUrl = resolvedDownloadUrl,
                                     forceUpdate = obj.optBoolean("forceUpdate", false),
-                                    sha256 = obj.optString("sha256", ""),
-                                    sources = effectiveSources
+                                    sha256 = resolvedSha256,
+                                    sources = resolvedSources
                                 )
                                 mainHandler.post { callback(updateInfo); onFinished(true) }
                             } else {
@@ -216,6 +250,19 @@ class UpdateManager(private val context: Context) {
         tryUrl(0)
     }
     
+    private fun selectAbiApk(apksObj: JSONObject?): JSONObject? {
+        if (apksObj == null) return null
+        for (abi in Build.SUPPORTED_ABIS) {
+            if (abi.equals("arm64-v8a", ignoreCase = true)) {
+                apksObj.optJSONObject("arm64-v8a")?.let { return it }
+            }
+            if (abi.equals("armeabi-v7a", ignoreCase = true)) {
+                apksObj.optJSONObject("armeabi-v7a")?.let { return it }
+            }
+        }
+        return apksObj.optJSONObject("universal")
+    }
+
     /**
      * 下载APK
      */
@@ -225,6 +272,11 @@ class UpdateManager(private val context: Context) {
         onProgress: (Int) -> Unit,
         onComplete: (File?) -> Unit
     ) {
+        if (!downloadUrl.startsWith("https://")) {
+            Log.e(TAG, "拒绝非 HTTPS 下载地址: $downloadUrl")
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete(null) }
+            return
+        }
         Log.d(TAG, "开始下载: $downloadUrl")
         
         // 删除旧的APK文件
