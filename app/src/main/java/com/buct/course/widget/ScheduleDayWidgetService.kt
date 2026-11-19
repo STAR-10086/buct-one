@@ -257,8 +257,10 @@ class ScheduleDayRemoteViewsFactory(
             views.setViewVisibility(R.id.item_time, View.GONE)
             views.setViewVisibility(R.id.item_loc, View.GONE)
             views.setInt(R.id.item_root, "setBackgroundColor", Color.TRANSPARENT)
-            views.setTextColor(R.id.item_name, if (isDarkMode) Color.WHITE else Color.BLACK)
+            views.setTextColor(R.id.item_name, if (isDarkMode) 0xCCFFFFFF.toInt() else 0xFF6E6E73.toInt())
+            views.setInt(R.id.item_name, "setGravity", android.view.Gravity.CENTER)
             applyCardSizing(views, R.id.item_root, R.id.item_name, R.id.item_time, R.id.item_loc)
+            views.setFloat(R.id.item_name, "setTextSize", 12.5f * WidgetTextSizes.scale(context))
             return views
         }
 
@@ -289,6 +291,7 @@ class ScheduleDayRemoteViewsFactory(
 
         views.setTextViewText(R.id.item_name, c.name)
         views.setTextColor(R.id.item_name, Color.WHITE)
+        views.setInt(R.id.item_name, "setGravity", android.view.Gravity.START)
         views.setTextViewText(R.id.item_time, timeText)
         views.setViewVisibility(R.id.item_time, View.VISIBLE)
         views.setTextViewText(R.id.item_loc, locText)

@@ -154,15 +154,23 @@ open class ScheduleWidget : AppWidgetProvider() {
                 WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = false)
             )
 
-            // 根据模式设置文字颜色和背景色
-            val textColor = if (isDarkMode) android.graphics.Color.WHITE else android.graphics.Color.BLACK
-            val bgColor = if (isDarkMode) android.graphics.Color.argb(180, 30, 30, 46) else android.graphics.Color.argb(180, 255, 255, 255)
-
-            views.setInt(R.id.widget_root, "setBackgroundColor", bgColor)
+            // 根据模式设置文字颜色、圆角背景和矢量箭头
+            val textColor = if (isDarkMode) android.graphics.Color.WHITE else 0xFF1C1C1E.toInt()
+            views.setInt(
+                R.id.widget_root,
+                "setBackgroundResource",
+                if (isDarkMode) R.drawable.widget_bg_dark else R.drawable.widget_bg_light
+            )
             views.setTextColor(R.id.widget_title, textColor)
             views.setTextColor(R.id.widget_week_info, textColor)
-            views.setTextColor(R.id.widget_prev_week, textColor)
-            views.setTextColor(R.id.widget_next_week, textColor)
+            views.setImageViewResource(
+                R.id.widget_prev_week,
+                if (isDarkMode) R.drawable.ic_widget_chevron_left_light else R.drawable.ic_widget_chevron_left_dark
+            )
+            views.setImageViewResource(
+                R.id.widget_next_week,
+                if (isDarkMode) R.drawable.ic_widget_chevron_right_light else R.drawable.ic_widget_chevron_right_dark
+            )
 
             // 设置星期表头的文字颜色
             views.setTextColor(R.id.widget_monday_header, textColor)

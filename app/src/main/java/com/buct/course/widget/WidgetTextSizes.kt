@@ -29,9 +29,7 @@ object WidgetTextSizes {
     val DAY_ROOT: Map<Int, Float> = mapOf(
         R.id.widget_title to 14.0f,
         R.id.widget_day_info to 11.0f,
-        R.id.widget_prev_day to 14.0f,
         R.id.widget_back_today to 11.0f,
-        R.id.widget_next_day to 14.0f,
     )
     /** widget_schedule_day_row.xml */
     val DAY_ROW: Map<Int, Float> = mapOf(
@@ -55,9 +53,7 @@ object WidgetTextSizes {
         R.id.widget_friday_header to 10.0f,
         R.id.widget_saturday_header to 10.0f,
         R.id.widget_sunday_header to 10.0f,
-        R.id.widget_prev_week to 16.0f,
         R.id.widget_week_info to 12.0f,
-        R.id.widget_next_week to 16.0f,
     )
     /** widget_schedule_row.xml */
     val WEEK_ROW: Map<Int, Float> = mapOf(

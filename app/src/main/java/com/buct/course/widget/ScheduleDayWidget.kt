@@ -93,17 +93,22 @@ open class ScheduleDayWidget : AppWidgetProvider() {
                 WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = true)
             )
 
-            val textColor = if (isDarkMode) android.graphics.Color.WHITE else android.graphics.Color.BLACK
-            val bgColor = if (isDarkMode) {
-                android.graphics.Color.argb(180, 30, 30, 46)
-            } else {
-                android.graphics.Color.argb(180, 255, 255, 255)
-            }
-            views.setInt(R.id.widget_root, "setBackgroundColor", bgColor)
+            val textColor = if (isDarkMode) android.graphics.Color.WHITE else 0xFF1C1C1E.toInt()
+            views.setInt(
+                R.id.widget_root,
+                "setBackgroundResource",
+                if (isDarkMode) R.drawable.widget_bg_dark else R.drawable.widget_bg_light
+            )
             views.setTextColor(R.id.widget_title, textColor)
             views.setTextColor(R.id.widget_day_info, textColor)
-            views.setTextColor(R.id.widget_prev_day, textColor)
-            views.setTextColor(R.id.widget_next_day, textColor)
+            views.setImageViewResource(
+                R.id.widget_prev_day,
+                if (isDarkMode) R.drawable.ic_widget_chevron_left_light else R.drawable.ic_widget_chevron_left_dark
+            )
+            views.setImageViewResource(
+                R.id.widget_next_day,
+                if (isDarkMode) R.drawable.ic_widget_chevron_right_light else R.drawable.ic_widget_chevron_right_dark
+            )
             views.setTextColor(R.id.widget_back_today, textColor)
 
             // 所选日期：今天 + offset（无限前后切换）

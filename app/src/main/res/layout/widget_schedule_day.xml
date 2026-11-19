@@ -4,8 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#80000000"
-    android:padding="5dp">
+    android:background="@drawable/widget_bg_light"
+    android:padding="10dp">
 
     <!-- 标题栏 -->
     <TextView
@@ -30,25 +30,22 @@
         android:gravity="center"
         android:paddingBottom="2dp" />
 
-    <!-- 日期导航：◀ 回到今天 ▶ -->
+    <!-- 日期导航：前一天 / 今天 / 后一天 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
+        android:gravity="center_vertical"
         android:paddingBottom="3dp">
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_prev_day"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="◀"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:gravity="center"
-            android:paddingLeft="12dp"
-            android:paddingTop="4dp"
-            android:paddingRight="12dp"
-            android:paddingBottom="4dp" />
+            android:layout_width="36dp"
+            android:layout_height="28dp"
+            android:src="@drawable/ic_widget_chevron_left_dark"
+            android:scaleType="centerInside"
+            android:contentDescription="前一天"
+            android:padding="4dp" />
 
         <TextView
             android:id="@+id/widget_back_today"
@@ -62,18 +59,14 @@
             android:paddingTop="4dp"
             android:paddingBottom="4dp" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_next_day"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="▶"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:gravity="center"
-            android:paddingLeft="12dp"
-            android:paddingTop="4dp"
-            android:paddingRight="12dp"
-            android:paddingBottom="4dp" />
+            android:layout_width="36dp"
+            android:layout_height="28dp"
+            android:src="@drawable/ic_widget_chevron_right_dark"
+            android:scaleType="centerInside"
+            android:contentDescription="后一天"
+            android:padding="4dp" />
 
     </LinearLayout>
 
