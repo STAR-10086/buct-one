@@ -1,9 +1,11 @@
 package com.buct.one.data.source.theol
 
 import android.util.Base64
+import android.webkit.MimeTypeMap
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.MatchingMemoryCookieJar
+import com.buct.one.data.model.TheolDownloadedFile
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
@@ -13,14 +15,19 @@ import okhttp3.Cookie
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.net.URI
 import java.net.URL
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.ByteBuffer
 import java.nio.charset.Charset
@@ -28,6 +35,7 @@ import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Arrays
+import java.util.Locale
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -61,6 +69,34 @@ class TheolClient {
         private const val MAX_COURSE_DEPTH = 6
         private const val SESSION_TTL_MILLIS = 5 * 60_000L
         private const val COURSE_CONTEXT_TTL_MILLIS = 2 * 60_000L
+        private const val MAX_ATTACHMENT_BYTES = 200L * 1024L * 1024L
+        private const val ATTACHMENT_CACHE_LIMIT_BYTES = 120L * 1024L * 1024L
+        private const val ATTACHMENT_CACHE_TARGET_BYTES = 96L * 1024L * 1024L
+
+        private val EXT_MIME_MAP = mapOf(
+            "pdf" to "application/pdf",
+            "doc" to "application/msword",
+            "docx" to "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xls" to "application/vnd.ms-excel",
+            "xlsx" to "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "ppt" to "application/vnd.ms-powerpoint",
+            "pptx" to "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "txt" to "text/plain",
+            "csv" to "text/csv",
+            "md" to "text/markdown",
+            "zip" to "application/zip",
+            "rar" to "application/x-rar-compressed",
+            "7z" to "application/x-7z-compressed",
+            "png" to "image/png",
+            "jpg" to "image/jpeg",
+            "jpeg" to "image/jpeg",
+            "gif" to "image/gif",
+            "webp" to "image/webp",
+            "mp4" to "video/mp4",
+            "mp3" to "audio/mpeg"
+        )
+        private val FILENAME_STAR_REGEX = Regex("""(?i)filename\*\s*=\s*(?:([a-zA-Z0-9_-]+)'[^']*')?([^;\r\n]+)""")
+        private val FILENAME_BASIC_REGEX = Regex("""(?i)filename\s*=\s*(?:"([^"]*)"|([^;\r\n]+))""")
 
         private val ALLOWED_HW_PATHS = setOf(
             "/meol/jpk/course/layout/newpage/index.jsp",
@@ -91,6 +127,10 @@ class TheolClient {
     private val meolClient: OkHttpClient = noRedirectClient.newBuilder()
         .followRedirects(true)
         .followSslRedirects(true)
+        .build()
+
+    private val downloadClient: OkHttpClient = noRedirectClient.newBuilder()
+        .readTimeout(90, TimeUnit.SECONDS)
         .build()
 
     /** 从持久化存储注入历史 Cookie（MEOL 的 JSESSIONID 默认作用域为 /meol，避免与根路径冲突） */
@@ -413,6 +453,157 @@ class TheolClient {
         val referer = TheolParser.buildTestListUrl(item.lid, MEOL_BASE)
         val html = fetchCourseSubpageHtml(item.lid, detailUrl, referer)
         return TheolParser.parseTestDetail(html, cleanId, nowMillis)
+    }
+
+    /**
+     * 原生带会话下载作业/课程附件（支持仅限 *.buct.edu.cn 的跳转、失效重登自愈、文件名编码修正及 HTML 网页回退）。
+     */
+    fun downloadAttachment(
+        url: String,
+        suggestedName: String,
+        courseLid: String,
+        cacheRootDir: File
+    ): TheolDownloadedFile {
+        val secureUrl = normalizeSecureCourseUrl(url.trim())
+        val parsed = secureUrl.toHttpUrlOrNull() ?: throw IOException("附件链接无效")
+        if (!parsed.isHttps || !isTrustedBuctHost(parsed.host)) {
+            throw IOException("仅允许通过北化校园域名下载附件")
+        }
+
+        val hwReferer = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
+        val baseAttachmentDir = File(cacheRootDir, "theol_attachments")
+        if (!baseAttachmentDir.exists()) baseAttachmentDir.mkdirs()
+
+        for (attempt in 0..1) {
+            enterCourseContext(courseLid, force = attempt > 0)
+            var needsReauth = false
+            val downloaded: TheolDownloadedFile? = try {
+                followAttachmentRedirects(secureUrl, hwReferer).use { resp ->
+                    if (resp.code == 401 || resp.code == 403 || isMeolLoginUrl(resp.request.url)) {
+                        needsReauth = true
+                        return@use null
+                    }
+                    if (!resp.isSuccessful) {
+                        throw IOException("附件下载失败（HTTP ${resp.code}）")
+                    }
+
+                    val body = resp.body ?: throw IOException("附件响应内容为空")
+                    val contentDisposition = resp.header("Content-Disposition").orEmpty()
+                    val contentTypeRaw = resp.header("Content-Type").orEmpty()
+                    val mimeHeader = contentTypeRaw.substringBefore(';').trim().lowercase(Locale.ROOT)
+                    val isExplicitAttachment = contentDisposition.contains("attachment", ignoreCase = true) ||
+                        contentDisposition.contains("filename", ignoreCase = true)
+
+                    if (!isExplicitAttachment && (mimeHeader.contains("text/html") || mimeHeader.contains("application/xhtml"))) {
+                        val html = decodeBytes(readBoundedPrefix(body.byteStream(), 128 * 1024), contentTypeRaw)
+                        if (TheolParser.isPermissionDeniedOrExpired(html)) {
+                            needsReauth = true
+                            return@use null
+                        }
+                        return@use TheolDownloadedFile(
+                            filePath = "",
+                            fileName = suggestedName.ifBlank { "page.html" },
+                            mimeType = "text/html",
+                            sizeBytes = 0L,
+                            isHtmlPage = true
+                        )
+                    }
+
+                    val stream = body.byteStream()
+                    val sniff = ByteArray(4096)
+                    var sniffLen = 0
+                    if (!isExplicitAttachment && mimeHeader.isEmpty()) {
+                        while (sniffLen < sniff.size) {
+                            val read = stream.read(sniff, sniffLen, sniff.size - sniffLen)
+                            if (read <= 0) break
+                            sniffLen += read
+                        }
+                        val sniffBytes = sniff.copyOf(sniffLen)
+                        val probeText = decodeBytes(sniffBytes, contentTypeRaw)
+                        if (looksLikeHtmlSnippet(probeText)) {
+                            val fullPrefix = readBoundedPrefix(stream, 128 * 1024 - sniffLen, initialBytes = sniffBytes)
+                            val fullHtml = decodeBytes(fullPrefix, contentTypeRaw)
+                            if (TheolParser.isPermissionDeniedOrExpired(fullHtml)) {
+                                needsReauth = true
+                                return@use null
+                            }
+                            return@use TheolDownloadedFile(
+                                filePath = "",
+                                fileName = suggestedName.ifBlank { "page.html" },
+                                mimeType = "text/html",
+                                sizeBytes = 0L,
+                                isHtmlPage = true
+                            )
+                        }
+                    }
+
+                    val rawName = extractDownloadFileName(contentDisposition, suggestedName, resp.request.url)
+                    val safeName = sanitizeAttachmentFileName(rawName, suggestedName)
+                    val itemDir = File(baseAttachmentDir, sha256Hex(secureUrl).take(12))
+                    if (!itemDir.exists()) itemDir.mkdirs()
+                    val targetFile = File(itemDir, safeName)
+                    val tmpFile = File(itemDir, "$safeName.download.tmp")
+
+                    var writtenBytes = 0L
+                    var success = false
+                    try {
+                        FileOutputStream(tmpFile).use { fos ->
+                            if (sniffLen > 0) {
+                                fos.write(sniff, 0, sniffLen)
+                                writtenBytes += sniffLen
+                            }
+                            val buffer = ByteArray(8192)
+                            while (true) {
+                                val read = stream.read(buffer)
+                                if (read == -1) break
+                                writtenBytes += read
+                                if (writtenBytes > MAX_ATTACHMENT_BYTES) {
+                                    throw IOException("附件超过 200MB 限制，已中止下载")
+                                }
+                                fos.write(buffer, 0, read)
+                            }
+                            fos.flush()
+                        }
+                        if (writtenBytes <= 0L) {
+                            throw IOException("服务器返回的附件内容为空")
+                        }
+                        if (targetFile.exists()) targetFile.delete()
+                        if (!tmpFile.renameTo(targetFile)) {
+                            tmpFile.copyTo(targetFile, overwrite = true)
+                            tmpFile.delete()
+                        }
+                        success = true
+                    } finally {
+                        if (!success) {
+                            tmpFile.delete()
+                        }
+                    }
+
+                    trimAttachmentCacheDir(baseAttachmentDir, excludeDir = itemDir)
+                    TheolDownloadedFile(
+                        filePath = targetFile.absolutePath,
+                        fileName = safeName,
+                        mimeType = resolveAttachmentMimeType(safeName, mimeHeader),
+                        sizeBytes = writtenBytes,
+                        isHtmlPage = false
+                    )
+                }
+            } catch (_: SessionExpiredSignal) {
+                needsReauth = true
+                null
+            }
+
+            if (downloaded != null) {
+                return downloaded
+            }
+            if (needsReauth) {
+                if (attempt == 0 && ensureSessionActive(forceSso = true)) {
+                    continue
+                }
+                throw IOException("北化在线会话已过期，请刷新或重新登录后重试")
+            }
+        }
+        throw IOException("附件下载未完成，请稍后重试")
     }
 
     /** 抓取北化在线所有待办作业与测验（支持复用探针已拿到的 reminderHtml 与测验页并发） */
@@ -755,13 +946,17 @@ class TheolClient {
 
     private fun decodeResponseBody(resp: Response): String {
         val bytes = resp.body?.bytes() ?: return ""
-        val contentType = resp.header("Content-Type").orEmpty()
+        return decodeBytes(bytes, resp.header("Content-Type").orEmpty())
+    }
+
+    private fun decodeBytes(bytes: ByteArray, contentType: String): String {
+        if (bytes.isEmpty()) return ""
         val headerCharset = CHARSET_REGEX.find(contentType)?.groupValues?.getOrNull(1)
         val probeHead = String(bytes, 0, minOf(bytes.size, 2048), Charsets.ISO_8859_1)
         val metaCharset = CHARSET_REGEX.find(probeHead)?.groupValues?.getOrNull(1)
         val declared = headerCharset ?: metaCharset
         if (declared != null) {
-            val charsetName = declared.uppercase()
+            val charsetName = declared.uppercase(Locale.ROOT)
             val charset = runCatching {
                 when {
                     charsetName.contains("GB") -> Charset.forName("GBK")
@@ -780,6 +975,188 @@ class TheolClient {
             Charset.forName("GBK").decode(ByteBuffer.wrap(bytes)).toString()
         }
     }
+
+    private fun followAttachmentRedirects(initialUrl: String, referer: String): Response {
+        var currentReq = Request.Builder()
+            .url(initialUrl)
+            .header("User-Agent", UA)
+            .header("Referer", referer)
+            .get()
+            .build()
+        var hops = 0
+        while (hops < 6) {
+            val resp = downloadClient.newCall(currentReq).execute()
+            if (resp.code !in 300..399) {
+                return resp
+            }
+            val location = resp.header("Location")
+            resp.close()
+            if (location.isNullOrBlank()) {
+                throw IOException("附件跳转缺少 Location")
+            }
+            val resolved = currentReq.url.resolve(location)
+                ?: throw IOException("非法的附件跳转地址")
+            if (!isTrustedBuctHost(resolved.host)) {
+                throw IOException("拒绝跳转到非校园域名: ${resolved.host}")
+            }
+            val safeUrl = when {
+                !resolved.isHttps && resolved.host.equals("course.buct.edu.cn", ignoreCase = true) ->
+                    resolved.newBuilder().scheme("https").build()
+                !resolved.isHttps ->
+                    throw IOException("拒绝非 HTTPS 下载地址: ${resolved.host}")
+                else -> resolved
+            }
+            if (isMeolLoginUrl(safeUrl)) {
+                throw SessionExpiredSignal("北化在线会话已过期，请刷新或重新登录")
+            }
+            currentReq = Request.Builder()
+                .url(safeUrl)
+                .header("User-Agent", UA)
+                .header("Referer", currentReq.url.toString())
+                .get()
+                .build()
+            hops++
+        }
+        throw IOException("附件重定向次数过多")
+    }
+
+    private fun isTrustedBuctHost(host: String): Boolean {
+        val lower = host.lowercase(Locale.ROOT)
+        return lower == "buct.edu.cn" || lower.endsWith(".buct.edu.cn")
+    }
+
+    private fun isMeolLoginUrl(url: HttpUrl): Boolean {
+        val host = url.host.lowercase(Locale.ROOT)
+        val path = url.encodedPath.lowercase(Locale.ROOT)
+        return host == "sidportal.buct.edu.cn" ||
+            host == "portal.buct.edu.cn" ||
+            (path.contains("login") && path != "/meol/homepage/common/sso_login.jsp")
+    }
+
+    private fun readBoundedPrefix(
+        stream: java.io.InputStream,
+        maxAdditionalBytes: Int,
+        initialBytes: ByteArray = ByteArray(0)
+    ): ByteArray {
+        val out = ByteArrayOutputStream(initialBytes.size + minOf(maxAdditionalBytes.coerceAtLeast(0), 16384))
+        if (initialBytes.isNotEmpty()) out.write(initialBytes)
+        val buf = ByteArray(4096)
+        var remaining = maxAdditionalBytes.coerceAtLeast(0)
+        while (remaining > 0) {
+            val read = stream.read(buf, 0, minOf(buf.size, remaining))
+            if (read <= 0) break
+            out.write(buf, 0, read)
+            remaining -= read
+        }
+        return out.toByteArray()
+    }
+
+    private fun looksLikeHtmlSnippet(text: String): Boolean {
+        val trimmed = text.trimStart().lowercase(Locale.ROOT)
+        return trimmed.startsWith("<!doctype html") ||
+            trimmed.startsWith("<html") ||
+            TheolParser.isPermissionDeniedOrExpired(text)
+    }
+
+    private fun extractDownloadFileName(
+        contentDisposition: String,
+        suggestedName: String,
+        finalUrl: HttpUrl
+    ): String {
+        if (contentDisposition.isNotBlank()) {
+            val starMatch = FILENAME_STAR_REGEX.find(contentDisposition)
+            if (starMatch != null) {
+                val charset = starMatch.groupValues[1].ifBlank { "UTF-8" }
+                val raw = starMatch.groupValues[2].trim().trim('"', '\'')
+                val decoded = runCatching { URLDecoder.decode(raw, charset) }.getOrDefault(raw)
+                if (decoded.isNotBlank()) return decoded
+            }
+            val basicMatch = FILENAME_BASIC_REGEX.find(contentDisposition)
+            if (basicMatch != null) {
+                val raw = basicMatch.groupValues[1].ifBlank { basicMatch.groupValues[2] }.trim().trim('"', '\'')
+                val fixed = recoverHeaderFilename(raw)
+                if (fixed.isNotBlank()) return fixed
+            }
+        }
+        if (suggestedName.isNotBlank()) return suggestedName.trim()
+        val lastSeg = finalUrl.pathSegments.lastOrNull { it.isNotBlank() && !it.endsWith(".jsp", ignoreCase = true) }
+        return lastSeg ?: "attachment.bin"
+    }
+
+    private fun recoverHeaderFilename(raw: String): String {
+        if (raw.isBlank()) return ""
+        val urlDecoded = if (raw.contains('%')) {
+            runCatching { URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
+        } else {
+            raw
+        }
+        val onlyLatin1Range = urlDecoded.any { it.code in 0x80..0xFF } && urlDecoded.none { it.code > 0xFF }
+        if (!onlyLatin1Range) return urlDecoded
+        val rawBytes = urlDecoded.toByteArray(Charsets.ISO_8859_1)
+        return try {
+            Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(rawBytes))
+                .toString()
+        } catch (_: Exception) {
+            Charset.forName("GBK").decode(ByteBuffer.wrap(rawBytes)).toString()
+        }
+    }
+
+    private fun sanitizeAttachmentFileName(rawName: String, suggestedName: String): String {
+        var cleaned = rawName.substringAfterLast('/').substringAfterLast('\\')
+            .replace(Regex("""[\\/:*?"<>|\u0000-\u001F]"""), "_")
+            .trim(' ', '.')
+        if (cleaned.isEmpty()) cleaned = "attachment"
+        val suggestedExt = suggestedName.substringAfterLast('.', "")
+            .takeIf { it.isNotBlank() && it.length <= 10 && it.all(Char::isLetterOrDigit) }
+            .orEmpty()
+        val currentExt = cleaned.substringAfterLast('.', "")
+            .takeIf { cleaned.contains('.') && it.length <= 10 && it.all(Char::isLetterOrDigit) }
+            .orEmpty()
+        if (currentExt.isEmpty() && suggestedExt.isNotEmpty()) {
+            cleaned = "$cleaned.$suggestedExt"
+        }
+        if (cleaned.length > 120) {
+            val extPart = if (currentExt.isNotEmpty()) ".$currentExt" else if (suggestedExt.isNotEmpty()) ".$suggestedExt" else ""
+            cleaned = cleaned.take(120 - extPart.length) + extPart
+        }
+        return cleaned
+    }
+
+    private fun resolveAttachmentMimeType(fileName: String, headerMime: String): String {
+        val ext = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (ext.isNotEmpty()) {
+            EXT_MIME_MAP[ext]?.let { return it }
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return it }
+        }
+        if (headerMime.isNotBlank() && headerMime != "application/octet-stream") {
+            return headerMime
+        }
+        return "application/octet-stream"
+    }
+
+    private fun trimAttachmentCacheDir(baseDir: File, excludeDir: File) {
+        val children = baseDir.listFiles()?.toList().orEmpty()
+        var total = children.sumOf { dirSize(it) }
+        if (total <= ATTACHMENT_CACHE_LIMIT_BYTES) return
+        val candidates = children
+            .filter { it.absolutePath != excludeDir.absolutePath }
+            .sortedBy { it.lastModified() }
+        for (dir in candidates) {
+            if (total <= ATTACHMENT_CACHE_TARGET_BYTES) break
+            val size = dirSize(dir)
+            if (dir.deleteRecursively()) {
+                total -= size
+            }
+        }
+    }
+
+    private fun dirSize(file: File): Long =
+        if (file.isDirectory) file.listFiles()?.sumOf { dirSize(it) } ?: 0L else file.length()
 
     private fun normalizeUrl(base: String, raw: String): String? {
         val trimmed = raw.trim()

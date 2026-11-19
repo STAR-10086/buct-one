@@ -67,6 +67,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.buct.course.TheolAttachmentOpener
 import com.buct.course.TheolSubmitWebViewActivity
 import com.buct.course.ui.system.LocalAppOverlayBottomInset
 import com.buct.course.ui.system.glassBorderColor
@@ -74,6 +75,7 @@ import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.TheolFilterPrefs
+import com.buct.one.data.model.TheolHomeworkAttachment
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolTestDetail
@@ -719,6 +721,11 @@ private fun HomeworkDetailDialog(
     var loading by remember(hw.hwtid) { mutableStateOf(true) }
     var errorMsg by remember(hw.hwtid) { mutableStateOf<String?>(null) }
     var reloadTick by remember(hw.hwtid) { mutableIntStateOf(0) }
+    val detailContext = LocalContext.current
+    val attachmentScope = rememberCoroutineScope()
+    var downloadingUrl by remember(hw.hwtid) { mutableStateOf<String?>(null) }
+    var attachmentError by remember(hw.hwtid) { mutableStateOf<String?>(null) }
+    var lastFailedAttachment by remember(hw.hwtid) { mutableStateOf<TheolHomeworkAttachment?>(null) }
 
     LaunchedEffect(hw.hwtid, reloadTick) {
         loading = true
@@ -874,12 +881,36 @@ private fun HomeworkDetailDialog(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             attachments.forEach { att ->
+                                val isDownloading = downloadingUrl == att.url
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                                        .clickable { onOpenAttachment(att) }
+                                        .clickable(enabled = downloadingUrl == null) {
+                                            attachmentError = null
+                                            lastFailedAttachment = null
+                                            downloadingUrl = att.url
+                                            attachmentScope.launch {
+                                                val result = service.downloadAttachment(
+                                                    url = att.url,
+                                                    suggestedName = att.name,
+                                                    courseLid = hw.lid
+                                                )
+                                                downloadingUrl = null
+                                                result.onSuccess { downloaded ->
+                                                    if (downloaded.isHtmlPage) {
+                                                        onOpenAttachment(att)
+                                                    } else if (!TheolAttachmentOpener.open(detailContext, downloaded)) {
+                                                        lastFailedAttachment = att
+                                                        attachmentError = "未找到可打开「${downloaded.fileName}」的应用"
+                                                    }
+                                                }.onFailure { err ->
+                                                    lastFailedAttachment = att
+                                                    attachmentError = err.message ?: "附件下载失败，请稍后重试"
+                                                }
+                                            }
+                                        }
                                         .padding(horizontal = 10.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -891,19 +922,58 @@ private fun HomeworkDetailDialog(
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Text(
-                                        text = att.name,
+                                        text = if (isDownloading) "${att.name}（正在下载…）" else att.name,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.weight(1f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Icon(
-                                        imageVector = Icons.Outlined.OpenInNew,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
+                                    if (isDownloading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(14.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Outlined.OpenInNew,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            attachmentError?.let { errMsg ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f))
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = errMsg,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
                                     )
+                                    lastFailedAttachment?.let { failed ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            TextButton(
+                                                onClick = { onOpenAttachment(failed) },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = "在网页中打开",
+                                                    style = MaterialTheme.typography.labelMedium
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

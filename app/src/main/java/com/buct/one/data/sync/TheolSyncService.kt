@@ -4,6 +4,7 @@ import android.content.Context
 import com.buct.one.data.model.BlacklistedCourse
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
+import com.buct.one.data.model.TheolDownloadedFile
 import com.buct.one.data.model.TheolFilterPrefs
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
@@ -228,6 +229,36 @@ class TheolSyncService private constructor(
                     client.exportCookieHeader("sidportal.buct.edu.cn") to
                         client.exportCookieHeader("course.buct.edu.cn")
                 )
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    /**
+     * 使用已认证的北化在线会话原生下载课程作业或网页附件到应用私有缓存目录。
+     */
+    suspend fun downloadAttachment(
+        url: String,
+        suggestedName: String,
+        courseLid: String
+    ): Result<TheolDownloadedFile> = withContext(Dispatchers.IO) {
+        syncMutex.withLock {
+            try {
+                restoreEncryptedSession()
+                if (!client.isSessionRecentlyVerified() && !client.ensureSessionActive()) {
+                    return@withContext Result.failure(
+                        IllegalStateException("请先登录教务统一身份认证（sidportal）")
+                    )
+                }
+                val file = client.downloadAttachment(
+                    url = url,
+                    suggestedName = suggestedName,
+                    courseLid = courseLid,
+                    cacheRootDir = appContext.cacheDir
+                )
+                persistEncryptedSession()
+                Result.success(file)
             } catch (e: Exception) {
                 Result.failure(e)
             }

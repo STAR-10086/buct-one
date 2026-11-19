@@ -32,6 +32,14 @@ data class TheolHomeworkAttachment(
     val url: String
 )
 
+data class TheolDownloadedFile(
+    val filePath: String,
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val isHtmlPage: Boolean = false
+)
+
 data class TheolHomeworkDetail(
     val hwtid: String,
     val title: String = "",

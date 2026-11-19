@@ -16,6 +16,7 @@ import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
+import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,12 +56,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,8 +75,10 @@ import com.buct.course.manager.AppThemeCoordinator
 import com.buct.course.ui.system.SystemIconButton
 import com.buct.course.ui.system.SystemTopBar
 import com.buct.course.ui.theme.CourseSelectorTheme
+import com.buct.one.data.model.TheolDownloadedFile
 import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.one.data.sync.TheolSyncService
+import kotlinx.coroutines.launch
 import java.net.URLEncoder
 
 /**
@@ -167,6 +173,9 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                     var ssoRetried by remember { mutableStateOf(false) }
                     var courseWarmedUp by remember { mutableStateOf(false) }
                     var pageError by remember { mutableStateOf<String?>(null) }
+                    val scope = rememberCoroutineScope()
+                    var downloadingFileName by remember { mutableStateOf<String?>(null) }
+                    var downloadedFile by remember { mutableStateOf<TheolDownloadedFile?>(null) }
 
                     LaunchedEffect(Unit) {
                         val res = TheolSyncService.getInstance(this@TheolSubmitWebViewActivity)
@@ -214,6 +223,10 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                     }
 
                     BackHandler {
+                        if (downloadedFile != null) {
+                            downloadedFile = null
+                            return@BackHandler
+                        }
                         val view = webView
                         if (view != null && view.canGoBack()) {
                             pageError = null
@@ -238,12 +251,16 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "返回",
                                     onClick = {
-                                        val view = webView
-                                        if (view != null && view.canGoBack()) {
-                                            pageError = null
-                                            view.goBack()
+                                        if (downloadedFile != null) {
+                                            downloadedFile = null
                                         } else {
-                                            finish()
+                                            val view = webView
+                                            if (view != null && view.canGoBack()) {
+                                                pageError = null
+                                                view.goBack()
+                                            } else {
+                                                finish()
+                                            }
                                         }
                                     }
                                 )
@@ -255,6 +272,8 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                                         contentDescription = "课程主页",
                                         onClick = {
                                             pageError = null
+                                            downloadingFileName = null
+                                            downloadedFile = null
                                             pendingTargetUrl = null
                                             courseWarmedUp = true
                                             webView?.loadUrl(
@@ -269,6 +288,8 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                                     contentDescription = "刷新",
                                     onClick = {
                                         pageError = null
+                                        downloadingFileName = null
+                                        downloadedFile = null
                                         val view = webView
                                         if (view != null) {
                                             if (view.url.isNullOrBlank()) {
@@ -687,6 +708,45 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                                                 }
                                             }
 
+                                            setDownloadListener { downloadUrl, _, contentDisposition, mimetype, _ ->
+                                                if (downloadUrl.isNullOrBlank()) return@setDownloadListener
+                                                syncCookiesToVault()
+                                                val suggestedName = URLUtil.guessFileName(
+                                                    downloadUrl,
+                                                    contentDisposition,
+                                                    mimetype
+                                                )
+                                                downloadingFileName = suggestedName
+                                                downloadedFile = null
+                                                pageError = null
+                                                scope.launch {
+                                                    val res = TheolSyncService.getInstance(this@TheolSubmitWebViewActivity)
+                                                        .downloadAttachment(
+                                                            url = downloadUrl,
+                                                            suggestedName = suggestedName,
+                                                            courseLid = courseLid
+                                                        )
+                                                    downloadingFileName = null
+                                                    res.onSuccess { file ->
+                                                        if (file.isHtmlPage) {
+                                                            downloadedFile = null
+                                                            webView?.loadUrl(
+                                                                downloadUrl,
+                                                                mapOf("Referer" to (webView?.url ?: courseHomeUrl))
+                                                            )
+                                                        } else {
+                                                            downloadedFile = file
+                                                            TheolAttachmentOpener.open(
+                                                                this@TheolSubmitWebViewActivity,
+                                                                file
+                                                            )
+                                                        }
+                                                    }.onFailure { err ->
+                                                        pageError = err.message ?: "附件下载失败，请点击重试"
+                                                    }
+                                                }
+                                            }
+
                                             webView = this
                                             loadUrl(
                                                 initialLoadUrl,
@@ -762,6 +822,96 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                                                     Text("进入课程主页")
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+                            }
+
+                            downloadingFileName?.let { fileName ->
+                                Surface(
+                                    modifier = Modifier.fillMaxSize(),
+                                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.94f)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(24.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(36.dp))
+                                        Spacer(Modifier.height(14.dp))
+                                        Text(
+                                            text = "正在下载附件…",
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = fileName,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+
+                            downloadedFile?.let { file ->
+                                Surface(
+                                    modifier = Modifier.fillMaxSize(),
+                                    color = MaterialTheme.colorScheme.background
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(24.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Description,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(44.dp)
+                                        )
+                                        Spacer(Modifier.height(14.dp))
+                                        Text(
+                                            text = "附件已下载",
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = "${file.fileName}（${TheolAttachmentOpener.formatFileSize(file.sizeBytes)}）",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Spacer(Modifier.height(18.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            Button(
+                                                onClick = {
+                                                    if (!TheolAttachmentOpener.open(this@TheolSubmitWebViewActivity, file)) {
+                                                        downloadedFile = null
+                                                        pageError = "未找到可打开「${file.fileName}」的应用"
+                                                    }
+                                                }
+                                            ) {
+                                                Text("打开文件")
+                                            }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    if (!TheolAttachmentOpener.share(this@TheolSubmitWebViewActivity, file)) {
+                                                        downloadedFile = null
+                                                        pageError = "无法调用系统分享或保存界面"
+                                                    }
+                                                }
+                                            ) {
+                                                Text("分享 / 另存")
+                                            }
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        TextButton(onClick = { downloadedFile = null }) {
+                                            Text("继续浏览")
                                         }
                                     }
                                 }
