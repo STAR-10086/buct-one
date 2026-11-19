@@ -42,7 +42,7 @@ fun PhosphorNavigationIcon(
                 AppSymbolSpec.Grab -> drawLightning(t, tint, fill)
                 AppSymbolSpec.Friends -> drawPeople(t, tint, fill)
                 AppSymbolSpec.Grades -> drawChart(t, tint, fill)
-                AppSymbolSpec.Settings -> drawSliders(t, tint, fill)
+                AppSymbolSpec.Settings -> drawUserProfile(t, tint, fill)
             }
         }
     }
@@ -187,12 +187,24 @@ private fun DrawScope.drawChart(t: Float, tint: Color, fill: Color) {
     drawLine(tint, Offset(32f, 208f), Offset(224f, 208f), 16f, StrokeCap.Round)
 }
 
-private fun DrawScope.drawSliders(t: Float, tint: Color, fill: Color) {
-    val shift = 54f * flourish(t)
-    for ((x, y) in listOf(104f + shift to 80f, 168f - shift to 176f)) {
-        drawLine(tint, Offset(40f, y), Offset(x - 24f, y), 16f, StrokeCap.Round)
-        drawLine(tint, Offset(x + 24f, y), Offset(216f, y), 16f, StrokeCap.Round)
-        drawCircle(fill, 24f, Offset(x, y))
-        drawCircle(tint, 24f, Offset(x, y), style = outlineStroke)
+/** 「我的」个人上半身人像图标（与 Phosphor 16f 线宽统一）。 */
+private fun DrawScope.drawUserProfile(t: Float, tint: Color, fill: Color) {
+    val lift = -8f * flourish(t)
+    drawCircle(color = fill, radius = 44f, center = Offset(128f, 88f + lift), style = Fill)
+    drawCircle(color = tint, radius = 44f, center = Offset(128f, 88f + lift), style = outlineStroke)
+
+    val bustFill = Path().apply {
+        moveTo(44f, 214f)
+        cubicTo(52f, 160f, 88f, 146f, 128f, 146f)
+        cubicTo(168f, 146f, 204f, 160f, 212f, 214f)
+        close()
     }
+    drawPath(bustFill, color = fill, style = Fill)
+
+    val bustStroke = Path().apply {
+        moveTo(44f, 214f)
+        cubicTo(52f, 160f, 88f, 146f, 128f, 146f)
+        cubicTo(168f, 146f, 204f, 160f, 212f, 214f)
+    }
+    drawPath(bustStroke, color = tint, style = outlineStroke)
 }
