@@ -7,8 +7,11 @@ import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.Provenance
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.TheolFilterPrefs
+import com.buct.one.data.model.TheolHomeworkAttachment
+import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
+import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
 import org.json.JSONArray
 import org.json.JSONObject
@@ -32,6 +35,8 @@ class TheolStore(private val rootDir: File) {
     private val theolFile: File get() = File(rootDir, "theol.snapshot.v1.json")
     private val todoFile: File get() = File(rootDir, "local.todos.v1.json")
     private val filterFile: File get() = File(rootDir, "theol.filters.v1.json")
+    private val hwDetailsFile: File get() = File(rootDir, "theol.hw_details.v1.json")
+    private val testDetailsFile: File get() = File(rootDir, "theol.test_details.v1.json")
 
     @Synchronized
     fun readTheol(defaultParserVersion: Int): DomainSlice<TheolSnapshot> {
@@ -297,6 +302,7 @@ class TheolStore(private val rootDir: File) {
                             put("hasResult", t.hasResult)
                             put("status", t.status)
                             put("testUrl", t.testUrl)
+                            put("resultHref", t.resultHref)
                         }
                     )
                 }
@@ -347,7 +353,8 @@ class TheolStore(private val rootDir: File) {
                         canStart = o.optBoolean("canStart", false),
                         hasResult = o.optBoolean("hasResult", false),
                         status = o.optString("status", ""),
-                        testUrl = o.optString("testUrl", "")
+                        testUrl = o.optString("testUrl", ""),
+                        resultHref = o.optString("resultHref", "")
                     )
                 )
             }
@@ -357,6 +364,126 @@ class TheolStore(private val rootDir: File) {
             tests = tests,
             failedCourseCount = obj.optInt("failedCourseCount", 0)
         )
+    }
+
+    @Synchronized
+    fun readHomeworkDetails(): Map<String, TheolHomeworkDetail> {
+        if (!hwDetailsFile.exists()) return emptyMap()
+        return runCatching {
+            val arr = JSONArray(hwDetailsFile.readText(Charsets.UTF_8))
+            val result = LinkedHashMap<String, TheolHomeworkDetail>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val hwtid = o.optString("hwtid", "")
+                if (hwtid.isBlank()) continue
+                val attArr = o.optJSONArray("attachments") ?: JSONArray()
+                val attachments = buildList(attArr.length()) {
+                    for (j in 0 until attArr.length()) {
+                        val a = attArr.getJSONObject(j)
+                        val url = a.optString("url", "")
+                        if (url.isNotBlank()) {
+                            add(TheolHomeworkAttachment(name = a.optString("name", "附件"), url = url))
+                        }
+                    }
+                }
+                result[hwtid] = TheolHomeworkDetail(
+                    hwtid = hwtid,
+                    title = o.optString("title", ""),
+                    deadline = o.optString("deadline", ""),
+                    score = o.optString("score", ""),
+                    publisher = o.optString("publisher", ""),
+                    contentText = o.optString("contentText", ""),
+                    attachments = attachments,
+                    fetchedAt = o.optLong("fetchedAt", 0L)
+                )
+            }
+            result
+        }.getOrDefault(emptyMap())
+    }
+
+    @Synchronized
+    fun writeHomeworkDetails(details: Map<String, TheolHomeworkDetail>) {
+        val trimmed = details.values
+            .sortedByDescending { it.fetchedAt }
+            .take(MAX_DETAIL_CACHE_ENTRIES)
+        val arr = JSONArray()
+        for (d in trimmed) {
+            arr.put(
+                JSONObject().apply {
+                    put("hwtid", d.hwtid)
+                    put("title", d.title)
+                    put("deadline", d.deadline)
+                    put("score", d.score)
+                    put("publisher", d.publisher)
+                    put("contentText", d.contentText)
+                    put("fetchedAt", d.fetchedAt)
+                    put(
+                        "attachments",
+                        JSONArray().apply {
+                            for (a in d.attachments) {
+                                put(
+                                    JSONObject().apply {
+                                        put("name", a.name)
+                                        put("url", a.url)
+                                    }
+                                )
+                            }
+                        }
+                    )
+                }
+            )
+        }
+        atomicWrite(hwDetailsFile, arr.toString())
+    }
+
+    @Synchronized
+    fun readTestDetails(): Map<String, TheolTestDetail> {
+        if (!testDetailsFile.exists()) return emptyMap()
+        return runCatching {
+            val arr = JSONArray(testDetailsFile.readText(Charsets.UTF_8))
+            val result = LinkedHashMap<String, TheolTestDetail>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val testId = o.optString("testId", "")
+                if (testId.isBlank()) continue
+                result[testId] = TheolTestDetail(
+                    testId = testId,
+                    title = o.optString("title", ""),
+                    description = o.optString("description", ""),
+                    startTime = o.optString("startTime", ""),
+                    endTime = o.optString("endTime", ""),
+                    duration = o.optString("duration", ""),
+                    totalScore = o.optString("totalScore", ""),
+                    questionCount = o.optString("questionCount", ""),
+                    fetchedAt = o.optLong("fetchedAt", 0L)
+                )
+            }
+            result
+        }.getOrDefault(emptyMap())
+    }
+
+    @Synchronized
+    fun writeTestDetails(details: Map<String, TheolTestDetail>) {
+        val trimmed = details.values
+            .sortedByDescending { it.fetchedAt }
+            .take(MAX_DETAIL_CACHE_ENTRIES)
+        val arr = JSONArray()
+        for (d in trimmed) {
+            arr.put(
+                JSONObject().apply {
+                    put("testId", d.testId)
+                    put("title", d.title)
+                    put("description", d.description)
+                    put("startTime", d.startTime)
+                    put("endTime", d.endTime)
+                    put("duration", d.duration)
+                    put("totalScore", d.totalScore)
+                    put("questionCount", d.questionCount)
+                    put("fetchedAt", d.fetchedAt)
+                }
+            )
+        }
+        atomicWrite(testDetailsFile, arr.toString())
     }
 
     private fun atomicWrite(target: File, content: String) {
@@ -371,6 +498,7 @@ class TheolStore(private val rootDir: File) {
 
     companion object {
         const val SOURCE_ID = "theol.homework"
+        private const val MAX_DETAIL_CACHE_ENTRIES = 80
 
         private fun sanitizeAccountKey(raw: String): String {
             val cleaned = raw.replace(Regex("""[^a-zA-Z0-9._-]"""), "_").take(64)

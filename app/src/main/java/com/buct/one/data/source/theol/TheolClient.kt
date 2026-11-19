@@ -7,6 +7,7 @@ import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
+import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
 import okhttp3.Cookie
 import okhttp3.FormBody
@@ -21,25 +22,45 @@ import java.io.IOException
 import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
+import java.nio.ByteBuffer
 import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Arrays
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
  * 北化在线（THEOL / MEOL）原生 HTTP 客户端。
- * 协议移植自 Ling0727-ai/go-buct-course (MIT)，零 WebView，强制走 BuctTlsTrustManager。
+ * 协议移植自 Ling0727-ai/go-buct-course 并融合 BUCT-Course-Companion 会话与路径修复，零 WebView，强制走 BuctTlsTrustManager。
  */
 class TheolClient {
     private val cookieJar: MatchingMemoryCookieJar = MatchingMemoryCookieJar()
+
+    @Volatile
+    private var lastSessionVerifiedAt: Long = 0L
+
+    @Volatile
+    private var activeCourseLid: String = ""
+
+    @Volatile
+    private var activeCourseActivatedAt: Long = 0L
+
     companion object {
         const val SID_PORTAL_BASE = "https://sidportal.buct.edu.cn"
         const val MEOL_BASE = "https://course.buct.edu.cn"
         const val MEOL_SSO_SERVICE = "https://course.buct.edu.cn/meol/homepage/common/sso_login.jsp"
-        private const val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+        const val MEOL_WELCOME_HOME = "https://course.buct.edu.cn/meol/welcomepage/student/index.jsp"
+        const val MEOL_LEGACY_HOME_PATH = "/meol/homepage/student/index.jsp"
+        const val MEOL_REMINDER_URL = "https://course.buct.edu.cn/meol/welcomepage/student/interaction_reminder_v8.jsp"
+        const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+        private const val UA = USER_AGENT
         private const val MAX_COURSE_PAGES = 40
         private const val MAX_COURSE_DEPTH = 6
+        private const val SESSION_TTL_MILLIS = 5 * 60_000L
+        private const val COURSE_CONTEXT_TTL_MILLIS = 2 * 60_000L
 
         private val ALLOWED_HW_PATHS = setOf(
             "/meol/jpk/course/layout/newpage/index.jsp",
@@ -101,7 +122,7 @@ class TheolClient {
     /** 导出指定域名的 Cookie 字符串以便加密保存（course.buct.edu.cn 按 /meol/ 路径检索） */
     fun exportCookieHeader(host: String): String {
         val probeUrl = if (host.equals("course.buct.edu.cn", ignoreCase = true)) {
-            "https://$host/meol/homepage/student/index.jsp".toHttpUrl()
+            MEOL_WELCOME_HOME.toHttpUrl()
         } else {
             "https://$host/login".toHttpUrl()
         }
@@ -117,8 +138,58 @@ class TheolClient {
         return merged.entries.joinToString("; ") { "${it.key}=${it.value}" }
     }
 
-    /** 检查当前会话是否可直接访问北化在线（或通过已有 TGT 自动换票） */
-    fun ensureSessionActive(): Boolean {
+    /** 重置内存中的会话校验与课程上下文缓存（切换账号或外部重新登录后调用） */
+    fun invalidateSessionCache() {
+        lastSessionVerifiedAt = 0L
+        activeCourseLid = ""
+        activeCourseActivatedAt = 0L
+    }
+
+    fun isSessionRecentlyVerified(ttlMillis: Long = SESSION_TTL_MILLIS): Boolean =
+        lastSessionVerifiedAt > 0L &&
+            (System.currentTimeMillis() - lastSessionVerifiedAt) in 0L..ttlMillis &&
+            hasMeolSessionCookie()
+
+    fun isCourseContextFresh(courseLid: String, ttlMillis: Long = COURSE_CONTEXT_TTL_MILLIS): Boolean {
+        val lid = courseLid.trim()
+        return lid.isNotEmpty() &&
+            activeCourseLid == lid &&
+            activeCourseActivatedAt > 0L &&
+            (System.currentTimeMillis() - activeCourseActivatedAt) in 0L..ttlMillis
+    }
+
+    private fun hasMeolSessionCookie(): Boolean =
+        cookieJar.loadForRequest(MEOL_REMINDER_URL.toHttpUrl()).any {
+            it.name.equals("JSESSIONID", ignoreCase = true) && it.value.isNotBlank()
+        }
+
+    /**
+     * 快速探针：仅请求一次待办索引页验证已有 JSESSIONID 是否存活。
+     * 成功时返回响应 HTML 并刷新会话校验时间戳（可直接复用于列表解析，避免多余重定向）；失效则返回 null。
+     */
+    fun probeReminderHtml(): String? {
+        val req = Request.Builder()
+            .url(MEOL_REMINDER_URL)
+            .header("User-Agent", UA)
+            .header("Referer", MEOL_WELCOME_HOME)
+            .get()
+            .build()
+        noRedirectClient.newCall(req).execute().use { resp ->
+            if (resp.code != 200) return null
+            val finalUrl = resp.request.url
+            if (!finalUrl.host.equals("course.buct.edu.cn", ignoreCase = true)) return null
+            val html = decodeResponseBody(resp)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) return null
+            lastSessionVerifiedAt = System.currentTimeMillis()
+            return html
+        }
+    }
+
+    /** 检查当前会话是否可直接访问北化在线（优先快速探针，失效时再通过 TGT 自动换票） */
+    fun ensureSessionActive(forceSso: Boolean = false): Boolean {
+        if (!forceSso && hasMeolSessionCookie()) {
+            if (probeReminderHtml() != null) return true
+        }
         val probe = followAuthRedirects(
             Request.Builder()
                 .url(MEOL_SSO_SERVICE)
@@ -127,13 +198,17 @@ class TheolClient {
                 .build(),
             allowedHosts = setOf("course.buct.edu.cn", "sidportal.buct.edu.cn", "portal.buct.edu.cn")
         )
-        return probe.use { resp ->
+        val landed = probe.use { resp ->
             val finalUrl = resp.request.url
+            val body = if (resp.isSuccessful) decodeResponseBody(resp) else ""
             resp.isSuccessful &&
                 finalUrl.host.equals("course.buct.edu.cn", ignoreCase = true) &&
                 finalUrl.encodedPath.startsWith("/meol/") &&
-                !finalUrl.encodedPath.contains("login", ignoreCase = true)
+                !finalUrl.encodedPath.contains("login", ignoreCase = true) &&
+                !TheolParser.isPermissionDeniedOrExpired(body)
         }
+        if (!landed) return false
+        return probeReminderHtml() != null
     }
 
     /**
@@ -163,6 +238,9 @@ class TheolClient {
                     finalUrl.encodedPath.startsWith("/meol/") &&
                     !finalUrl.encodedPath.contains("login", ignoreCase = true)
                 ) {
+                    lastSessionVerifiedAt = System.currentTimeMillis()
+                    activeCourseLid = ""
+                    activeCourseActivatedAt = 0L
                     return Result.success(Unit)
                 }
                 finalUrl to decodeResponseBody(resp)
@@ -237,6 +315,9 @@ class TheolClient {
                     return Result.failure(IOException("认证未完成，请检查学号密码或在教务登录页重新登录后点击刷新"))
                 }
             }
+            lastSessionVerifiedAt = System.currentTimeMillis()
+            activeCourseLid = ""
+            activeCourseActivatedAt = 0L
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -245,15 +326,22 @@ class TheolClient {
         }
     }
 
+    private class SessionExpiredSignal(message: String) : IOException(message)
+
     /** 在服务端 Tomcat HttpSession 中激活当前课程上下文，防止直达作业详情/提交页报 Permission Denied */
-    fun enterCourseContext(courseLid: String): Boolean {
+    fun enterCourseContext(courseLid: String, force: Boolean = false): Boolean {
         val lid = courseLid.trim()
         if (lid.isEmpty()) return true
+        if (!force && isCourseContextFresh(lid)) return true
+
         val courseHome = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=${URLEncoder.encode(lid, "UTF-8")}"
-        val courseHtml = fetchHtml(courseHome, "$MEOL_BASE/meol/homepage/student/index.jsp")
+        val courseHtml = fetchHtml(courseHome, MEOL_WELCOME_HOME)
         if (TheolParser.isPermissionDeniedOrExpired(courseHtml)) {
+            activeCourseLid = ""
+            activeCourseActivatedAt = 0L
             return false
         }
+        // 部分课程使用自定义栏目，默认 hwtask.jsp 失败时仍可继续读取单条详情，因此忽略此步错误
         val hwEntry = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
         runCatching {
             val req = Request.Builder()
@@ -264,7 +352,33 @@ class TheolClient {
                 .build()
             meolClient.newCall(req).execute().use { /* 同步激活作业栏目上下文 */ }
         }
+        activeCourseLid = lid
+        activeCourseActivatedAt = System.currentTimeMillis()
         return true
+    }
+
+    private fun normalizeSecureCourseUrl(rawUrl: String): String {
+        val normalized = normalizeUrl(MEOL_BASE, rawUrl) ?: rawUrl
+        return if (normalized.startsWith("http://course.buct.edu.cn", ignoreCase = true)) {
+            "https://" + normalized.removePrefix("http://")
+        } else {
+            normalized
+        }
+    }
+
+    private fun fetchCourseSubpageHtml(courseLid: String, secureUrl: String, referer: String): String {
+        enterCourseContext(courseLid)
+        var html = fetchHtml(secureUrl, referer)
+        if (TheolParser.isPermissionDeniedOrExpired(html)) {
+            if (!ensureSessionActive(forceSso = true) || !enterCourseContext(courseLid, force = true)) {
+                throw IOException("北化在线会话已过期，请刷新或重新登录")
+            }
+            html = fetchHtml(secureUrl, referer)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) {
+                throw IOException("北化在线提示权限不足或登录超时，请重新登录后重试")
+            }
+        }
+        return html
     }
 
     /** 拉取单条作业详情（要求、附件等），自动建立课程上下文并在失效时尝试换票重试一次 */
@@ -273,35 +387,47 @@ class TheolClient {
         nowMillis: Long = System.currentTimeMillis()
     ): TheolHomeworkDetail {
         val rawDetailUrl = item.detailHref.ifBlank { "$MEOL_BASE/meol/common/hw/student/hwtask.view.jsp?hwtid=${item.hwtid}" }
-        val normalized = normalizeUrl(MEOL_BASE, rawDetailUrl) ?: rawDetailUrl
-        val secureUrl = if (normalized.startsWith("http://course.buct.edu.cn", ignoreCase = true)) {
-            "https://" + normalized.removePrefix("http://")
-        } else {
-            normalized
-        }
+        val secureUrl = normalizeSecureCourseUrl(rawDetailUrl)
         val referer = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
-
-        enterCourseContext(item.lid)
-        var html = fetchHtml(secureUrl, referer)
-        if (TheolParser.isPermissionDeniedOrExpired(html)) {
-            if (!ensureSessionActive() || !enterCourseContext(item.lid)) {
-                throw IOException("北化在线会话已过期，请刷新或重新登录")
-            }
-            html = fetchHtml(secureUrl, referer)
-            if (TheolParser.isPermissionDeniedOrExpired(html)) {
-                throw IOException("北化在线提示权限不足或登录超时，请重新登录后重试")
-            }
-        }
+        val html = fetchCourseSubpageHtml(item.lid, secureUrl, referer)
         return TheolParser.parseHomeworkDetail(html, secureUrl, item.hwtid, nowMillis)
     }
 
-    /** 抓取北化在线所有待办作业与测验 */
-    fun fetchPendingSnapshot(nowMillis: Long = System.currentTimeMillis()): TheolSnapshot {
-        val reminderUrl = "$MEOL_BASE/meol/welcomepage/student/interaction_reminder_v8.jsp"
-        val reminderHtml = fetchHtml(reminderUrl, "$MEOL_BASE/meol/homepage/student/index.jsp")
-        if (TheolParser.isPermissionDeniedOrExpired(reminderHtml)) {
-            throw IOException("北化在线会话已过期，请重新登录")
+    /** 拉取单条在线测验详情（view.jsp?testId=...），无法直接定位数字编号时平滑回退列表摘要 */
+    fun fetchTestDetail(
+        item: TheolTestItem,
+        nowMillis: Long = System.currentTimeMillis()
+    ): TheolTestDetail {
+        val cleanId = item.testId.trim()
+        if (cleanId.isEmpty() || !cleanId.all(Char::isDigit) || cleanId.all { it == '0' }) {
+            return TheolTestDetail(
+                testId = item.testId,
+                title = item.title,
+                startTime = item.startTime,
+                endTime = item.endTime,
+                duration = item.duration,
+                fetchedAt = nowMillis
+            )
         }
+        val detailUrl = "$MEOL_BASE/meol/common/question/test/student/view.jsp?testId=${URLEncoder.encode(cleanId, "UTF-8")}"
+        val referer = TheolParser.buildTestListUrl(item.lid, MEOL_BASE)
+        val html = fetchCourseSubpageHtml(item.lid, detailUrl, referer)
+        return TheolParser.parseTestDetail(html, cleanId, nowMillis)
+    }
+
+    /** 抓取北化在线所有待办作业与测验（支持复用探针已拿到的 reminderHtml 与测验页并发） */
+    fun fetchPendingSnapshot(
+        nowMillis: Long = System.currentTimeMillis(),
+        prefetchedReminderHtml: String? = null
+    ): TheolSnapshot {
+        val reminderHtml = prefetchedReminderHtml
+            ?.takeIf { !TheolParser.isPermissionDeniedOrExpired(it) }
+            ?: fetchHtml(MEOL_REMINDER_URL, MEOL_WELCOME_HOME).also { html ->
+                if (TheolParser.isPermissionDeniedOrExpired(html)) {
+                    throw IOException("北化在线会话已过期，请重新登录")
+                }
+                lastSessionVerifiedAt = System.currentTimeMillis()
+            }
 
         val (hwCourses, testCourses) = TheolParser.parsePendingCourses(reminderHtml, MEOL_BASE)
         val allHomeworks = mutableListOf<TheolHomeworkItem>()
@@ -310,6 +436,9 @@ class TheolClient {
         val seenTestIds = mutableSetOf<String>()
         var failedCourses = 0
 
+        // 抓取多门课程作业会切换 Tomcat session 中的当前课程，因此顺序执行并在结束后重置课程上下文缓存
+        activeCourseLid = ""
+        activeCourseActivatedAt = 0L
         for (course in hwCourses) {
             try {
                 val items = walkHomeworkPages(course.url, course.lid, course.courseName, nowMillis)
@@ -318,23 +447,52 @@ class TheolClient {
                         allHomeworks.add(hw)
                     }
                 }
+            } catch (e: SessionExpiredSignal) {
+                throw e
             } catch (_: Exception) {
                 failedCourses++
             }
         }
+        activeCourseLid = ""
+        activeCourseActivatedAt = 0L
 
-        for (course in testCourses) {
+        if (testCourses.size <= 1) {
+            for (course in testCourses) {
+                try {
+                    for (t in fetchCourseTests(course.lid, course.courseName, course.url)) {
+                        if (seenTestIds.add("${t.lid}:${t.testId}")) {
+                            allTests.add(t)
+                        }
+                    }
+                } catch (e: SessionExpiredSignal) {
+                    throw e
+                } catch (_: Exception) {
+                    failedCourses++
+                }
+            }
+        } else {
+            val pool = Executors.newFixedThreadPool(minOf(3, testCourses.size))
             try {
-                val referer = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=${course.lid}"
-                val testHtml = fetchHtml(course.url, referer)
-                val tests = TheolParser.parseTestList(testHtml, course.lid, course.courseName, MEOL_BASE)
-                for (t in tests) {
-                    if (seenTestIds.add("${t.lid}:${t.testId}")) {
-                        allTests.add(t)
+                val futures = testCourses.map { course ->
+                    pool.submit(Callable {
+                        fetchCourseTests(course.lid, course.courseName, course.url)
+                    })
+                }
+                for (future in futures) {
+                    try {
+                        for (t in future.get()) {
+                            if (seenTestIds.add("${t.lid}:${t.testId}")) {
+                                allTests.add(t)
+                            }
+                        }
+                    } catch (e: java.util.concurrent.ExecutionException) {
+                        val cause = e.cause
+                        if (cause is SessionExpiredSignal) throw cause
+                        failedCourses++
                     }
                 }
-            } catch (_: Exception) {
-                failedCourses++
+            } finally {
+                pool.shutdown()
             }
         }
 
@@ -348,6 +506,15 @@ class TheolClient {
         )
     }
 
+    private fun fetchCourseTests(lid: String, courseName: String, url: String): List<TheolTestItem> {
+        val referer = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=$lid"
+        val testHtml = fetchHtml(url, referer)
+        if (TheolParser.isPermissionDeniedOrExpired(testHtml)) {
+            throw SessionExpiredSignal("课程会话已过期")
+        }
+        return TheolParser.parseTestList(testHtml, lid, courseName, MEOL_BASE)
+    }
+
     private fun walkHomeworkPages(
         startUrl: String,
         lid: String,
@@ -358,6 +525,7 @@ class TheolClient {
 
         val queue = ArrayDeque<QueueEntry>()
         val visited = mutableSetOf<String>()
+        val seenTableSignatures = mutableSetOf<String>()
         val found = mutableListOf<TheolHomeworkItem>()
         val seenIds = mutableSetOf<String>()
 
@@ -384,7 +552,7 @@ class TheolClient {
                     val location = resp.header("Location").orEmpty()
                     val next = normalizeUrl(current.url, location) ?: return@use
                     if (next.contains("login", ignoreCase = true)) {
-                        throw IOException("课程会话已过期")
+                        throw SessionExpiredSignal("课程会话已过期")
                     }
                     if (isAllowedHomeworkUrl(next) && visited.add(next)) {
                         queue.addFirst(QueueEntry(next, current.url, current.depth + 1))
@@ -394,21 +562,34 @@ class TheolClient {
                 if (!resp.isSuccessful) return@use
                 val html = decodeResponseBody(resp)
                 if (TheolParser.isPermissionDeniedOrExpired(html)) {
-                    throw IOException("课程会话已过期")
+                    throw SessionExpiredSignal("课程会话已过期")
                 }
 
-                for (hw in TheolParser.parseHomeworkPage(html, current.url, lid, courseName, nowMillis)) {
+                // 单次 Jsoup 解析同时供作业抽取与子栏目发现使用，避免重复 parse
+                val doc = Jsoup.parse(html, current.url)
+                for (hw in TheolParser.parseHomeworkPage(doc, current.url, lid, courseName, nowMillis)) {
                     if (seenIds.add(hw.hwtid)) found.add(hw)
                 }
 
-                fun enqueue(raw: String) {
+                val parsedUrl = runCatching { current.url.toHttpUrl() }.getOrNull()
+                val currentPath = parsedUrl?.encodedPath.orEmpty()
+                val pagingPageStr = parsedUrl?.queryParameter("pagingPage").orEmpty()
+                val table = doc.selectFirst("table.valuelist")
+                var repeated = false
+                if (table != null && pagingPageStr.isNotEmpty()) {
+                    val seriesUrl = parsedUrl!!.newBuilder().removeAllQueryParameters("pagingPage").build().toString()
+                    val signature = sha256Hex("$seriesUrl\u0000${table.html()}")
+                    repeated = !seenTableSignatures.add(signature)
+                }
+
+                fun enqueue(raw: String, sameDepth: Boolean = false) {
                     val next = normalizeUrl(current.url, raw) ?: return
                     if (isAllowedHomeworkUrl(next) && visited.add(next)) {
-                        queue.addLast(QueueEntry(next, current.url, current.depth + 1))
+                        val nextDepth = if (sameDepth) current.depth else current.depth + 1
+                        queue.addLast(QueueEntry(next, current.url, nextDepth))
                     }
                 }
 
-                val doc = Jsoup.parse(html, current.url)
                 doc.select("iframe[src], frame[src]").forEach { enqueue(it.attr("src")) }
                 doc.select("meta[http-equiv]").forEach {
                     if (it.attr("http-equiv").equals("refresh", ignoreCase = true)) {
@@ -424,16 +605,52 @@ class TheolClient {
                 }
                 doc.select("a[href], a[onclick]").forEach { a ->
                     val href = a.attr("href")
-                    if (href.isNotEmpty()) enqueue(href)
+                    if (href.isNotEmpty()) {
+                        val targetPath = normalizeUrl(current.url, href)
+                            ?.let { u -> runCatching { u.toHttpUrl().encodedPath }.getOrNull() }
+                        if (targetPath == currentPath) {
+                            if (!repeated) enqueue(href, sameDepth = true)
+                        } else {
+                            enqueue(href)
+                        }
+                    }
                     val onclick = a.attr("onclick")
                     if (onclick.isNotEmpty()) {
-                        QUOTED_URL_REGEX.findAll(onclick).forEach { m -> enqueue(m.groupValues[1]) }
+                        LOCATION_REGEX.findAll(onclick).forEach { m ->
+                            val target = m.groupValues[1].ifEmpty { m.groupValues[2] }
+                            if (target.isNotEmpty()) enqueue(target)
+                        }
+                        QUOTED_URL_REGEX.findAll(onclick).forEach { m ->
+                            val quoted = m.groupValues[1]
+                            if (quoted.contains("columnId=") || quoted.contains("pagingPage=")) {
+                                if (!repeated) enqueue(quoted, sameDepth = true)
+                            } else {
+                                enqueue(quoted)
+                            }
+                        }
+                    }
+                }
+                val currentPage = pagingPageStr.toIntOrNull() ?: 0
+                val perPage = parsedUrl?.queryParameter("pagingNumberPer")?.toIntOrNull() ?: 0
+                if (!repeated && currentPage > 0 && perPage > 0 && table != null) {
+                    val dataRows = table.select("tr").count { it.select("> td").isNotEmpty() }
+                    if (dataRows >= perPage) {
+                        val nextUrl = parsedUrl.newBuilder()
+                            .setQueryParameter("pagingPage", (currentPage + 1).toString())
+                            .build()
+                            .toString()
+                        enqueue(nextUrl, sameDepth = true)
                     }
                 }
             }
         }
         return found
     }
+
+    private fun sha256Hex(input: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(input.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     private fun checkCaptchaPreflight(username: String, referer: String) {
         val randomBytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
@@ -495,12 +712,20 @@ class TheolClient {
             if (hostLower !in allowedHosts) {
                 throw IOException("拒绝跳转到非信任域名: ${resolved.host}")
             }
-            val safeUrl = if (!resolved.isHttps && hostLower == "course.buct.edu.cn") {
+            val upgradedUrl = if (!resolved.isHttps && hostLower == "course.buct.edu.cn") {
                 resolved.newBuilder().scheme("https").build()
             } else if (!resolved.isHttps) {
                 throw IOException("拒绝非 HTTPS 重定向: ${resolved.host}")
             } else {
                 resolved
+            }
+            val safeUrl = if (
+                upgradedUrl.host.equals("course.buct.edu.cn", ignoreCase = true) &&
+                upgradedUrl.encodedPath.equals(MEOL_LEGACY_HOME_PATH, ignoreCase = true)
+            ) {
+                MEOL_WELCOME_HOME.toHttpUrl()
+            } else {
+                upgradedUrl
             }
             currentReq = Request.Builder()
                 .url(safeUrl)
@@ -534,14 +759,26 @@ class TheolClient {
         val headerCharset = CHARSET_REGEX.find(contentType)?.groupValues?.getOrNull(1)
         val probeHead = String(bytes, 0, minOf(bytes.size, 2048), Charsets.ISO_8859_1)
         val metaCharset = CHARSET_REGEX.find(probeHead)?.groupValues?.getOrNull(1)
-        val charsetName = (headerCharset ?: metaCharset ?: "UTF-8").uppercase()
-        val charset = runCatching {
-            when {
-                charsetName.contains("GB") -> Charset.forName("GBK")
-                else -> Charset.forName(charsetName)
-            }
-        }.getOrDefault(Charsets.UTF_8)
-        return String(bytes, charset)
+        val declared = headerCharset ?: metaCharset
+        if (declared != null) {
+            val charsetName = declared.uppercase()
+            val charset = runCatching {
+                when {
+                    charsetName.contains("GB") -> Charset.forName("GBK")
+                    else -> Charset.forName(charsetName)
+                }
+            }.getOrDefault(Charsets.UTF_8)
+            return String(bytes, charset)
+        }
+        return try {
+            Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes))
+                .toString()
+        } catch (_: Exception) {
+            Charset.forName("GBK").decode(ByteBuffer.wrap(bytes)).toString()
+        }
     }
 
     private fun normalizeUrl(base: String, raw: String): String? {

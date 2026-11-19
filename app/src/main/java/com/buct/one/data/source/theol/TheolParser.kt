@@ -4,6 +4,7 @@ import com.buct.one.data.model.TheolCourseInfo
 import com.buct.one.data.model.TheolHomeworkAttachment
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
+import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -11,6 +12,7 @@ import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
 import java.net.URI
 import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -21,7 +23,7 @@ import java.util.TimeZone
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object TheolParser {
-    const val PARSER_VERSION = 2
+    const val PARSER_VERSION = 3
     const val BASE_URL = "https://course.buct.edu.cn"
 
     private val testStartRegex = Regex("""gotostart\('(\d+)'""")
@@ -85,6 +87,15 @@ object TheolParser {
         return homeworks to tests
     }
 
+    /** 构造课程在线测验列表入口（MEOL 无独立的 test_start.jsp 页面，统一由列表页点击开始） */
+    fun buildTestListUrl(lid: String, baseUrl: String = BASE_URL): String {
+        val cleanBase = baseUrl.trimEnd('/')
+        val encodedLid = URLEncoder.encode(lid.trim(), "UTF-8")
+        return "$cleanBase/meol/common/question/test/student/list.jsp" +
+            "?sortColumn=createTime&status=1&tagbug=client&sortDirection=-1&strStyle=new03" +
+            "&cateId=$encodedLid&pagingPage=1&pagingNumberPer=30"
+    }
+
     private fun extractPendingCourse(a: Element, expectedType: String, baseUrl: String): TheolCourseInfo? {
         val courseName = a.text().trim()
         val onclick = a.attr("onclick")
@@ -95,7 +106,7 @@ object TheolParser {
         if (expectedType == "test" && (lid == "24199" || lid == "27215")) return null
 
         val url = if (expectedType == "test") {
-            "$baseUrl/meol/common/question/test/student/list.jsp?sortColumn=createTime&status=1&tagbug=client&sortDirection=-1&strStyle=lesson19&cateId=$lid&pagingPage=1&pagingNumberPer=30"
+            buildTestListUrl(lid, baseUrl)
         } else {
             "$baseUrl/meol/jpk/course/layout/newpage/index.jsp?courseId=$lid"
         }
@@ -109,8 +120,17 @@ object TheolParser {
         lid: String,
         courseName: String,
         nowMillis: Long
+    ): List<TheolHomeworkItem> =
+        parseHomeworkPage(Jsoup.parse(html, sourceUrl), sourceUrl, lid, courseName, nowMillis)
+
+    /** 复用已构建的 Jsoup Document 解析作业列表，避免重复解析整页 HTML */
+    fun parseHomeworkPage(
+        doc: Document,
+        sourceUrl: String,
+        lid: String,
+        courseName: String,
+        nowMillis: Long
     ): List<TheolHomeworkItem> {
-        val doc = Jsoup.parse(html, sourceUrl)
         val result = mutableListOf<TheolHomeworkItem>()
         val seen = mutableSetOf<String>()
 
@@ -310,6 +330,7 @@ object TheolParser {
         return lower.contains("permission denied") ||
             html.contains("登录时间超时") ||
             html.contains("请重新登录") ||
+            html.contains("用户身份错误") ||
             lower.contains("type=\"password\"") ||
             html.contains("login-page-flowkey")
     }
@@ -347,20 +368,7 @@ object TheolParser {
         val paragraphs = mutableListOf<String>()
         val attachments = linkedMapOf<String, TheolHomeworkAttachment>()
 
-        fun normalizeDetailHref(rawHref: String): String {
-            val trimmed = rawHref.trim()
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("javascript:", true)) return ""
-            return runCatching {
-                val resolved = URL(URL(detailUrl), trimmed)
-                if (resolved.protocol != "http" && resolved.protocol != "https") return ""
-                val str = resolved.toString()
-                if (str.startsWith("http://course.buct.edu.cn", ignoreCase = true)) {
-                    "https://" + str.removePrefix("http://")
-                } else {
-                    str
-                }
-            }.getOrDefault("")
-        }
+        fun normalizeDetailHref(rawHref: String): String = resolveHttpUrl(rawHref, detailUrl)
 
         fun collectFromFragment(container: Element) {
             val blocks = container.select("p, li, tr")
@@ -440,7 +448,7 @@ object TheolParser {
         )
     }
 
-    /** 解析在线测验列表页 */
+    /** 解析在线测验列表页（入口统一指向 list.jsp，避免 test_start.jsp 404 白屏） */
     fun parseTestList(html: String, lid: String, fallbackCourseName: String, baseUrl: String = BASE_URL): List<TheolTestItem> {
         val doc: Document = Jsoup.parse(html, baseUrl)
         val titleText = doc.title().trim()
@@ -454,6 +462,8 @@ object TheolParser {
             ?: doc.selectFirst("table[border=0][cellspacing=0][cellpadding=0]")
             ?: return emptyList()
 
+        val listSourceUrl = "$baseUrl/meol/common/question/test/student/list.jsp"
+        val resolvedTestListUrl = buildTestListUrl(lid, baseUrl)
         val result = mutableListOf<TheolTestItem>()
         val rows = table.select("tr")
         for (i in 1 until rows.size) {
@@ -467,10 +477,11 @@ object TheolParser {
             val duration = cells[4].text().trim()
 
             val onclick = cells[5].selectFirst("a")?.attr("onclick").orEmpty()
-            val testId = testStartRegex.find(onclick)?.groupValues?.getOrNull(1).orEmpty()
-            val canStart = testId.isNotEmpty()
-            val resultHref = cells[7].selectFirst("a")?.attr("href").orEmpty()
+            val onclickTestId = testStartRegex.find(onclick)?.groupValues?.getOrNull(1).orEmpty()
+            val canStart = onclickTestId.isNotEmpty()
+            val resultHref = cells[7].selectFirst("a")?.let { resolveActiveLink(it, listSourceUrl) }.orEmpty()
             val hasResult = resultHref.isNotEmpty()
+            val resolvedTestId = onclickTestId.ifEmpty { extractPositiveIdParam(resultHref, "testId") }
             val status = when {
                 hasResult -> "已完成"
                 canStart -> "可进行"
@@ -479,7 +490,7 @@ object TheolParser {
 
             result.add(
                 TheolTestItem(
-                    testId = testId.ifEmpty { "${lid}_$i" },
+                    testId = resolvedTestId.ifEmpty { "${lid}_$i" },
                     lid = lid,
                     courseName = courseName,
                     title = title,
@@ -491,11 +502,56 @@ object TheolParser {
                     canStart = canStart,
                     hasResult = hasResult,
                     status = status,
-                    testUrl = if (testId.isNotEmpty()) "$baseUrl/meol/common/question/test/student/test_start.jsp?testId=$testId" else ""
+                    testUrl = resolvedTestListUrl,
+                    resultHref = resultHref
                 )
             )
         }
         return result
+    }
+
+    /** 解析单个在线测验详情页（view.jsp?testId=...） */
+    fun parseTestDetail(
+        html: String,
+        testId: String,
+        nowMillis: Long
+    ): TheolTestDetail {
+        val doc = Jsoup.parse(html, BASE_URL)
+        val title = doc.selectFirst("h1, h2, h3, .title")?.text()?.trim().orEmpty()
+        val description = doc.selectFirst("div.content, div.description")?.text()?.trim().orEmpty()
+            .ifEmpty { doc.selectFirst("div#body")?.text()?.trim().orEmpty() }
+
+        var startTime = ""
+        var endTime = ""
+        var duration = ""
+        var totalScore = ""
+        var questionCount = ""
+
+        for (tr in doc.select("table.info tr, table.infotable tr, table.valuelist tr")) {
+            val cells = tr.select("> th, > td")
+            if (cells.size < 2) continue
+            val key = cells[0].text().trim()
+            val value = cells[1].text().trim()
+            when {
+                key.contains("开始时间") && startTime.isEmpty() -> startTime = value
+                key.contains("结束时间") && endTime.isEmpty() -> endTime = value
+                (key.contains("持续时间") || key.contains("考试时长")) && duration.isEmpty() -> duration = value
+                key.contains("总分") && totalScore.isEmpty() -> totalScore = value
+                (key.contains("题目数") || key.contains("问题数")) && questionCount.isEmpty() -> questionCount = value
+            }
+        }
+
+        return TheolTestDetail(
+            testId = testId,
+            title = title,
+            description = description,
+            startTime = startTime,
+            endTime = endTime,
+            duration = duration,
+            totalScore = totalScore,
+            questionCount = questionCount,
+            fetchedAt = nowMillis
+        )
     }
 
     fun parseDeadlineMillis(raw: String): Long? {
@@ -525,20 +581,37 @@ object TheolParser {
         if (a.hasAttr("disabled")) return ""
         if (a.attr("aria-disabled").equals("true", ignoreCase = true)) return ""
         if (a.attr("class").lowercase(Locale.ROOT).contains("disabled")) return ""
-        val href = a.attr("href").trim()
-        if (href.isEmpty() || href.startsWith("#")) return ""
+        return resolveHttpUrl(a.attr("href"), sourceUrl)
+    }
+
+    private fun resolveHttpUrl(rawHref: String, sourceUrl: String): String {
+        val href = rawHref.trim()
+        if (href.isEmpty() || href.startsWith("#") || href.startsWith("javascript:", true)) return ""
         return runCatching {
             val resolved = URL(URL(sourceUrl), href)
-            if (resolved.protocol == "http" || resolved.protocol == "https") resolved.toString() else ""
+            if (resolved.protocol == "http" || resolved.protocol == "https") {
+                upgradeCourseScheme(resolved.toString())
+            } else {
+                ""
+            }
         }.getOrDefault("")
     }
 
-    private fun extractHwtid(href: String): String {
+    private fun upgradeCourseScheme(url: String): String =
+        if (url.startsWith("http://course.buct.edu.cn", ignoreCase = true)) {
+            "https://" + url.removePrefix("http://")
+        } else {
+            url
+        }
+
+    private fun extractHwtid(href: String): String = extractPositiveIdParam(href, "hwtid")
+
+    private fun extractPositiveIdParam(href: String, paramName: String): String {
         if (href.isEmpty()) return ""
         val query = runCatching { URI(href).rawQuery }.getOrNull().orEmpty()
         val id = query.split('&')
-            .firstOrNull { it.startsWith("hwtid=") }
-            ?.substringAfter("hwtid=")
+            .firstOrNull { it.startsWith("$paramName=") }
+            ?.substringAfter("$paramName=")
             ?.trim()
             .orEmpty()
         if (id.isEmpty() || !id.all(Char::isDigit) || id.all { it == '0' }) return ""

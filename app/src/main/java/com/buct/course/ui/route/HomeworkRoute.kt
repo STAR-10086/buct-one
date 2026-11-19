@@ -76,9 +76,11 @@ import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.TheolFilterPrefs
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
+import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
 import com.buct.one.data.sync.TheolSyncService
 import kotlinx.coroutines.launch
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -104,6 +106,7 @@ fun HomeworkRoute() {
     var showFilterManageDialog by rememberSaveable { mutableStateOf(false) }
     var pendingBlacklistCourse by remember { mutableStateOf<Pair<String, String>?>(null) }
     var selectedHomeworkForDetail by remember { mutableStateOf<TheolHomeworkItem?>(null) }
+    var selectedTestForDetail by remember { mutableStateOf<TheolTestItem?>(null) }
     var feedbackMsg by remember { mutableStateOf<String?>(null) }
     var autoTried by rememberSaveable { mutableStateOf(false) }
 
@@ -361,16 +364,15 @@ fun HomeworkRoute() {
                         items(tests, key = { "${it.lid}:${it.testId}" }) { test ->
                             TestGlassCard(
                                 test = test,
+                                onOpenDetail = { selectedTestForDetail = test },
                                 onOpenTest = {
-                                    if (test.testUrl.isNotBlank()) {
-                                        TheolSubmitWebViewActivity.launch(
-                                            context = context,
-                                            url = test.testUrl,
-                                            title = test.title,
-                                            courseName = test.courseName,
-                                            courseLid = test.lid
-                                        )
-                                    }
+                                    TheolSubmitWebViewActivity.launch(
+                                        context = context,
+                                        url = resolveSafeTestUrl(test),
+                                        title = test.title,
+                                        courseName = test.courseName,
+                                        courseLid = test.lid
+                                    )
                                 },
                                 onHideTest = { service.hideTest(test.lid, test.testId) },
                                 onBlacklistCourse = {
@@ -431,6 +433,45 @@ fun HomeworkRoute() {
                     title = attachment.name,
                     courseName = hw.courseName,
                     courseLid = hw.lid
+                )
+            }
+        )
+    }
+
+    selectedTestForDetail?.let { test ->
+        TestDetailDialog(
+            test = test,
+            service = service,
+            onDismiss = { selectedTestForDetail = null },
+            onOpenTestList = {
+                selectedTestForDetail = null
+                TheolSubmitWebViewActivity.launch(
+                    context = context,
+                    url = resolveSafeTestUrl(test),
+                    title = test.title,
+                    courseName = test.courseName,
+                    courseLid = test.lid
+                )
+            },
+            onOpenResult = { resultUrl ->
+                selectedTestForDetail = null
+                TheolSubmitWebViewActivity.launch(
+                    context = context,
+                    url = resultUrl,
+                    title = "${test.title} · 成绩结果",
+                    courseName = test.courseName,
+                    courseLid = test.lid
+                )
+            },
+            onOpenCourseHome = {
+                selectedTestForDetail = null
+                val courseUrl = "https://course.buct.edu.cn/meol/jpk/course/layout/newpage/index.jsp?courseId=${URLEncoder.encode(test.lid, "UTF-8")}"
+                TheolSubmitWebViewActivity.launch(
+                    context = context,
+                    url = courseUrl,
+                    title = test.courseName.ifBlank { "课程主页" },
+                    courseName = test.courseName,
+                    courseLid = test.lid
                 )
             }
         )
@@ -893,14 +934,38 @@ private fun HomeworkDetailDialog(
     )
 }
 
+private fun resolveSafeTestUrl(test: TheolTestItem): String {
+    val raw = test.testUrl.trim()
+    if (raw.isNotEmpty() && !raw.contains("test_start.jsp", ignoreCase = true)) {
+        return if (raw.startsWith("http://course.buct.edu.cn", ignoreCase = true)) {
+            "https://" + raw.removePrefix("http://")
+        } else {
+            raw
+        }
+    }
+    if (test.lid.isNotBlank()) {
+        val encodedLid = URLEncoder.encode(test.lid.trim(), "UTF-8")
+        return "https://course.buct.edu.cn/meol/common/question/test/student/list.jsp" +
+            "?sortColumn=createTime&status=1&tagbug=client&sortDirection=-1&strStyle=new03" +
+            "&cateId=$encodedLid&pagingPage=1&pagingNumberPer=30"
+    }
+    return "https://course.buct.edu.cn/meol/welcomepage/student/index.jsp"
+}
+
 @Composable
 private fun TestGlassCard(
     test: TheolTestItem,
+    onOpenDetail: () -> Unit,
     onOpenTest: () -> Unit,
     onHideTest: () -> Unit,
     onBlacklistCourse: () -> Unit
 ) {
     val shape = RoundedCornerShape(24.dp)
+    val badgeColor = when {
+        test.canStart -> Color(0xFFFF453A)
+        test.hasResult || test.status == "已完成" -> Color(0xFF34C759)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     var menuExpanded by remember { mutableStateOf(false) }
 
     Column(
@@ -909,7 +974,7 @@ private fun TestGlassCard(
             .clip(shape)
             .background(glassSurfaceColor())
             .border(0.5.dp, glassBorderColor(), shape)
-            .then(if (test.testUrl.isNotBlank()) Modifier.clickable(onClick = onOpenTest) else Modifier)
+            .clickable(onClick = onOpenDetail)
             .padding(start = 16.dp, end = 10.dp, top = 14.dp, bottom = 14.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -919,7 +984,7 @@ private fun TestGlassCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = test.courseName,
+                text = test.courseName.ifBlank { "北化在线课程" },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
@@ -930,11 +995,18 @@ private fun TestGlassCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Text(
-                    text = test.status,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (test.canStart) Color(0xFFFF453A) else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(badgeColor.copy(alpha = 0.14f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = test.status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = badgeColor
+                    )
+                }
                 Box {
                     Icon(
                         imageVector = Icons.Outlined.MoreVert,
@@ -950,15 +1022,20 @@ private fun TestGlassCard(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false }
                     ) {
-                        if (test.testUrl.isNotBlank()) {
-                            DropdownMenuItem(
-                                text = { Text("打开测验页面") },
-                                onClick = {
-                                    menuExpanded = false
-                                    onOpenTest()
-                                }
-                            )
-                        }
+                        DropdownMenuItem(
+                            text = { Text("查看测验详情") },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenDetail()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("直接进入测验") },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenTest()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("隐藏此测验") },
                             onClick = {
@@ -988,13 +1065,250 @@ private fun TestGlassCard(
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(end = 6.dp)
         )
-        Text(
-            text = "时间：${test.startTime} ~ ${test.endTime}${if (test.duration.isNotBlank()) " · 时长 ${test.duration}" else ""}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(end = 6.dp)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "时间：${test.startTime} ~ ${test.endTime}${if (test.duration.isNotBlank()) " · 时长 ${test.duration}" else ""}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "查看详情 ›",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
     }
+}
+
+@Composable
+private fun TestDetailDialog(
+    test: TheolTestItem,
+    service: TheolSyncService,
+    onDismiss: () -> Unit,
+    onOpenTestList: () -> Unit,
+    onOpenResult: (String) -> Unit,
+    onOpenCourseHome: () -> Unit
+) {
+    var detail by remember(test.lid, test.testId) { mutableStateOf<TheolTestDetail?>(null) }
+    var loading by remember(test.lid, test.testId) { mutableStateOf(true) }
+    var errorMsg by remember(test.lid, test.testId) { mutableStateOf<String?>(null) }
+    var reloadTick by remember(test.lid, test.testId) { mutableIntStateOf(0) }
+
+    LaunchedEffect(test.lid, test.testId, reloadTick) {
+        loading = true
+        errorMsg = null
+        val res = service.fetchTestDetail(test, forceRefresh = reloadTick > 0)
+        if (res.isSuccess) {
+            detail = res.getOrNull()
+        } else {
+            errorMsg = res.exceptionOrNull()?.message ?: "加载测验详情失败"
+        }
+        loading = false
+    }
+
+    val statusColor = when {
+        test.canStart -> Color(0xFFFF453A)
+        test.hasResult || test.status == "已完成" -> Color(0xFF34C759)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val startDisplay = detail?.startTime?.ifBlank { null } ?: test.startTime.ifBlank { "未标注" }
+    val endDisplay = detail?.endTime?.ifBlank { null } ?: test.endTime.ifBlank { "未标注" }
+    val durationDisplay = detail?.duration?.ifBlank { null } ?: test.duration
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = test.courseName.ifBlank { "北化在线课程" },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = detail?.title?.ifBlank { null } ?: test.title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(statusColor.copy(alpha = 0.14f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = test.status,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor
+                        )
+                    }
+                    if (test.allowedAttempts.isNotBlank()) {
+                        Text(
+                            text = "允许次数：${test.allowedAttempts}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "开放时间：$startDisplay ~ $endDisplay",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (durationDisplay.isNotBlank()) {
+                        Text(
+                            text = "考试时长：$durationDisplay",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    detail?.totalScore?.takeIf { it.isNotBlank() }?.let { total ->
+                        Text(
+                            text = "测验总分：$total",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    detail?.questionCount?.takeIf { it.isNotBlank() }?.let { count ->
+                        Text(
+                            text = "题目数量：$count",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (test.resultHref.isNotBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                            .clickable { onOpenResult(test.resultHref) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "查看答题结果与批改详情",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.OpenInNew,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
+                HorizontalDivider()
+
+                when {
+                    loading -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = "正在获取测验说明…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    errorMsg != null -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "未能读取详细说明：$errorMsg",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFFF453A)
+                            )
+                            Text(
+                                text = "仍可点击下方「进入测验」直接前往北化在线测验列表页。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(
+                                onClick = { reloadTick++ },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("重试拉取详情")
+                            }
+                        }
+                    }
+                    else -> {
+                        val desc = detail?.description.orEmpty()
+                        if (desc.isNotBlank()) {
+                            SelectionContainer {
+                                Text(
+                                    text = desc,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "老师未填写额外说明，可点击下方按钮打开北化在线测验列表页查看或答题。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (test.lid.isNotBlank()) {
+                    TextButton(onClick = onOpenCourseHome) {
+                        Text("课程主页")
+                    }
+                }
+                Button(onClick = onOpenTestList) {
+                    Text("进入测验")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        }
+    )
 }
 
 @Composable

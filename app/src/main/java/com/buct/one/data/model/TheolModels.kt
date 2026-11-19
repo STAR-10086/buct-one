@@ -56,7 +56,20 @@ data class TheolTestItem(
     val canStart: Boolean = false,
     val hasResult: Boolean = false,
     val status: String = "",
-    val testUrl: String = ""
+    val testUrl: String = "",
+    val resultHref: String = ""
+)
+
+data class TheolTestDetail(
+    val testId: String,
+    val title: String = "",
+    val description: String = "",
+    val startTime: String = "",
+    val endTime: String = "",
+    val duration: String = "",
+    val totalScore: String = "",
+    val questionCount: String = "",
+    val fetchedAt: Long = 0L
 )
 
 data class TheolSnapshot(
