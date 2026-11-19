@@ -87,10 +87,12 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           if [ -n "${KEYSTORE_BASE64:-}" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n' | base64 -d > "$RUNNER_TEMP/release.jks"
             {
               echo "RELEASE_SIGNING_CONFIG_FILE=$RUNNER_TEMP/release.jks"
               echo "RELEASE_STORE_PASSWORD=$STORE_PASSWORD"
@@ -99,6 +101,10 @@ jobs:
             } >> "$GITHUB_ENV"
             echo "签名：正式（secrets 已配置）"
           else
+            if [ "${PUBLISH_RELEASE:-false}" = "true" ] && [[ "${RELEASE_TAG:-}" != *-* ]]; then
+              echo "::error::正式版发布必须配置正式签名 secrets，拒绝使用临时签名发布"
+              exit 1
+            fi
             keytool -genkeypair -v -keystore "$RUNNER_TEMP/ci-release.jks" -alias ci \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass android -keypass android -dname "CN=buct-one CI" > /dev/null 2>&1
@@ -132,6 +138,12 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK signature
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs "$APK"
 
       - name: APK size gate (100MB)
         run: |
@@ -188,6 +200,14 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
+      - name: Prepare release APK filename
+        if: inputs.publish_release == true && inputs.release_tag != ''
+        run: |
+          set -euo pipefail
+          mkdir -p release-dist
+          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          cp "$APK" "release-dist/buct-one-${{ inputs.release_tag }}.apk"
+
       - name: Publish to Release
         if: inputs.publish_release == true && inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
@@ -195,5 +215,5 @@ jobs:
           tag_name: ${{ inputs.release_tag }}
           name: "BUCT One ${{ inputs.release_tag }}"
           prerelease: ${{ contains(inputs.release_tag, '-') }}
-          files: app/build/outputs/apk/release/*.apk
+          files: release-dist/buct-one-${{ inputs.release_tag }}.apk
           fail_on_unmatched_files: true

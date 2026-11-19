@@ -12,7 +12,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-7c3aed?style=flat-square)](https://developer.android.com/compose)
 [![CI](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/build-apk.yml?style=flat-square)](https://github.com/STAR-10086/buct-one/actions/workflows/build-apk.yml)
 
-[下载测试版 (Releases)](https://github.com/STAR-10086/buct-one/releases) · [上游声明 (NOTICE)](NOTICE) · [规划](docs/规划.md) · [数据层设计](docs/plan-1-data-layer.md)
+[下载正式版 (Releases)](https://github.com/STAR-10086/buct-one/releases) · [上游声明 (NOTICE)](NOTICE) · [规划](docs/规划.md) · [数据层设计](docs/plan-1-data-layer.md)
 
 </div>
 
@@ -29,7 +29,7 @@
 - [x] 周视图与日视图，课程名称、教师、地点完整显示
 - [x] 学年与三学期切换（第一学期 / 第二学期 / 小学期，修复春季标签错位并支持切换往年课表）
 - [x] 课程详情查看与自定义课程 / 课前提醒
-- [x] 桌面小组件（最小支持 2×2，周课表与可上下滑动、按行数限流的今日课表）
+- [x] 桌面小组件（最小支持 2×2，周课表与可上下滑动、按当前时间自动隐藏已上完课程、按行数限流的今日课表）
 - [x] 小组件支持隐藏顶部标题、自定义字号，并动态同步用户设置的开学第一周与学期
 - [x] 日历导出（ICS）与多账号切换
 
@@ -43,15 +43,15 @@
 
 - [x] 复用教务统一身份认证（`sidportal.buct.edu.cn`）会话凭证免二次登录
 - [x] 待交作业与全部作业列表，自动过滤已超时/已完成状态
-- [x] 点击作业卡片先查看原生抓取的作业要求与附件，再通过内嵌 WebView 复用会话与课程上下文交作业
+- [x] 点击作业卡片先查看原生抓取的作业要求与附件，支持作业附件原生下载与系统应用打开，再通过内嵌 WebView 复用会话与课程上下文交作业
 - [x] 手动删除/隐藏单条作业，或将已退课程加入黑名单不再显示
-- [x] 在线测验安排与本地自定义待办
+- [x] 在线测验详情查看、课程主页直达与本地自定义待办
 - [ ] 全量课程资料目录浏览与课程通知聚合
 
 ### 工作台与校园工具
 
-- [x] 工作台首屏：下一节课、今日课程、待办作业与测验概览、教学周提示
-- [x] 空闲教室查询（含选课/已选课程浏览）
+- [x] 工作台首屏：教务真实姓名展示、下一节课、今日课程、待办作业与测验概览、教学周提示
+- [x] 空闲教室查询（工作台独立入口 + 课表空白格点击，含选课/已选课程浏览）
 - [ ] 场馆状态、体测成绩估算、创新与第二课堂学分计算
 
 ### 邮箱、通知与消息
@@ -68,7 +68,7 @@
 - [x] 凭据由 `Android Keystore`（AES-GCM）加密存储，且从系统自动备份中排除 vault 文件
 - [x] 全链校方 TLS 校验（`BuctTlsTrustManager`），绝不跳过证书或主机名验证
 - [x] 全云端 GitHub Actions CI + 包依赖静态规则门禁 + 100MB APK 体积门禁
-- [ ] 正式发布签名接入（当前 `ci-*` 与 `beta` 包使用 CI 临时签名，详情见 [签名接入](docs/签名接入.md)）
+- [x] 正式发布签名接入（已启用正式发布签名构建与 Release 发布，详情见 [签名接入](docs/签名接入.md)）
 
 ## 数据怎么走
 
@@ -104,7 +104,7 @@ model/    → 零依赖
 | 数据存储 | 分片 JSON 原子落盘 + `SharedPreferences` + 私有文件离线缓存 |
 | 网络与安全 | OkHttp + BouncyCastle SM2 + `BuctTlsTrustManager` 校方证书链 |
 | 凭据保护 | `Android Keystore`（AES-GCM），学号密码绝不落盘 |
-| 体积门禁 | 上限 100MB（80MB 预警），当前测试版约 13MB |
+| 体积门禁 | 上限 100MB（80MB 预警），当前正式版约 13MB |
 
 ## 从源码构建
 
