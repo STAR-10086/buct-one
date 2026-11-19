@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.ManageAccounts
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -108,7 +109,9 @@ fun SettingsScreen(
     onFeedbackClick: () -> Unit = {},
     widgetCount: Int = 0,
     onWidgetManage: () -> Unit = {},
-    onFriendsClick: () -> Unit = {}
+    onFriendsClick: () -> Unit = {},
+    permissionSummary: String = "通知与定时提醒权限",
+    onPermissionClick: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
     // 折叠进度随滚动偏移连续变化（约 96px 行程），全程跟手
@@ -120,8 +123,8 @@ fun SettingsScreen(
         topBar = {
             Box(Modifier.moduleEntrance(0)) {
             SystemTopBar(
-                title = "设置",
-                subtitle = "账号、外观与应用偏好",
+                title = "我的",
+                subtitle = "账号、外观与权限偏好",
                 collapseFraction = headerCollapse
             )
             }
@@ -176,16 +179,9 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.Outlined.School,
                     iconTint = Color(0xFF0A84FF),
-                    title = "学校选择",
-                    subtitle = schoolName.ifBlank { "未选择学校" },
+                    title = "教务系统（本科 / 研究生）",
+                    subtitle = schoolName.ifBlank { "未选择系统" },
                     onClick = onSchoolSelect
-                )
-                SettingsRow(
-                    icon = Icons.Outlined.AssignmentInd,
-                    iconTint = if (isSuper) Color(0xFF34C759) else Color(0xFF5E5CE6),
-                    title = "配额 / 身份",
-                    subtitle = if (isSuper) "超级用户 · 无限制" else quotaInfo.ifBlank { "普通用户" },
-                    onClick = onQuotaClick
                 )
                 SettingsRow(
                     icon = Icons.Outlined.ManageAccounts,
@@ -287,6 +283,13 @@ fun SettingsScreen(
 
             InsetGroupedSection(Modifier.moduleEntrance(3), header = "数据与安全") {
                 SettingsRow(
+                    icon = Icons.Outlined.NotificationsActive,
+                    iconTint = Color(0xFF34C759),
+                    title = "通知与系统权限",
+                    subtitle = permissionSummary,
+                    onClick = onPermissionClick
+                )
+                SettingsRow(
                     icon = Icons.Outlined.Delete,
                     iconTint = Color(0xFFFF9F0A),
                     title = "清除缓存",
@@ -379,25 +382,11 @@ private fun SettingsHeader(
             }
         }
 
-        androidx.compose.foundation.layout.FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (isSuper) {
-                SystemStatusBadge(
-                    text = "超级用户",
-                    tone = SystemTone.Success
-                )
-            }
-            if (quotaInfo.isNotBlank()) {
-                Box(modifier = Modifier.clickable(onClick = onQuotaClick)) {
-                    SystemStatusBadge(
-                        text = if (isSuper) "无限制" else "配额 $quotaInfo",
-                        tone = if (isSuper) SystemTone.Info else SystemTone.Neutral
-                    )
-                }
-            }
-            if (canRefreshCookie) {
+        if (canRefreshCookie) {
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Box(
                     modifier = Modifier.clickable(
                         enabled = !isRefreshingCookie,

@@ -141,8 +141,40 @@ fun SettingsRoute(
     var feedbackUnread by remember { mutableIntStateOf(0) }
     var showWidgetSettings by remember { mutableStateOf(false) }
     var showFriends by remember { mutableStateOf(false) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
+    var permissionRefreshTick by remember { mutableIntStateOf(0) }
     var widgetCount by remember {
         mutableIntStateOf(com.buct.course.ui.screen.listWidgetInstances(context).size)
+    }
+
+    val notificationGranted = remember(permissionRefreshTick, showPermissionDialog) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+        }
+    }
+    val exactAlarmGranted = remember(permissionRefreshTick, showPermissionDialog) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val am = context.getSystemService(android.content.Context.ALARM_SERVICE) as? android.app.AlarmManager
+            am?.canScheduleExactAlarms() == true
+        } else {
+            true
+        }
+    }
+    val permissionSummary = remember(notificationGranted, exactAlarmGranted) {
+        val notif = if (notificationGranted) "通知已开启" else "通知未授权"
+        val alarm = if (exactAlarmGranted) "精确闹钟已允许" else "精确闹钟未允许"
+        "$notif · $alarm"
+    }
+    val requestNotificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        permissionRefreshTick++
+        GlassToaster.show(if (granted) "通知权限已开启" else "未授予通知权限，可在系统设置中开启")
     }
 
     // 从小组件管理页回来时重新数一遍（用户可能在桌面增删过实例）
@@ -372,7 +404,9 @@ fun SettingsRoute(
         },
         widgetCount = widgetCount,
         onWidgetManage = { showWidgetSettings = true },
-        onFriendsClick = { showFriends = true }
+        onFriendsClick = { showFriends = true },
+        permissionSummary = permissionSummary,
+        onPermissionClick = { showPermissionDialog = true }
     )
 
     if (showFriends) {
@@ -429,7 +463,149 @@ fun SettingsRoute(
         )
     }
 
-    // Dialogs
+    if (showPermissionDialog) {
+        SystemDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            title = {
+                Text(
+                    text = "通知与系统权限",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            confirmButton = {
+                SystemPrimaryButton(
+                    text = "完成",
+                    onClick = { showPermissionDialog = false },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "通知权限",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (notificationGranted) "已授予 · 可发送课前/考试/DDL提醒" else "未开启 · 将无法弹出课前和DDL提醒",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU && !notificationGranted) {
+                                requestNotificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                }
+                                runCatching { context.startActivity(intent) }
+                                    .onFailure {
+                                        context.startActivity(
+                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                data = android.net.Uri.parse("package:${context.packageName}")
+                                            }
+                                        )
+                                    }
+                            }
+                        }
+                    ) {
+                        Text(if (notificationGranted) "系统设置" else "去授权")
+                    }
+                }
+
+                SystemDivider()
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "精确闹钟权限",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (exactAlarmGranted) "已允许 · 准时触发提醒与小组件刷新" else "未允许 · 课前提醒可能延迟",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                val intent = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                    data = android.net.Uri.parse("package:${context.packageName}")
+                                }
+                                runCatching { context.startActivity(intent) }
+                                    .onFailure {
+                                        context.startActivity(
+                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                data = android.net.Uri.parse("package:${context.packageName}")
+                                            }
+                                        )
+                                    }
+                            } else {
+                                GlassToaster.show("当前系统版本无需单独授予精确闹钟权限")
+                            }
+                        }
+                    ) {
+                        Text(if (exactAlarmGranted) "管理" else "去开启")
+                    }
+                }
+
+                SystemDivider()
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "应用完整权限设置",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "若跳转企业微信/电池优化受限，可在此调整权限与自启动",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            context.startActivity(
+                                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = android.net.Uri.parse("package:${context.packageName}")
+                                }
+                            )
+                        }
+                    ) {
+                        Text("打开")
+                    }
+                }
+            }
+        }
+    }
+
     if (showLogoutDialog) {
         SimpleConfirmDialog(
             title = "退出登录",
@@ -486,7 +662,7 @@ fun SettingsRoute(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "由 STAR-10086 维护的北京化工大学本地优先校园工作台，集成教务课表、成绩考试与北化在线作业，按 GPL-3.0 开源发布，无任何后台信息上报。",
+                    text = "北京化工大学校园工作台（Android / Kotlin + Compose），由 STAR-10086 维护。\n集成教务课表与桌面小组件、成绩分析与培养方案、北化在线（THEOL/MEOL）原生作业测验同步、校园一卡通、实践教学与第二课堂五育成绩，按 GPL-3.0 开源发布，纯本地存储、零第三方上报。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 20.sp
@@ -607,7 +783,7 @@ fun SettingsRoute(
             onDismissRequest = { dismiss() },
             title = {
                 Text(
-                    text = "选择学校",
+                    text = "选择教务系统",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface

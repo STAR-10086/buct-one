@@ -10,7 +10,7 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.People
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -33,7 +33,7 @@ enum class AppSymbolSpec(val outline: ImageVector) {
     Grab(Icons.Outlined.MyLocation),
     Friends(Icons.Outlined.People),
     Grades(Icons.Outlined.BarChart),
-    Settings(Icons.Outlined.Settings)
+    Settings(Icons.Outlined.Person)
 }
 
 /** Animation state is owned once by the navigation, including its optical sampling copy. */
@@ -45,7 +45,7 @@ fun AppSymbol(spec: AppSymbolSpec, progress: Float, tint: Color, modifier: Modif
         AppSymbolSpec.Grab -> AnimatedIconSpec.Target
         AppSymbolSpec.Friends -> AnimatedIconSpec.Person
         AppSymbolSpec.Grades -> AnimatedIconSpec.Grades
-        AppSymbolSpec.Settings -> AnimatedIconSpec.Settings
+        AppSymbolSpec.Settings -> AnimatedIconSpec.Person
         AppSymbolSpec.Dashboard, AppSymbolSpec.Homework -> null
     }
     if (lineSpec != null) {
