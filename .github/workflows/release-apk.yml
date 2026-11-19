@@ -12,5 +12,6 @@ jobs:
   release:
     uses: ./.github/workflows/build-apk.yml
     with:
+      publish_release: true
       release_tag: ${{ github.ref_name }}
     secrets: inherit
