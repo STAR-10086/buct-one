@@ -2,6 +2,7 @@ package com.buct.course.ui.route
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Assignment
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.MeetingRoom
 import androidx.compose.material.icons.outlined.Refresh
@@ -47,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.buct.course.EcardActivity
 import com.buct.course.manager.ScheduleSettingsManager
 import com.buct.course.manager.StartupPage
 import com.buct.course.manager.UserManager
@@ -58,6 +61,8 @@ import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.course.widget.WidgetScheduleSource
 import com.buct.course.widget.parseClockMinutes
 import com.buct.one.data.model.RefreshState
+import com.buct.one.data.model.formatFenToYuan
+import com.buct.one.data.sync.CardSyncService
 import com.buct.one.data.sync.TheolSyncService
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -86,6 +91,10 @@ fun DashboardRoute(
     val localTodos by theolService.todosState.collectAsState()
     val filterPrefs by theolService.filterPrefs.collectAsState()
     val syncing by theolService.syncing.collectAsState()
+    val cardService = remember(context) { CardSyncService.getInstance(context) }
+    val cardSlice by cardService.cardState.collectAsState()
+    val cardHasSession by cardService.hasSession.collectAsState()
+    val cardSyncing by cardService.syncing.collectAsState()
     var showEmptyClassroomDialog by remember { mutableStateOf(false) }
     val classroomSlot = remember(showEmptyClassroomDialog) { resolveCurrentClassroomSlot(context) }
     val classroomDayLabel = listOf("一", "二", "三", "四", "五", "六", "日")
@@ -162,8 +171,11 @@ fun DashboardRoute(
                         .clip(CircleShape)
                         .background(glassSurfaceColor())
                         .border(0.5.dp, glassBorderColor(), CircleShape)
-                        .clickable(enabled = !syncing) {
+                        .clickable(enabled = !syncing && !cardSyncing) {
                             scope.launch { theolService.refreshIfSessionValid() }
+                            if (cardHasSession) {
+                                scope.launch { cardService.refresh() }
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -291,7 +303,106 @@ fun DashboardRoute(
             }
         }
 
-        // 卡片 2：快捷入口网格与查空闲教室
+        // 卡片 2：校园卡余额与近期消费流水（ecard.buct.edu.cn 独立认证）
+        item {
+            val cardData = cardSlice.data
+            DashboardGlassCard(
+                title = "校园卡 · 余额与流水",
+                badge = when {
+                    cardSlice.provenance.refreshState == RefreshState.NEVER -> "未登录"
+                    cardSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK -> "同步失败·显示旧数据"
+                    !cardHasSession && cardData != null -> "会话过期"
+                    cardSlice.provenance.refreshState == RefreshState.EMPTY_CONFIRMED -> "暂无流水"
+                    cardSlice.provenance.refreshState == RefreshState.STALE -> "历史快照"
+                    else -> "最新"
+                },
+                badgeColor = when {
+                    cardSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK -> Color(0xFFFF453A)
+                    !cardHasSession && cardData != null -> Color(0xFFFF9500)
+                    cardSlice.provenance.refreshState == RefreshState.NEVER -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.primary
+                },
+                onClick = {
+                    context.startActivity(Intent(context, EcardActivity::class.java))
+                }
+            ) {
+                if (cardData == null) {
+                    Text(
+                        text = "校园卡平台（ecard.buct.edu.cn）独立于统一身份认证，默认密码一般为身份证后六位。点击登录即可查看实时余额与消费流水。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "¥ ${formatFenToYuan(cardData.account.balanceFen)}",
+                                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${cardData.account.cardTypeName} · ${cardData.account.statusLabel} · ${cardData.account.maskedId}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Outlined.CreditCard,
+                            contentDescription = "进入校园卡",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    if (cardData.transactions.isEmpty()) {
+                        Text(
+                            text = "近期暂无消费或充值记录，点击查看详情",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        cardData.transactions.take(2).forEach { tx ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${tx.title} · ${tx.formattedTime.substringBefore(' ')}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "¥ ${formatFenToYuan(tx.amountFen)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+                if (!cardSlice.lastError.isNullOrBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "提示：${cardSlice.lastError}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFFF453A)
+                    )
+                }
+            }
+        }
+
+        // 卡片 3：快捷入口网格与查空闲教室
         item {
             DashboardGlassCard(
                 title = "校园入口",

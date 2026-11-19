@@ -19,6 +19,7 @@ class KeystoreCipher(private val alias: String) {
         const val ALIAS_SSO = "buct_sso_master_key"
         const val ALIAS_MAIL = "buct_mail_master_key"
         const val ALIAS_WECOM = "buct_wecom_master_key"
+        const val ALIAS_ECARD = "buct_ecard_master_key"
 
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"

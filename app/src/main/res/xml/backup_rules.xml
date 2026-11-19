@@ -5,6 +5,7 @@
     <exclude domain="file" path="vault/sso_vault.enc" />
     <exclude domain="file" path="vault/mail_vault.enc" />
     <exclude domain="file" path="vault/wecom_vault.enc" />
+    <exclude domain="file" path="vault/ecard_vault.enc" />
     <exclude domain="sharedpref" path="buct_sso_vault.xml" />
     <exclude domain="sharedpref" path="buct_mail_vault.xml" />
     <exclude domain="sharedpref" path="buct_wecom_vault.xml" />
