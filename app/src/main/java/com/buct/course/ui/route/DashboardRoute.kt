@@ -527,6 +527,8 @@ fun DashboardRoute(
     val cardService = remember(context) { CardSyncService.getInstance(context) }
     val cardSlice by cardService.cardState.collectAsState()
     val cardHasSession by cardService.hasSession.collectAsState()
+    val cardHasSavedPassword by cardService.hasSavedPassword.collectAsState()
+    val cardCanAutoSync = cardHasSession || cardHasSavedPassword
     val cardSyncing by cardService.syncing.collectAsState()
 
     val sjcxService = remember(context) { SjcxSyncService.getInstance(context) }
@@ -751,7 +753,7 @@ fun DashboardRoute(
                             if (mailService.canAutoSync()) {
                                 scope.launch { mailService.refresh(userInitiated = true) }
                             }
-                            if (cardHasSession) {
+                            if (cardService.canAutoSync()) {
                                 scope.launch { cardService.refresh() }
                             }
                         }
@@ -1062,7 +1064,7 @@ fun DashboardRoute(
                                     pendingTests = pendingTests,
                                     activeLocalTodos = activeLocalTodos,
                                     cardSlice = cardSlice,
-                                    cardHasSession = cardHasSession,
+                                    cardHasSession = cardCanAutoSync,
                                     sjcxSlice = sjcxSlice,
                                     scsSlice = scsSlice,
                                     tyglSlice = tyglSlice,

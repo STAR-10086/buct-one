@@ -74,6 +74,7 @@ import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassLoadingState
 import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassTextField
+import com.buct.course.ui.system.LiquidSwitch
 import com.buct.course.ui.system.SystemCompactSegmentedControl
 import com.buct.course.ui.system.SystemDestructiveButton
 import com.buct.course.ui.system.SystemDialog
@@ -128,6 +129,8 @@ class EcardActivity : ComponentActivity() {
                 val cardSlice by cardService.cardState.collectAsState()
                 val syncing by cardService.syncing.collectAsState()
                 val hasSession by cardService.hasSession.collectAsState()
+                val hasSavedPassword by cardService.hasSavedPassword.collectAsState()
+                val canAutoSync = hasSession || hasSavedPassword
                 val scope = rememberCoroutineScope()
 
                 var forceLoginScreen by remember { mutableStateOf(false) }
@@ -137,18 +140,18 @@ class EcardActivity : ComponentActivity() {
                 var showLogoutConfirm by remember { mutableStateOf(false) }
 
                 LaunchedEffect(Unit) {
-                    if (hasSession && !forceLoginScreen) {
+                    if (canAutoSync && !forceLoginScreen) {
                         val (start, end) = selectedRange.resolveDates()
                         currentPage = 0
                         cardService.refresh(startDate = start, endDate = end, pageSize = PAGE_SIZE)
                     }
                 }
 
-                val showLoginScreen = forceLoginScreen || (!hasSession && (cardSlice.data == null || !allowCachedPreview))
+                val showLoginScreen = forceLoginScreen || (!canAutoSync && (cardSlice.data == null || !allowCachedPreview))
 
                 GlassPageScaffold(
                     title = if (showLoginScreen) "登录校园卡" else "校园一卡通",
-                    subtitle = if (showLoginScreen) "ecard.buct.edu.cn · 独立认证" else "实时余额与消费流水",
+                    subtitle = if (showLoginScreen) "ecard.buct.edu.cn · Keystore 加密存储" else "实时余额与消费流水",
                     onBack = {
                         if (forceLoginScreen && cardSlice.data != null) {
                             forceLoginScreen = false
@@ -166,7 +169,7 @@ class EcardActivity : ComponentActivity() {
                                     contentDescription = "刷新",
                                     tint = MaterialTheme.colorScheme.primary,
                                     onClick = {
-                                        if (hasSession) {
+                                        if (canAutoSync) {
                                             val (start, end) = selectedRange.resolveDates()
                                             currentPage = 0
                                             scope.launch {
@@ -201,7 +204,7 @@ class EcardActivity : ComponentActivity() {
                             EcardLoginPane(
                                 initialId = prefillId,
                                 hasCachedSnapshot = cardSlice.data != null,
-                                sessionExpiredMessage = if (!hasSession && cardSlice.data != null) {
+                                sessionExpiredMessage = if (!canAutoSync && cardSlice.data != null) {
                                     cardSlice.lastError ?: "校园卡会话已过期，请重新登录以刷新最新余额"
                                 } else null,
                                 syncing = syncing,
@@ -211,13 +214,14 @@ class EcardActivity : ComponentActivity() {
                                     forceLoginScreen = false
                                     allowCachedPreview = true
                                 },
-                                onSubmit = { idserial, passwordChars, onDone ->
+                                onSubmit = { idserial, passwordChars, rememberPassword, onDone ->
                                     scope.launch {
                                         val res = cardService.loginAndSync(
                                             idserial = idserial,
                                             password = passwordChars,
                                             rangeDays = 30,
-                                            pageSize = PAGE_SIZE
+                                            pageSize = PAGE_SIZE,
+                                            rememberPassword = rememberPassword
                                         )
                                         if (res.isSuccess) {
                                             selectedRange = EcardRangeFilter.DAYS_30
@@ -234,13 +238,13 @@ class EcardActivity : ComponentActivity() {
                         } else {
                             EcardHomePane(
                                 slice = cardSlice,
-                                hasSession = hasSession,
+                                hasSession = canAutoSync,
                                 syncing = syncing,
                                 selectedRange = selectedRange,
                                 topPadding = padding.calculateTopPadding(),
                                 bottomPadding = padding.calculateBottomPadding(),
                                 onSelectRange = { range ->
-                                    if (!hasSession) {
+                                    if (!canAutoSync) {
                                         forceLoginScreen = true
                                         return@EcardHomePane
                                     }
@@ -252,7 +256,7 @@ class EcardActivity : ComponentActivity() {
                                     }
                                 },
                                 onRefresh = {
-                                    if (!hasSession) {
+                                    if (!canAutoSync) {
                                         forceLoginScreen = true
                                         return@EcardHomePane
                                     }
@@ -263,7 +267,7 @@ class EcardActivity : ComponentActivity() {
                                     }
                                 },
                                 onLoadMore = {
-                                    if (!hasSession || syncing) return@EcardHomePane
+                                    if (!canAutoSync || syncing) return@EcardHomePane
                                     val nextPage = currentPage + 1
                                     val (start, end) = selectedRange.resolveDates()
                                     scope.launch {
@@ -316,7 +320,7 @@ class EcardActivity : ComponentActivity() {
                             }
                         ) {
                             Text(
-                                text = "将清除本地加密保存的校园卡会话与缓存流水记录（不影响教务统一身份认证登录）。",
+                                text = "将清除本地加密保存的校园卡会话、已记住的查询密码与缓存流水记录（不影响教务统一身份认证登录）。",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -372,11 +376,12 @@ private fun EcardLoginPane(
     topPadding: Dp,
     bottomPadding: Dp,
     onViewCached: () -> Unit,
-    onSubmit: (idserial: String, password: CharArray, onDone: (error: String?) -> Unit) -> Unit
+    onSubmit: (idserial: String, password: CharArray, rememberPassword: Boolean, onDone: (error: String?) -> Unit) -> Unit
 ) {
     var idInput by remember(initialId) { mutableStateOf(initialId) }
     var passwordInput by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    var rememberPassword by remember { mutableStateOf(true) }
     var localError by remember { mutableStateOf<String?>(null) }
 
     fun triggerLogin() {
@@ -391,7 +396,7 @@ private fun EcardLoginPane(
         }
         localError = null
         val pwdChars = passwordInput.toCharArray()
-        onSubmit(cleanId, pwdChars) { err ->
+        onSubmit(cleanId, pwdChars, rememberPassword) { err ->
             if (err == null) {
                 passwordInput = ""
             } else {
@@ -447,7 +452,7 @@ private fun EcardLoginPane(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "独立登录通道 · 密码不落盘",
+                        text = "独立登录通道 · Keystore 本地加密",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -455,7 +460,7 @@ private fun EcardLoginPane(
             }
 
             Text(
-                text = "校园卡系统（ecard.buct.edu.cn）未接入统一身份认证，默认密码通常为本人身份证后六位；凭据仅在本地 AES+RSA 加密后直连校方服务器，不保存密码明文。",
+                text = "校园卡系统（ecard.buct.edu.cn）未接入统一身份认证，默认密码通常为本人身份证后六位；凭据经 AES+RSA 加密直连校方服务器，开启记住密码后仅用 Android Keystore 加密存于本机且不参与云备份。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -531,6 +536,38 @@ private fun EcardLoginPane(
                 keyboardActions = KeyboardActions(onDone = { triggerLogin() }),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f))
+                    .clickable(enabled = !syncing) { rememberPassword = !rememberPassword }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "本机加密记住校园卡密码",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "仅用 Android Keystore 加密存本机，会话过期自动续期",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                LiquidSwitch(
+                    checked = rememberPassword,
+                    onCheckedChange = { if (!syncing) rememberPassword = it },
+                    enabled = !syncing
+                )
+            }
 
             localError?.let { errMsg ->
                 Text(

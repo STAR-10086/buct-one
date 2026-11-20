@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### 新增
+- **校园卡支持本机 Keystore 加密记住密码与自动静默重登**：校园卡登录页新增「本机加密记住校园卡密码」开关（默认开启，仅在验证登录成功后经 Android Keystore `ALIAS_ECARD` AES-GCM 加密存入本机 `vault/ecard_vault.enc` 并排除云备份），后续会话过期时进页、切流水与工作台刷新均自动重登续期；若密码被外部修改或主动退出登录，立即清除本地凭据以防误试锁卡。
 - **北化校园邮箱（`mail.buct.edu.cn`）原生收件模块（`parserVersion: 1`）**：通过统一身份认证（`sidportal` → `mailuser.buct.edu.cn/buct/api/login` → 网易企业邮箱 `/js6/s`）免密换票直连收件箱，提供原生液态玻璃邮件列表（收件箱 / 未读 / 多文件夹 / 搜索 / 分页）、安全 HTML 正文阅读与附件原生下载打开，并在工作台新增 `MAIL` 卡片与未读提醒。
 
 ### 优化与修复
