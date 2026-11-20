@@ -1185,7 +1185,7 @@ fun DashboardRoute(
     }
 
     if (showCourseSelectSubpage) {
-        LaunchedEffect(Unit) {
+        androidx.compose.runtime.LaunchedEffect(Unit) {
             com.buct.course.analytics.UmamiTracker.trackPageVisit(context, "/module/course_select", "选课抢课")
         }
         GlassSubpage(onDismiss = { showCourseSelectSubpage = false }) { close ->
