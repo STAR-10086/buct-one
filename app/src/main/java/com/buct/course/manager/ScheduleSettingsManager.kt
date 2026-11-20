@@ -19,6 +19,7 @@ class ScheduleSettingsManager internal constructor(private var prefs: SharedPref
     companion object {
         private const val PREFS_NAME = "schedule_settings"
         private const val KEY_SEMESTER_START = "semester_start"
+        private const val KEY_MANUAL_TERM_STARTS = "manual_semester_start_terms"
         private const val KEY_PERIOD_TIMES = "period_times"
         private const val KEY_CUSTOM_COURSES = "custom_courses"
         private const val KEY_PERIOD_COUNT = "period_count"
@@ -190,6 +191,44 @@ class ScheduleSettingsManager internal constructor(private var prefs: SharedPref
             prefs?.edit()?.putLong(scopedKey(KEY_SEMESTER_START), value)?.remove(KEY_SEMESTER_START)?.apply()
             revision++
         }
+
+    private fun manualTermsKey(accountKey: String): String =
+        "${KEY_MANUAL_TERM_STARTS}_${accountKey.ifBlank { "default" }}"
+
+    private fun readManualTerms(accountKey: String): MutableSet<String> {
+        val raw = prefs?.getString(manualTermsKey(accountKey), "").orEmpty()
+        return raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toMutableSet()
+    }
+
+    fun isManualSemesterStart(accountKey: String, termId: String): Boolean {
+        if (termId.isBlank()) return false
+        return termId in readManualTerms(accountKey)
+    }
+
+    fun markManualSemesterStart(accountKey: String, termId: String) {
+        if (termId.isBlank()) return
+        val terms = readManualTerms(accountKey)
+        if (!terms.add(termId)) return
+        prefs?.edit()?.putString(manualTermsKey(accountKey), terms.joinToString(","))?.apply()
+    }
+
+    fun clearManualSemesterStart(accountKey: String, termId: String) {
+        if (termId.isBlank()) return
+        val terms = readManualTerms(accountKey)
+        if (!terms.remove(termId)) return
+        prefs?.edit()?.putString(manualTermsKey(accountKey), terms.joinToString(","))?.apply()
+    }
+
+    fun applyAutoSemesterStart(accountKey: String, millis: Long) {
+        if (millis <= 0L) return
+        val p = prefs ?: return
+        val scoped = "${KEY_SEMESTER_START}_${accountKey.ifBlank { "default" }}"
+        if (p.contains(scoped) && p.getLong(scoped, 0L) == millis && !p.contains(KEY_SEMESTER_START)) {
+            return
+        }
+        p.edit().putLong(scoped, millis).remove(KEY_SEMESTER_START).apply()
+        revision++
+    }
     
     /**
      * 根据第一周日期计算当前是第几周（周一基准，与 App 课表周次口径一致）

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Height
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Visibility
 import kotlin.math.roundToInt
@@ -104,7 +105,10 @@ fun ScheduleSettingsScreen(
     onSyncSchedule: (() -> Unit)? = null,
     selectedYear: Int? = null,
     yearOptions: List<Int> = emptyList(),
-    onSelectYear: ((Int) -> Unit)? = null
+    onSelectYear: ((Int) -> Unit)? = null,
+    officialCalendarSummary: String? = null,
+    officialCalendarSyncing: Boolean = false,
+    onCalibrateOfficialCalendar: (() -> Unit)? = null
 ) {
     var periodCount by remember { mutableStateOf(manager.periodCount) }
     var storedPeriodTimes by remember { mutableStateOf(periodTimesOverride ?: manager.getPeriodTimes()) }
@@ -258,6 +262,28 @@ fun ScheduleSettingsScreen(
                                     }
                                 }
                             )
+                            if (onCalibrateOfficialCalendar != null) {
+                                InsetGroupedRow(
+                                    icon = Icons.Outlined.Refresh,
+                                    iconTint = Color(0xFF30D158),
+                                    title = "自动校准官方校历",
+                                    subtitle = officialCalendarSummary ?: "从 i北化同步开学日期、教学周与法定节假日",
+                                    trailing = {
+                                        Text(
+                                            text = if (officialCalendarSyncing) "同步中..." else "校准",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (officialCalendarSyncing) {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            } else {
+                                                NeuPrimary
+                                            }
+                                        )
+                                    },
+                                    enabled = !officialCalendarSyncing,
+                                    onClick = onCalibrateOfficialCalendar
+                                )
+                            }
                             InsetGroupedRow(
                                 icon = Icons.Outlined.AccessTime,
                                 iconTint = Color(0xFFFF9F0A),

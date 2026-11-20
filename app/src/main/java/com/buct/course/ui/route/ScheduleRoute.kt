@@ -45,7 +45,10 @@ import com.buct.course.demo.DemoData
 import com.buct.course.academic.AcademicGatewayFactory
 import com.buct.course.academic.AcademicStudyBridge
 import com.buct.course.manager.ScheduleSettingsManager
+import com.buct.course.manager.SyncSettings
 import com.buct.course.manager.UserManager
+import com.buct.one.data.model.shortHolidayBadge
+import com.buct.one.data.sync.PortalSyncService
 import com.buct.course.network.CourseApiClient
 import com.buct.course.ui.screen.PeriodTimeUi
 import com.buct.course.ui.screen.ScheduleCourseUi
@@ -211,6 +214,19 @@ fun ScheduleRoute() {
         else scheduleCache.currentTerm(routeAccountKey, UserManager.getInstance().currentSchool?.id ?: "buct").id
     }
     val reminderScheduler = remember(context) { ScheduleReminderScheduler.get(context) }
+    val portalSyncService = remember(context) { PortalSyncService.getInstance(context) }
+    val portalCalendarSlice by portalSyncService.calendarState.collectAsState()
+    val portalSyncing by portalSyncService.syncing.collectAsState()
+    val holidaysByDate = remember(portalCalendarSlice.data) {
+        buildMap {
+            portalCalendarSlice.data?.holidays?.forEach { item ->
+                val badge = shortHolidayBadge(item.holidayName)
+                if (badge.isNotBlank() && item.date.length == 10) {
+                    put(item.date, badge)
+                }
+            }
+        }
+    }
     val customRevision = settingsManager.revision
     val customCourses = remember(customRevision, routeAccountKey) { settingsManager.getCustomCourses(routeAccountKey) }
     val remindersRevision = reminderScheduler.revision
@@ -501,6 +517,25 @@ fun ScheduleRoute() {
         loadSchedule(force)
     }
 
+    LaunchedEffect(routeAccountKey, isDemoMode, session.token) {
+        if (isDemoMode || !SyncSettings.enabled(context) || !portalSyncService.canAutoSync()) {
+            return@LaunchedEffect
+        }
+        portalSyncService.refreshCalendar(userInitiated = false)
+    }
+
+    LaunchedEffect(portalCalendarSlice.data, routeAccountKey, isDemoMode) {
+        val data = portalCalendarSlice.data ?: return@LaunchedEffect
+        if (!isDemoMode) {
+            OfficialCalendarApplier.apply(
+                context = context,
+                accountKey = routeAccountKey,
+                snapshot = data,
+                forceOverrideManual = false
+            )
+        }
+    }
+
     // Refresh custom courses when dialogs close
     LaunchedEffect(customRevision, routeAccountKey) {
         courses = reloadCustomCourses(courses)
@@ -625,7 +660,8 @@ fun ScheduleRoute() {
             }
         },
         accountLabel = effectiveAccountLabel,
-        onAccountClick = { showAccountSwitcher = true }
+        onAccountClick = { showAccountSwitcher = true },
+        holidaysByDate = holidaysByDate
     )
     }
     if (showAccountSwitcher) {
@@ -687,6 +723,8 @@ fun ScheduleRoute() {
                     runCatching { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).parse(it)?.time }.getOrNull()
                 } ?: 0L,
                 onSemesterStartChange = { millis ->
+                    val targetTerm = settingsTerm.ifBlank { activeCurrentTermId }
+                    settingsManager.markManualSemesterStart(routeAccountKey, targetTerm)
                     if (settingsTerm == activeCurrentTermId) settingsManager.semesterStartDate = millis
                     val times = periodTimesFor(termTimeBase)
                     reminderScheduler.updateTimeBase(routeAccountKey, settingsTerm, ScheduleTimeBase(
@@ -694,6 +732,38 @@ fun ScheduleRoute() {
                     context.getSharedPreferences("widget_prefs", android.content.Context.MODE_PRIVATE)
                         .edit().putLong("last_week_nav", 0L).apply()
                     com.buct.course.widget.WidgetProviders.refreshAll(context)
+                },
+                officialCalendarSummary = portalCalendarSlice.data?.let { d ->
+                    val termLabel = d.currentTermId.ifBlank { "本学期" }
+                    val weekSuffix = if (d.currentTeachingWeek > 0) "（第${d.currentTeachingWeek}周）" else ""
+                    val beginLabel = d.beginDate.ifBlank { "未知" }
+                    "当前：$termLabel · 开学 $beginLabel$weekSuffix"
+                },
+                officialCalendarSyncing = portalSyncing,
+                onCalibrateOfficialCalendar = if (isDemoMode) null else {
+                    {
+                        scope.launch {
+                            val res = portalSyncService.refreshCalendar(userInitiated = true)
+                            res.onSuccess { slice ->
+                                val data = slice.data
+                                val date = data?.let {
+                                    OfficialCalendarApplier.apply(
+                                        context = context,
+                                        accountKey = routeAccountKey,
+                                        snapshot = it,
+                                        forceOverrideManual = true
+                                    )
+                                }
+                                if (!date.isNullOrBlank()) {
+                                    GlassToaster.show("已校准至官方校历（$date）")
+                                } else {
+                                    GlassToaster.show("未获取到官方开学日期")
+                                }
+                            }.onFailure { err ->
+                                GlassToaster.show(err.message?.takeIf { it.isNotBlank() } ?: "官方校历同步失败，请先登录统一身份认证")
+                            }
+                        }
+                    }
                 },
                 onPeriodTimesChange = { times ->
                     if (settingsTerm == activeCurrentTermId) settingsManager.savePeriodTimes(times)

@@ -77,6 +77,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.remember
@@ -163,6 +164,7 @@ import com.buct.course.ui.theme.NeuPrimary
 import com.buct.course.ui.theme.NeuSurface
 
 import java.util.Calendar
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.ceil
@@ -381,7 +383,9 @@ fun ScheduleScreen(
     exams: List<ExamItemUi> = emptyList(),
     /** 顶栏账号芯片文案（当前账号显示名）；空串则不显示 */
     accountLabel: String = "",
-    onAccountClick: () -> Unit = {}
+    onAccountClick: () -> Unit = {},
+    /** 法定节假日（YYYY-MM-DD -> 2 字短徽标） */
+    holidaysByDate: Map<String, String> = emptyMap()
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val coroutineScope = rememberCoroutineScope()
@@ -549,7 +553,8 @@ fun ScheduleScreen(
                     onDaySelect = onDaySelect,
                     showToday = dayView && selectedDay in 1..7 &&
                         (currentWeek != actualWeek || selectedDay != ((Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1)),
-                    onTodayClick = onTodayClick
+                    onTodayClick = onTodayClick,
+                    holidaysByDate = holidaysByDate
                 )
             }
         }
@@ -694,7 +699,8 @@ fun WeekHeaderCompact(
     onDaySelect: (Int) -> Unit = {},
     /** 不在「今天」时显示回到今天入口 */
     showToday: Boolean = false,
-    onTodayClick: () -> Unit = {}
+    onTodayClick: () -> Unit = {},
+    holidaysByDate: Map<String, String> = emptyMap()
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
     val calendar = Calendar.getInstance()
@@ -993,6 +999,14 @@ fun WeekHeaderCompact(
                         } else {
                             "${date.get(Calendar.DAY_OF_MONTH)}"
                         }
+                        val dateKey = String.format(
+                            Locale.ROOT,
+                            "%04d-%02d-%02d",
+                            date.get(Calendar.YEAR),
+                            date.get(Calendar.MONTH) + 1,
+                            date.get(Calendar.DAY_OF_MONTH)
+                        )
+                        val holidayLabel = holidaysByDate[dateKey]?.takeIf { it.isNotBlank() }
                         CompactWeekdayLabel(
                             modifier = Modifier
                                 .weight(1f)
@@ -1003,7 +1017,8 @@ fun WeekHeaderCompact(
                             isSelected = isSelected,
                             collapse = collapse,
                             date = dateText,
-                            weekOffset = weekOffset
+                            weekOffset = weekOffset,
+                            holidayLabel = holidayLabel
                         )
                     }
                 }
@@ -1076,10 +1091,16 @@ private fun CompactWeekdayLabel(
     isSelected: Boolean = false,
     collapse: Float = 0f,
     date: String? = null,
-    weekOffset: Float = 0f
+    weekOffset: Float = 0f,
+    holidayLabel: String? = null
 ) {
+    val hasHoliday = !holidayLabel.isNullOrBlank()
     val textColor by animateColorAsState(
-        targetValue = if (isToday || isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = when {
+            isToday || isSelected -> MaterialTheme.colorScheme.primary
+            hasHoliday -> Color(0xFFD84315)
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
         label = "weekdayColor"
     )
     val dotScale by animateFloatAsState(
@@ -1097,17 +1118,24 @@ private fun CompactWeekdayLabel(
     Column(
         modifier = modifier.semantics(mergeDescendants = true) {
             if (isToday || isSelected) stateDescription = if (isToday) "今天" else "选中"
+            if (hasHoliday) {
+                contentDescription = buildString {
+                    append("周").append(day).append(' ').append(holidayLabel)
+                    if (date != null) append(' ').append(date)
+                }
+            }
         },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(lerpDp(2.dp, 1.dp, collapse))
     ) {
         Text(
-            text = day,
-            fontSize = lerpSp(12f, 11f, collapse),
+            text = holidayLabel ?: day,
+            fontSize = lerpSp(if (hasHoliday) 10.5f else 12f, if (hasHoliday) 9.5f else 11f, collapse),
             lineHeight = lerpSp(14f, 13f, collapse),
-            fontWeight = if (isToday || isSelected) FontWeight.SemiBold else FontWeight.Medium,
+            fontWeight = if (isToday || isSelected || hasHoliday) FontWeight.SemiBold else FontWeight.Medium,
             color = textColor,
-            maxLines = 1
+            maxLines = 1,
+            softWrap = false
         )
         if (date != null) {
             // GitHub 新版观感：日期大数字在下，15sp 半粗 tabular 数字、列居中；今天/选中 accent，其余深色
