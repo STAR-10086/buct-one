@@ -47,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -142,7 +143,9 @@ fun DialogHost(state: DialogHostState, modifier: Modifier = Modifier) {
             val page = dialog.presentation == DialogPresentation.Page
             val backProgress = remember { Animatable(0f) }
             var backSwipeEdge by remember { mutableIntStateOf(0) }
-            val backDragShape = remember { RoundedCornerShape(24.dp) }
+            val backDragShape = remember { RoundedCornerShape(28.dp) }
+            var dismissedByBack by remember { mutableStateOf(false) }
+            var backExitDir by remember { mutableFloatStateOf(1f) }
             val scope = rememberCoroutineScope()
             var hostSize by remember { mutableStateOf(IntSize.Zero) }
             var hostOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -161,6 +164,8 @@ fun DialogHost(state: DialogHostState, modifier: Modifier = Modifier) {
                             backProgress.snapTo(it.progress)
                         }
                     }
+                    dismissedByBack = backProgress.value > 0.01f
+                    backExitDir = if (backSwipeEdge == 1) -1f else 1f
                     state.dismiss(dialog.handle)
                 } catch (_: CancellationException) {
                     scope.launch {
@@ -198,35 +203,50 @@ fun DialogHost(state: DialogHostState, modifier: Modifier = Modifier) {
                     modifier.fillMaxSize().onGloballyPositioned { hostSize = it.size; hostOrigin = it.positionInRoot() },
                     contentAlignment = if (bottom) Alignment.BottomCenter else Alignment.Center
                 ) {
-                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = progress.value.coerceIn(0f, 1f) * (1f - 0.55f * backProgress.value) }
-                        .background(Color.Black.copy(alpha = 0.22f))
+                    Box(Modifier.fillMaxSize().graphicsLayer {
+                            alpha = progress.value.coerceIn(0f, 1f) * (1f - (if (page) 0.65f else 0.55f) * backProgress.value)
+                        }
+                        .background(Color.Black.copy(alpha = if (page) 0.34f else 0.22f))
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                             onClick = { state.dismiss(dialog.handle) }).clearAndSetSemantics {})
                     Box(
                         Modifier.graphicsLayer {
                                 val presence = progress.value
-                                val back = backProgress.value
+                                val back = backProgress.value.coerceIn(0f, 1f)
                                 val backDir = if (backSwipeEdge == 1) -1f else 1f
                                 val above = state.dialogs.lastOrNull { it.presentation == DialogPresentation.Page }
                                     ?.takeIf { state.dialogs.indexOf(it) > state.dialogs.indexOf(dialog) }?.presence ?: 0f
-                                translationX = if (page) {
-                                    with(density) { com.buct.course.ui.theme.MotionProfile.HierarchyEnterDp.dp.toPx() * (1f - presence) + 56.dp.toPx() * back * backDir } -
-                                        with(density) { com.buct.course.ui.theme.MotionProfile.HierarchyBehindDp.dp.toPx() } * above
-                                } else 0f
+                                transformOrigin = if (page && back > 0.002f) {
+                                    TransformOrigin(if (backSwipeEdge == 1) 0.12f else 0.88f, 0.5f)
+                                } else {
+                                    TransformOrigin.Center
+                                }
+                                translationX = when {
+                                    page -> {
+                                        val exitShift = with(density) {
+                                            (if (dismissedByBack) 56.dp.toPx() * backExitDir else com.buct.course.ui.theme.MotionProfile.HierarchyEnterDp.dp.toPx()) * (1f - presence)
+                                        }
+                                        val dragShift = size.width * 0.08f * back * backDir
+                                        exitShift + dragShift - with(density) { com.buct.course.ui.theme.MotionProfile.HierarchyBehindDp.dp.toPx() } * above
+                                    }
+                                    !bottom -> with(density) { 24.dp.toPx() * back * backDir }
+                                    else -> 0f
+                                }
                                 translationY = if (bottom) {
                                     val drag = dialog.bottomSheet?.offset ?: 0f
                                     if (dialog.bottomSheet != null) drag + (size.height - drag) * (1f - presence.coerceIn(0f, 1f))
                                     else size.height * ((1f - presence) / 3f + 0.18f * back)
                                 } else 0f
                                 scaleX = when {
-                                    page -> 1f - 0.06f * back
-                                    !bottom -> (0.94f + 0.06f * presence) * (1f - 0.08f * back)
+                                    page -> 1f - 0.12f * back
+                                    !bottom -> (0.94f + 0.06f * presence) * (1f - 0.10f * back)
                                     else -> 1f
                                 }
                                 scaleY = scaleX
-                                if (page && back > 0.005f) {
+                                if (page && back > 0.002f) {
                                     shape = backDragShape
                                     clip = true
+                                    shadowElevation = with(density) { (24.dp * (back / 0.2f).coerceIn(0f, 1f)).toPx() }
                                 }
                                 if (bottom && dialog.bottomSheet != null && !reducedMotion) {
                                     val sheet = dialog.bottomSheet
@@ -251,7 +271,7 @@ fun DialogHost(state: DialogHostState, modifier: Modifier = Modifier) {
                                     dialog.lastSheetFrame = SheetFrame(translationX, translationY, scaleX, scaleY)
                                     dialog.lastPresence = p
                                 }
-                                alpha = presence.coerceIn(0f, 1f) * (1f - (if (page) 0.16f else if (!bottom) 0.24f else 0.12f) * back) * (1f - 0.03f * above)
+                                alpha = presence.coerceIn(0f, 1f) * (1f - (if (page) 0f else if (!bottom) 0.28f else 0.12f) * back) * (1f - 0.03f * above)
                             }
                             .then(if (page) Modifier.fillMaxSize() else Modifier.windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime)).padding(vertical = 12.dp))
                             .semantics {

@@ -30,7 +30,7 @@ import com.buct.course.ui.system.glass.drawBlurred
 import com.buct.course.ui.system.glass.glassLensAnchor
 import com.buct.course.ui.system.glass.rememberGlassLensRegion
 
-private val LocalGlassWindowOwner = staticCompositionLocalOf<android.view.View?> { null }
+internal val LocalGlassWindowOwner = staticCompositionLocalOf<android.view.View?> { null }
 
 /** Each actual window owns its sources; pages inside that window reuse the provided locals. */
 @Composable
@@ -64,7 +64,10 @@ fun GlassWindowHost(
     val modalAnchor = if (modal != null) rememberGlassLensRegion("window-modal", dialogs.currentDialog) { coordinates ->
         drawBlurred(GlassRecipe.DialogBlurDp * density.density) { drawBackdropSource(modal, density, coordinates) }
     } else null
-    PredictiveBackFallbackHandler(hasBlockingSurface = dialogs.hasBlockingSurface)
+    val isRootDialogHost = LocalDialogHost.current == null
+    if (isRootDialogHost) {
+        PredictiveBackFallbackHandler(hasBlockingSurface = dialogs.hasBlockingSurface)
+    }
     CompositionLocalProvider(
         LocalGlassWindowOwner provides view,
         LocalAppBackdrop provides wallpaper,

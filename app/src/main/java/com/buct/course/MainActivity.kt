@@ -529,6 +529,7 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
         }
 
         CompositionLocalProvider(
+            com.buct.course.ui.system.LocalGlassWindowOwner provides androidx.compose.ui.platform.LocalView.current,
             LocalAppBackdrop provides wallpaperBackdrop,
             LocalControlBackdrop provides wallpaperBackdrop,
             LocalModalBackdrop provides navBarBackdrop,
@@ -593,10 +594,14 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
                             val savedPages = rememberSaveableStateHolder()
                             com.buct.course.ui.theme.NavigationPages(navigationMotion,
                                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                                    translationX = -6.dp.toPx() * dialogHostState.pageProgress
+                                    val pageProgress = dialogHostState.pageProgress
+                                    val pageScale = 1f - 0.04f * pageProgress
+                                    scaleX = pageScale
+                                    scaleY = pageScale
+                                    translationX = -16.dp.toPx() * pageProgress
                                     val entry = com.buct.course.ui.theme.StartupLogoAnimation.contentProgress
                                     translationY = (1f - entry) * 16.dp.toPx()
-                                    alpha = (1f - 0.03f * dialogHostState.pageProgress) * entry
+                                    alpha = (1f - 0.08f * pageProgress) * entry
                                 }
                             ) { page ->
                               // 底栏可隐藏后，pages 里可能残留已不存在的下标（比如隐藏到只剩 3 个，
