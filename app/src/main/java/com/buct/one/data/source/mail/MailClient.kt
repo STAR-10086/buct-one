@@ -7,6 +7,7 @@ import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.MailAccountInfo
 import com.buct.one.data.model.MailAttachment
 import com.buct.one.data.model.MailFolder
+import com.buct.one.data.model.MailFolderIds
 import com.buct.one.data.model.MailMessageDetail
 import com.buct.one.data.model.MailDownloadedFile
 import com.buct.one.data.model.MailSnapshot
@@ -331,7 +332,7 @@ class MailClient {
                 .header("User-Agent", UA)
                 .header("Accept", "application/json")
                 .header("Lingxi-Language", "zh")
-                .header("Origin", "$base/")
+                .header("Origin", base)
                 .header("Referer", "$base/static/sirius-web/")
                 .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
@@ -347,7 +348,7 @@ class MailClient {
                         throw IOException("校园邮箱请求失败（HTTP ${resp.code}）")
                     }
                     val (ok, code) = MailParser.checkRpcCode(respText)
-                    if (!ok && (!respText.trimStart().startsWith("{") || MailParser.isSessionErrorCode(code))) {
+                    if (!ok && (!respText.contains('{') || MailParser.isSessionErrorCode(code))) {
                         expired = true
                     }
                 }
@@ -455,16 +456,64 @@ class MailClient {
     }
 
     fun setMessageRead(messageId: String, isRead: Boolean) {
+        setMessagesRead(listOf(messageId), isRead)
+    }
+
+    fun setMessagesRead(messageIds: List<String>, isRead: Boolean) {
+        if (messageIds.isEmpty()) return
         val body = JSONObject().apply {
-            put("ids", JSONArray().put(messageId))
+            put("ids", JSONArray().apply { messageIds.forEach { put(it) } })
             put("attrs", JSONObject().put("flags", JSONObject().put("read", isRead)))
-            put("isThread", false)
-            put("needFilter", false)
         }
         val resp = postJs6("mbox:updateMessageInfos", body)
         val (ok, code) = MailParser.checkRpcCode(resp)
         if (!ok) {
-            throw IOException("更新邮件状态失败（$code）")
+            throw IOException("更新邮件已读状态失败（$code）")
+        }
+    }
+
+    fun moveMessages(messageIds: List<String>, targetFolderId: Int) {
+        if (messageIds.isEmpty()) return
+        val body = JSONObject().apply {
+            put("ids", JSONArray().apply { messageIds.forEach { put(it) } })
+            put("attrs", JSONObject().put("fid", targetFolderId))
+        }
+        val resp = postJs6("mbox:updateMessageInfos", body)
+        val (ok, code) = MailParser.checkRpcCode(resp)
+        if (!ok) {
+            throw IOException("移动邮件失败（$code）")
+        }
+    }
+
+    fun deleteMessagesPermanently(messageIds: List<String>) {
+        if (messageIds.isEmpty()) return
+        val body = JSONObject().apply {
+            put("ids", JSONArray().apply { messageIds.forEach { put(it) } })
+        }
+        val resp = postJs6("mbox:deleteMessages", body)
+        val (ok, code) = MailParser.checkRpcCode(resp)
+        if (!ok) {
+            throw IOException("彻底删除邮件失败（$code）")
+        }
+    }
+
+    fun deleteMessage(messageId: String, currentFolderId: Int, permanent: Boolean = false) {
+        if (permanent || currentFolderId == MailFolderIds.TRASH) {
+            deleteMessagesPermanently(listOf(messageId))
+        } else {
+            moveMessages(listOf(messageId), MailFolderIds.TRASH)
+        }
+    }
+
+    fun markFolderAllRead(folderId: Int) {
+        val body = JSONObject().apply {
+            put("fid", folderId)
+            put("read", true)
+        }
+        val resp = postJs6("mbox:markSeen", body)
+        val (ok, code) = MailParser.checkRpcCode(resp)
+        if (!ok) {
+            throw IOException("全部标为已读失败（$code）")
         }
     }
 

@@ -15,9 +15,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,11 +45,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.MarkEmailUnread
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
@@ -86,6 +91,7 @@ import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.SystemCompactSegmentedControl
+import com.buct.course.ui.system.SystemDestructiveButton
 import com.buct.course.ui.system.SystemDialog
 import com.buct.course.ui.system.SystemDivider
 import com.buct.course.ui.system.SystemEmptyState
@@ -99,6 +105,7 @@ import com.buct.course.ui.theme.CourseSelectorTheme
 import com.buct.one.data.model.MailAttachment
 import com.buct.one.data.model.MailDownloadedFile
 import com.buct.one.data.model.MailFolder
+import com.buct.one.data.model.MailFolderIds
 import com.buct.one.data.model.MailMessageDetail
 import com.buct.one.data.model.MailMessageSummary
 import com.buct.one.data.model.RefreshState
@@ -110,8 +117,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 北化校园邮箱（mail.buct.edu.cn / 网易企业邮箱只读收件）原生液态玻璃界面。
- * 通过统一身份认证（sidportal）无感换票登录，支持文件夹切换、未读筛选、关键词搜索、安全富文本读信与附件下载。
+ * 北化校园邮箱（mail.buct.edu.cn / 网易企业邮箱原生收件）液态玻璃界面。
+ * 通过统一身份认证（sidportal）无感换票登录，支持文件夹切换、未读筛选、点击同步已读/标未读/全读、删除与还原、关键词搜索、安全富文本读信与附件下载。
  */
 class MailActivity : ComponentActivity() {
 
@@ -176,11 +183,16 @@ private fun MailScreen(
     var detailLoading by remember { mutableStateOf(false) }
     var detailError by remember { mutableStateOf<String?>(null) }
     var downloadingPartId by remember { mutableStateOf<String?>(null) }
+    var actionMenuTarget by remember { mutableStateOf<MailMessageSummary?>(null) }
+    var deleteConfirmState by remember { mutableStateOf<Pair<MailMessageSummary, Boolean>?>(null) }
+    var showMarkAllReadConfirm by remember { mutableStateOf(false) }
+    var actionBusy by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val ageMs = System.currentTimeMillis() - slice.provenance.capturedAt
         if (service.canAutoSync() && (
                 slice.provenance.refreshState == RefreshState.NEVER ||
+                    slice.provenance.refreshState == RefreshState.STALE ||
                     slice.provenance.refreshState == RefreshState.FAILED_FALLBACK ||
                     !slice.lastError.isNullOrBlank() ||
                     ageMs > 5 * 60_000L
@@ -193,8 +205,8 @@ private fun MailScreen(
     val snapshot = slice.data
     val folders = snapshot?.folders.orEmpty()
     val folderChoices = remember(folders) {
-        folders.filter { it.id != 2 && it.id > 0 }
-            .ifEmpty { listOf(MailFolder(id = 1, name = "收件箱")) }
+        folders.filter { it.id != MailFolderIds.DRAFTS && it.id != 6 && it.id > 0 }
+            .ifEmpty { listOf(MailFolder(id = MailFolderIds.INBOX, name = "收件箱")) }
     }
 
     LaunchedEffect(folders) {
@@ -212,7 +224,7 @@ private fun MailScreen(
             feedbackMsg = null
             return@LaunchedEffect
         }
-        val targetFolder = if (selectedTab == 1) 1 else selectedFolderId
+        val targetFolder = if (selectedTab == 1) MailFolderIds.INBOX else selectedFolderId
         val unreadOnly = selectedTab == 1
         folderLoading = true
         feedbackMsg = null
@@ -233,12 +245,6 @@ private fun MailScreen(
         }
     }
 
-    LaunchedEffect(slice) {
-        if (selectedTab == 0) {
-            inboxPaginatedMessages = null
-        }
-    }
-
     LaunchedEffect(selectedMessage?.id) {
         val target = selectedMessage ?: return@LaunchedEffect
         activeDetail = null
@@ -248,18 +254,109 @@ private fun MailScreen(
         detailLoading = false
         res.onSuccess { detail ->
             activeDetail = detail
-            if (!target.isRead) {
-                selectedMessage = target.copy(isRead = true)
-                extraFolderMessages = extraFolderMessages.map {
-                    if (it.id == target.id) it.copy(isRead = true) else it
-                }
-                inboxPaginatedMessages = inboxPaginatedMessages?.map {
-                    if (it.id == target.id) it.copy(isRead = true) else it
-                }
-                launch { service.setMessageRead(target.id, true) }
-            }
         }.onFailure { err ->
             detailError = err.message ?: "读取邮件正文失败"
+        }
+    }
+
+    fun updateLocalReadState(messageId: String, isRead: Boolean) {
+        selectedMessage = selectedMessage?.let {
+            if (it.id == messageId) it.copy(isRead = isRead) else it
+        }
+        extraFolderMessages = extraFolderMessages.map {
+            if (it.id == messageId) it.copy(isRead = isRead) else it
+        }
+        inboxPaginatedMessages = inboxPaginatedMessages?.map {
+            if (it.id == messageId) it.copy(isRead = isRead) else it
+        }
+    }
+
+    fun removeLocalMessage(messageId: String) {
+        if (selectedMessage?.id == messageId) {
+            selectedMessage = null
+        }
+        if (extraFolderMessages.any { it.id == messageId }) {
+            extraFolderMessages = extraFolderMessages.filterNot { it.id == messageId }
+            extraFolderTotal = (extraFolderTotal - 1).coerceAtLeast(0)
+        }
+        if (inboxPaginatedMessages?.any { it.id == messageId } == true) {
+            inboxPaginatedMessages = inboxPaginatedMessages?.filterNot { it.id == messageId }
+            inboxPaginatedTotal = (inboxPaginatedTotal - 1).coerceAtLeast(0)
+        }
+    }
+
+    fun openMessage(msg: MailMessageSummary) {
+        selectedMessage = if (!msg.isRead) msg.copy(isRead = true) else msg
+        if (!msg.isRead) {
+            updateLocalReadState(msg.id, true)
+            scope.launch {
+                val res = service.setMessageRead(
+                    messageId = msg.id,
+                    isRead = true,
+                    folderId = msg.folderId,
+                    previousIsRead = false
+                )
+                if (res.isFailure) {
+                    updateLocalReadState(msg.id, false)
+                    GlassToaster.show(res.exceptionOrNull()?.message ?: "同步已读状态失败")
+                }
+            }
+        }
+    }
+
+    fun toggleMessageRead(msg: MailMessageSummary) {
+        if (actionBusy) return
+        val targetRead = !msg.isRead
+        updateLocalReadState(msg.id, targetRead)
+        scope.launch {
+            actionBusy = true
+            val res = service.setMessageRead(
+                messageId = msg.id,
+                isRead = targetRead,
+                folderId = msg.folderId,
+                previousIsRead = msg.isRead
+            )
+            actionBusy = false
+            if (res.isSuccess) {
+                GlassToaster.show(if (targetRead) "已标为已读" else "已标为未读")
+            } else {
+                updateLocalReadState(msg.id, msg.isRead)
+                GlassToaster.show(res.exceptionOrNull()?.message ?: "状态更新失败")
+            }
+        }
+    }
+
+    fun executeDelete(msg: MailMessageSummary, permanent: Boolean) {
+        if (actionBusy) return
+        scope.launch {
+            actionBusy = true
+            val res = service.deleteMessage(msg, permanent = permanent)
+            actionBusy = false
+            res.onSuccess {
+                deleteConfirmState = null
+                actionMenuTarget = null
+                removeLocalMessage(msg.id)
+                val isHard = permanent || msg.folderId == MailFolderIds.TRASH
+                GlassToaster.show(if (isHard) "已彻底删除邮件" else "已移至「已删除」")
+            }.onFailure { err ->
+                GlassToaster.show(err.message ?: "删除邮件失败")
+            }
+        }
+    }
+
+    fun executeRestore(msg: MailMessageSummary) {
+        if (actionBusy) return
+        scope.launch {
+            actionBusy = true
+            val res = service.restoreMessageToInbox(msg)
+            actionBusy = false
+            res.onSuccess {
+                actionMenuTarget = null
+                removeLocalMessage(msg.id)
+                GlassToaster.show("已移回收件箱")
+            }.onFailure { err ->
+                GlassToaster.show(err.message ?: "移动邮件失败")
+            }
         }
     }
 
@@ -283,23 +380,9 @@ private fun MailScreen(
                         .onFailure { detailError = it.message ?: "读取邮件正文失败" }
                 }
             },
-            onToggleRead = {
-                val targetRead = !currentMsg.isRead
-                scope.launch {
-                    val res = service.setMessageRead(currentMsg.id, targetRead)
-                    if (res.isSuccess) {
-                        selectedMessage = currentMsg.copy(isRead = targetRead)
-                        extraFolderMessages = extraFolderMessages.map {
-                            if (it.id == currentMsg.id) it.copy(isRead = targetRead) else it
-                        }
-                        inboxPaginatedMessages = inboxPaginatedMessages?.map {
-                            if (it.id == currentMsg.id) it.copy(isRead = targetRead) else it
-                        }
-                        GlassToaster.show(if (targetRead) "已标为已读" else "已标为未读")
-                    } else {
-                        GlassToaster.show(res.exceptionOrNull()?.message ?: "状态更新失败")
-                    }
-                }
+            onToggleRead = { toggleMessageRead(currentMsg) },
+            onDeleteClick = {
+                deleteConfirmState = currentMsg to (currentMsg.folderId == MailFolderIds.TRASH)
             },
             onDownloadAttachment = { attachment ->
                 if (downloadingPartId == null) {
@@ -316,8 +399,7 @@ private fun MailScreen(
                 }
             }
         )
-        return
-    }
+    } else {
 
     val rawMessages = when (selectedTab) {
         0 -> inboxPaginatedMessages ?: snapshot?.inboxMessages.orEmpty()
@@ -514,6 +596,46 @@ private fun MailScreen(
                 )
             }
 
+            if (selectedTab == 1 && displayedMessages.isNotEmpty() && searchQuery.isBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(glassSurfaceColor())
+                        .border(0.5.dp, glassBorderColor(), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "共 $totalCount 封未读",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                            .clickable(enabled = !actionBusy) { showMarkAllReadConfirm = true }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.DoneAll,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "全部标为已读",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
@@ -545,7 +667,8 @@ private fun MailScreen(
                     items(displayedMessages, key = { it.id }) { msg ->
                         MailMessageCard(
                             message = msg,
-                            onClick = { selectedMessage = msg }
+                            onClick = { openMessage(msg) },
+                            onMoreClick = { actionMenuTarget = msg }
                         )
                     }
 
@@ -597,6 +720,7 @@ private fun MailScreen(
             }
         }
     }
+    }
 
     if (showLoginDialog) {
         MailLoginDialog(
@@ -607,6 +731,7 @@ private fun MailScreen(
                     feedbackMsg = null
                     val res = service.loginAndSync(username, passwordChars)
                     if (res.isSuccess) {
+                        inboxPaginatedMessages = null
                         showLoginDialog = false
                         GlassToaster.show("登录成功并已同步校园邮箱")
                     } else {
@@ -618,12 +743,69 @@ private fun MailScreen(
             }
         )
     }
+
+    actionMenuTarget?.let { targetMsg ->
+        MailMessageActionDialog(
+            message = targetMsg,
+            busy = actionBusy,
+            onDismiss = { if (!actionBusy) actionMenuTarget = null },
+            onToggleRead = {
+                actionMenuTarget = null
+                toggleMessageRead(targetMsg)
+            },
+            onMoveToTrash = { executeDelete(targetMsg, permanent = false) },
+            onRestoreToInbox = { executeRestore(targetMsg) },
+            onPermanentDelete = {
+                actionMenuTarget = null
+                deleteConfirmState = targetMsg to true
+            }
+        )
+    }
+
+    deleteConfirmState?.let { (targetMsg, permanent) ->
+        MailDeleteConfirmDialog(
+            message = targetMsg,
+            permanent = permanent,
+            busy = actionBusy,
+            onDismiss = { if (!actionBusy) deleteConfirmState = null },
+            onConfirm = { executeDelete(targetMsg, permanent = permanent) }
+        )
+    }
+
+    if (showMarkAllReadConfirm) {
+        MailMarkAllReadDialog(
+            busy = actionBusy,
+            onDismiss = { if (!actionBusy) showMarkAllReadConfirm = false },
+            onConfirm = {
+                if (!actionBusy) {
+                    scope.launch {
+                        actionBusy = true
+                        val res = service.markFolderAllRead(MailFolderIds.INBOX)
+                        actionBusy = false
+                        res.onSuccess {
+                            showMarkAllReadConfirm = false
+                            extraFolderMessages = emptyList()
+                            extraFolderTotal = 0
+                            inboxPaginatedMessages = inboxPaginatedMessages?.map {
+                                if (!it.isRead) it.copy(isRead = true) else it
+                            }
+                            GlassToaster.show("收件箱已全部标为已读")
+                        }.onFailure { err ->
+                            GlassToaster.show(err.message ?: "全部标为已读失败")
+                        }
+                    }
+                }
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MailMessageCard(
     message: MailMessageSummary,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onMoreClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(22.dp)
     val senderDisplay = message.fromName.ifBlank { message.fromAddress }.ifBlank { "未知发件人" }
@@ -636,7 +818,10 @@ private fun MailMessageCard(
             .clip(shape)
             .background(glassSurfaceColor())
             .border(0.5.dp, glassBorderColor(), shape)
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onMoreClick
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top
@@ -750,6 +935,20 @@ private fun MailMessageCard(
                         }
                     }
                 }
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onMoreClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.MoreVert,
+                        contentDescription = "邮件更多操作",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
     }
@@ -765,6 +964,7 @@ private fun MailDetailView(
     onBack: () -> Unit,
     onReload: () -> Unit,
     onToggleRead: () -> Unit,
+    onDeleteClick: () -> Unit,
     onDownloadAttachment: (MailAttachment) -> Unit
 ) {
     val senderHeader = detail?.fromList?.firstOrNull()?.takeIf { it.isNotBlank() }
@@ -781,6 +981,12 @@ private fun MailDetailView(
                 icon = if (message.isRead) Icons.Outlined.MarkEmailUnread else Icons.Outlined.MarkEmailRead,
                 contentDescription = if (message.isRead) "标为未读" else "标为已读",
                 onClick = onToggleRead
+            )
+            SystemIconButton(
+                icon = Icons.Outlined.DeleteOutline,
+                contentDescription = if (message.folderId == MailFolderIds.TRASH) "彻底删除" else "删除邮件",
+                tint = Color(0xFFFF453A),
+                onClick = onDeleteClick
             )
             if (loading) {
                 GlassLoadingIndicator(size = 38.dp)
@@ -1155,6 +1361,160 @@ private fun MailLoginDialog(
                 modifier = Modifier.fillMaxWidth()
             )
         }
+    }
+}
+
+@Composable
+private fun MailMessageActionDialog(
+    message: MailMessageSummary,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onToggleRead: () -> Unit,
+    onMoveToTrash: () -> Unit,
+    onRestoreToInbox: () -> Unit,
+    onPermanentDelete: () -> Unit
+) {
+    val sender = message.fromName.ifBlank { message.fromAddress }.ifBlank { "未知发件人" }
+    SystemDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = message.subject.ifBlank { "(无主题)" },
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        dismissButton = {
+            SystemSecondaryButton(
+                text = "取消",
+                enabled = !busy,
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "发件人：$sender · 将同步至官方校园邮箱",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            SystemSecondaryButton(
+                text = if (message.isRead) "标为未读" else "标为已读",
+                enabled = !busy,
+                onClick = onToggleRead,
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (message.folderId == MailFolderIds.TRASH) {
+                SystemPrimaryButton(
+                    text = if (busy) "处理中…" else "移回收件箱",
+                    enabled = !busy,
+                    onClick = onRestoreToInbox,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                SystemSecondaryButton(
+                    text = if (busy) "处理中…" else "移至「已删除」",
+                    enabled = !busy,
+                    onClick = onMoveToTrash,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            SystemDestructiveButton(
+                text = "彻底删除",
+                enabled = !busy,
+                onClick = onPermanentDelete,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun MailDeleteConfirmDialog(
+    message: MailMessageSummary,
+    permanent: Boolean,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val isHard = permanent || message.folderId == MailFolderIds.TRASH
+    SystemDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (isHard) "彻底删除邮件" else "移至「已删除」",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        confirmButton = {
+            SystemDestructiveButton(
+                text = if (busy) "正在删除…" else if (isHard) "彻底删除" else "移至已删除",
+                enabled = !busy,
+                onClick = onConfirm,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        dismissButton = {
+            SystemSecondaryButton(
+                text = "取消",
+                enabled = !busy,
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    ) {
+        Text(
+            text = if (isHard) {
+                "确定彻底删除「${message.subject.ifBlank { "(无主题)" }}」吗？删除后官方邮箱与本地将无法恢复。"
+            } else {
+                "确定将「${message.subject.ifBlank { "(无主题)" }}」移至官方邮箱「已删除」吗？后续仍可在已删除文件夹还原或彻底清理。"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun MailMarkAllReadDialog(
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    SystemDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "全部标为已读",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        confirmButton = {
+            SystemPrimaryButton(
+                text = if (busy) "正在同步…" else "确认全部已读",
+                enabled = !busy,
+                onClick = onConfirm,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        dismissButton = {
+            SystemSecondaryButton(
+                text = "取消",
+                enabled = !busy,
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    ) {
+        Text(
+            text = "将收件箱内所有未读邮件同步标记为已读（会同步至官方校园邮箱网页端）。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

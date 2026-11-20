@@ -5,6 +5,14 @@ package com.buct.one.data.model
  *
  * 严格约束：model/ 禁止任何 import（零依赖）。
  */
+object MailFolderIds {
+    const val INBOX = 1
+    const val DRAFTS = 2
+    const val SENT = 3
+    const val TRASH = 4
+    const val SPAM = 5
+}
+
 data class MailAccountInfo(
     val email: String = "",
     val displayEmail: String = "",

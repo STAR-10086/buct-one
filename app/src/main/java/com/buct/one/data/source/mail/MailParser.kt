@@ -15,7 +15,7 @@ import java.io.IOException
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object MailParser {
-    const val PARSER_VERSION = 1
+    const val PARSER_VERSION = 2
 
     data class SidLoginPage(
         val execution: String,
@@ -44,10 +44,10 @@ object MailParser {
     }
 
     fun checkRpcCode(json: String): Pair<Boolean, String> {
-        val trimmed = json.trim()
-        if (!trimmed.startsWith("{")) return false to "NON_JSON"
+        val start = json.indexOf('{')
+        if (start < 0) return false to "NON_JSON"
         return runCatching {
-            val code = JSONObject(trimmed).optString("code", "")
+            val code = JSONObject(json.substring(start)).optString("code", "")
             (code == "S_OK") to code
         }.getOrDefault(false to "PARSE_ERROR")
     }
@@ -126,7 +126,7 @@ object MailParser {
             val (fromName, fromAddress) = splitSender(fromRaw)
             val toRaw = extractAddressText(obj.opt("to"))
             val flags = obj.optJSONObject("flags")
-            val isRead = flags?.optBoolean("read", true) ?: true
+            val isRead = flags?.optBoolean("read", false) == true
             val hasAttFlag = (flags?.optBoolean("attached", false) ?: false) ||
                 (flags?.optBoolean("realAttached", false) ?: false)
             val attachments = parseAttachments(obj.optJSONArray("attachments"))
