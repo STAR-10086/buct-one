@@ -123,7 +123,7 @@ fun SettingsRoute(
 
     // 在线同步开关（默认开启，可手动关闭以只使用本地数据）
     var onlineSyncEnabled by remember(context) { mutableStateOf(com.buct.course.manager.SyncSettings.enabled(context)) }
-    var analyticsEnabled by remember(context) { mutableStateOf(com.buct.course.analytics.UsageStatsReporter.isEnabled(context)) }
+    var analyticsEnabled by remember(context) { mutableStateOf(com.buct.course.analytics.UmamiTracker.isEnabled(context)) }
     
     // Quota States
     var isSuper by remember { mutableStateOf(false) }
@@ -419,7 +419,7 @@ fun SettingsRoute(
         analyticsEnabled = analyticsEnabled,
         onAnalyticsChange = {
             analyticsEnabled = it
-            com.buct.course.analytics.UsageStatsReporter.setEnabled(context, it)
+            com.buct.course.analytics.UmamiTracker.setEnabled(context, it)
             com.buct.course.ui.system.GlassToaster.show(if (it) "匿名使用统计已开启" else "匿名使用统计已关闭")
         },
         onlineSyncEnabled = onlineSyncEnabled,
@@ -752,7 +752,7 @@ fun SettingsRoute(
                 com.buct.course.ui.system.SystemDivider()
 
                 Text(
-                    text = "本软件为开源免费项目（GPL-3.0），仅供个人学习与技术交流使用。所有校园数据仅保存在本机，不上传学号密码，不集成第三方统计或上报服务。",
+                    text = "本软件为开源免费项目（GPL-3.0），仅供个人学习与技术交流使用。所有校园数据与学号密码仅保存在本机；仅在开启「匿名使用统计」时向自托管 Umami 发送不含个人身份的匿名版本与功能热度统计，可在设置中随时关闭。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     lineHeight = 16.sp

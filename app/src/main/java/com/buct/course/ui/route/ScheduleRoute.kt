@@ -718,6 +718,9 @@ fun ScheduleRoute() {
     }
     
     if (showSettingsDialog) {
+        LaunchedEffect(Unit) {
+            com.buct.course.analytics.UmamiTracker.trackPageVisit(context, "/module/schedule_settings", "课表设置")
+        }
         com.buct.course.ui.system.GlassSubpage(onDismiss = { showSettingsDialog = false; settingsTermOverride = null }) { close ->
             ScheduleSettingsScreen(
                 manager = settingsManager,

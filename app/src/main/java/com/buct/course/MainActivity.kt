@@ -421,6 +421,18 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
         if (session.expired) SessionRenewer.request(session.token)
     }
 
+    LaunchedEffect(safeSelectedTab, isDemoMode) {
+        if (!isDemoMode) {
+            items.getOrNull(safeSelectedTab)?.let { navItem ->
+                com.buct.course.analytics.UmamiTracker.trackPageVisit(
+                    fragmentActivity,
+                    "/tab/${navItem.page.route}",
+                    navItem.label
+                )
+            }
+        }
+    }
+
     DisposableEffect(fragmentActivity, session.token, session.expired, foreground) {
         if (foreground && !isDemoMode && UserManager.getInstance().currentSchool != null && !session.expired) {
             com.buct.course.utils.CookieWatchdog.start(fragmentActivity)

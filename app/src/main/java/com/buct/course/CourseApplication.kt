@@ -26,6 +26,7 @@ class CourseApplication : Application() {
                 ?.firstOrNull { it.pid == android.os.Process.myPid() }?.processName
         }
         if (processName == packageName) {
+            com.buct.course.analytics.UmamiTracker.install(this)
             com.buct.course.schedule.ScheduleReminderScheduler.get(this).start(this)
             // 自建考试的提醒：每次冷启动重排一遍，代价很小，能兜住漏掉的闹钟
             runCatching { com.buct.course.schedule.ExamReminderScheduler.reschedule(this) }

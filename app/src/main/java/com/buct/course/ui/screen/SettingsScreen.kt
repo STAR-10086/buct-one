@@ -365,6 +365,23 @@ fun SettingsScreen(
                     subtitle = permissionSummary,
                     onClick = onPermissionClick
                 )
+                InsetGroupedRow(
+                    icon = Icons.Outlined.Dashboard,
+                    iconTint = Color(0xFF5E5CE6),
+                    title = "匿名使用统计",
+                    subtitle = if (analyticsEnabled) {
+                        "仅上报匿名随机标识、版本号与功能热度，不含学号等个人信息"
+                    } else {
+                        "已关闭，不上报任何统计数据"
+                    },
+                    showDivider = true,
+                    trailing = {
+                        LiquidSwitch(
+                            checked = analyticsEnabled,
+                            onCheckedChange = onAnalyticsChange
+                        )
+                    }
+                )
                 SettingsRow(
                     icon = Icons.Outlined.Delete,
                     iconTint = Color(0xFFFF9F0A),

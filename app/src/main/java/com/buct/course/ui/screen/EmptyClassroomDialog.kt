@@ -105,6 +105,10 @@ fun EmptyClassroomDialog(
     var reload by remember { mutableIntStateOf(0) }
     val dayText = listOf("一", "二", "三", "四", "五", "六", "日").getOrElse(selectedDay - 1) { selectedDay.toString() }
 
+    LaunchedEffect(Unit) {
+        com.buct.course.analytics.UmamiTracker.trackPageVisit(context, "/module/empty_classroom", "空闲教室")
+    }
+
     LaunchedEffect(school, semester, selectedWeek, selectedDay, selectedPeriod, campusId, reload) {
         if (school == null) {
             error = "请先登录教务系统"
