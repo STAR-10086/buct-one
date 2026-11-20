@@ -41,6 +41,8 @@ class ScsSyncService private constructor(
 
     fun hasSavedSsoSession(): Boolean = SidPortalSessionVault.hasAnyCookie(appContext)
 
+    fun canAutoSync(): Boolean = hasSavedSsoSession() || SsoSilentRelogin.hasSavedCredentials(appContext)
+
     private fun restoreSidPortalCookies() {
         val (sidCookies, _) = SidPortalSessionVault.readCookies(appContext)
         if (sidCookies.isNotBlank() && sidCookies != lastRestoredSidCookie) {
@@ -58,12 +60,29 @@ class ScsSyncService private constructor(
         }
     }
 
-    suspend fun refresh(): Result<DomainSlice<ScsSnapshot>> = withContext(Dispatchers.IO) {
+    suspend fun refresh(userInitiated: Boolean = false): Result<DomainSlice<ScsSnapshot>> = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             _syncing.value = true
             try {
+                val sidBefore = SidPortalSessionVault.readCookies(appContext).first
                 restoreSidPortalCookies()
-                val snapshot = client.fetchFullSnapshot()
+                val snapshot = try {
+                    client.fetchFullSnapshot()
+                } catch (e: Exception) {
+                    if (!SsoSilentRelogin.isAuthFailure(e)) throw e
+                    val relogined = SsoSilentRelogin.attemptRelogin(
+                        context = appContext,
+                        sidSnapshotBefore = sidBefore,
+                        bypassCooldown = userInitiated
+                    ) { username, passwordChars ->
+                        val ok = client.loginWithSidCredentials(username, passwordChars).isSuccess
+                        if (ok) persistSidPortalCookies()
+                        ok
+                    }
+                    if (!relogined) throw e
+                    restoreSidPortalCookies()
+                    client.fetchFullSnapshot()
+                }
                 persistSidPortalCookies()
                 val committed = store.commitSuccess(
                     snapshot = snapshot,
@@ -96,6 +115,7 @@ class ScsSyncService private constructor(
                         _scsState.value = failed
                         return@withContext Result.failure(loginRes.exceptionOrNull() ?: IllegalStateException(msg))
                     }
+                    SsoSilentRelogin.resetCooldown()
                     persistSidPortalCookies()
                     val snapshot = client.fetchFullSnapshot()
                     val committed = store.commitSuccess(
@@ -112,6 +132,7 @@ class ScsSyncService private constructor(
                     _scsState.value = failed
                     Result.failure(e)
                 } finally {
+                    passwordChars.fill('\u0000')
                     _syncing.value = false
                 }
             }

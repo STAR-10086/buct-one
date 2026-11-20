@@ -69,6 +69,8 @@ import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.course.utils.SessionRenewer
 import com.buct.course.utils.SessionRepair
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
  * 空闲教室查询全屏液态玻璃页：
@@ -116,12 +118,44 @@ fun EmptyClassroomDialog(
         } catch (e: CancellationException) {
             throw e
         } catch (e: SessionExpiredException) {
-            classrooms = emptyList()
-            expiredCode = e.statusCode
+            val canAuto = UserManager.getInstance().canAutoRelogin() &&
+                com.buct.course.manager.SyncSettings.enabled(context)
+            if (canAuto) {
+                repairing = true
+                val outcome = suspendCancellableCoroutine<SessionRepair.Outcome> { cont ->
+                    SessionRepair.repair(context) { res ->
+                        if (cont.isActive) cont.resume(res)
+                    }
+                }
+                repairing = false
+                if (outcome.ok) {
+                    try {
+                        classrooms = EmptyClassroomApi.load(
+                            school, semester, selectedWeek, selectedDay, selectedPeriod, campusId
+                        )
+                    } catch (retryCancel: CancellationException) {
+                        throw retryCancel
+                    } catch (retryExpired: SessionExpiredException) {
+                        classrooms = emptyList()
+                        expiredCode = retryExpired.statusCode
+                    } catch (retryErr: Exception) {
+                        classrooms = emptyList()
+                        error = retryErr.message ?: "查询失败，请稍后重试"
+                    }
+                } else {
+                    classrooms = emptyList()
+                    expiredCode = e.statusCode
+                    error = outcome.message.orEmpty()
+                }
+            } else {
+                classrooms = emptyList()
+                expiredCode = e.statusCode
+            }
         } catch (e: Exception) {
             classrooms = emptyList()
             error = e.message ?: "查询失败，请稍后重试"
         } finally {
+            repairing = false
             loading = false
         }
     }
@@ -372,7 +406,7 @@ fun EmptyClassroomDialog(
                     ) {
                         when {
                             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                GlassLoadingState(text = "正在查询空闲教室…")
+                                GlassLoadingState(text = if (repairing) "正在自动恢复登录状态…" else "正在查询空闲教室…")
                             }
 
                             expiredCode != 0 -> Box(

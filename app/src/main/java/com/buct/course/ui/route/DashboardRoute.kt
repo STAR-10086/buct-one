@@ -723,13 +723,13 @@ fun DashboardRoute(
                         dateLine = dateLine,
                         anySyncing = anySyncing,
                         onRefreshAll = {
-                            scope.launch { theolService.refreshIfSessionValid() }
-                            scope.launch { sjcxService.refresh() }
-                            if (scsService.hasSavedSsoSession()) {
-                                scope.launch { scsService.refresh() }
+                            scope.launch { theolService.refreshIfSessionValid(userInitiated = true) }
+                            scope.launch { sjcxService.refresh(userInitiated = true) }
+                            if (scsService.canAutoSync()) {
+                                scope.launch { scsService.refresh(userInitiated = true) }
                             }
-                            if (tyglService.hasSavedSsoSession()) {
-                                scope.launch { tyglService.refresh() }
+                            if (tyglService.canAutoSync()) {
+                                scope.launch { tyglService.refresh(userInitiated = true) }
                             }
                             if (cardHasSession) {
                                 scope.launch { cardService.refresh() }

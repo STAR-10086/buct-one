@@ -45,6 +45,8 @@ class SjcxSyncService private constructor(
 
     fun hasSavedSsoSession(): Boolean = SidPortalSessionVault.hasAnyCookie(appContext)
 
+    fun canAutoSync(): Boolean = hasSavedSsoSession() || SsoSilentRelogin.hasSavedCredentials(appContext)
+
     private fun restoreSidPortalCookies() {
         val (sidCookies, _) = SidPortalSessionVault.readCookies(appContext)
         if (sidCookies.isNotBlank() && sidCookies != lastRestoredSidCookie) {
@@ -62,16 +64,41 @@ class SjcxSyncService private constructor(
         }
     }
 
+    private suspend fun <T> executeWithAutoRelogin(
+        userInitiated: Boolean = false,
+        block: () -> T
+    ): T {
+        val sidBefore = SidPortalSessionVault.readCookies(appContext).first
+        restoreSidPortalCookies()
+        return try {
+            block().also { persistSidPortalCookies() }
+        } catch (e: Exception) {
+            if (!SsoSilentRelogin.isAuthFailure(e)) throw e
+            val relogined = SsoSilentRelogin.attemptRelogin(
+                context = appContext,
+                sidSnapshotBefore = sidBefore,
+                bypassCooldown = userInitiated
+            ) { username, passwordChars ->
+                val ok = client.loginWithSidCredentials(username, passwordChars).isSuccess
+                if (ok) persistSidPortalCookies()
+                ok
+            }
+            if (!relogined) throw e
+            restoreSidPortalCookies()
+            block().also { persistSidPortalCookies() }
+        }
+    }
+
     /**
-     * 尝试复用已有统一身份认证（sidportal）TGT 同步实践教学数据。
+     * 尝试复用已有统一身份认证（sidportal）TGT 同步实践教学数据，会话失效时自动尝试静默重登。
      */
-    suspend fun refresh(): Result<DomainSlice<SjcxSnapshot>> = withContext(Dispatchers.IO) {
+    suspend fun refresh(userInitiated: Boolean = false): Result<DomainSlice<SjcxSnapshot>> = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             _syncing.value = true
             try {
-                restoreSidPortalCookies()
-                val snapshot = client.fetchFullSnapshot()
-                persistSidPortalCookies()
+                val snapshot = executeWithAutoRelogin(userInitiated = userInitiated) {
+                    client.fetchFullSnapshot()
+                }
                 val committed = store.commitSuccess(
                     snapshot = snapshot,
                     parserVersion = SjcxParser.PARSER_VERSION
@@ -106,6 +133,7 @@ class SjcxSyncService private constructor(
                         _sjcxState.value = failed
                         return@withContext Result.failure(loginRes.exceptionOrNull() ?: IllegalStateException(msg))
                     }
+                    SsoSilentRelogin.resetCooldown()
                     persistSidPortalCookies()
                     val snapshot = client.fetchFullSnapshot()
                     val committed = store.commitSuccess(
@@ -139,8 +167,9 @@ class SjcxSyncService private constructor(
         syncMutex.withLock {
             _syncing.value = true
             try {
-                restoreSidPortalCookies()
-                val msg = client.uploadExperimentReport(item, pdfFile, displayFileName)
+                val msg = executeWithAutoRelogin(userInitiated = true) {
+                    client.uploadExperimentReport(item, pdfFile, displayFileName)
+                }
                 runCatching {
                     val snapshot = client.fetchFullSnapshot()
                     val committed = store.commitSuccess(snapshot, SjcxParser.PARSER_VERSION)
@@ -163,8 +192,9 @@ class SjcxSyncService private constructor(
     ): Result<SjcxDownloadedFile> = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             try {
-                restoreSidPortalCookies()
-                val file = client.downloadReportTemplate(item, appContext.cacheDir)
+                val file = executeWithAutoRelogin(userInitiated = true) {
+                    client.downloadReportTemplate(item, appContext.cacheDir)
+                }
                 Result.success(file)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -180,8 +210,9 @@ class SjcxSyncService private constructor(
     ): Result<SjcxDownloadedFile> = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             try {
-                restoreSidPortalCookies()
-                val file = client.downloadSubmittedReport(item, appContext.cacheDir)
+                val file = executeWithAutoRelogin(userInitiated = true) {
+                    client.downloadSubmittedReport(item, appContext.cacheDir)
+                }
                 Result.success(file)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -196,8 +227,9 @@ class SjcxSyncService private constructor(
         syncMutex.withLock {
             _syncing.value = true
             try {
-                restoreSidPortalCookies()
-                val msg = client.registerLecture(projectTimeId)
+                val msg = executeWithAutoRelogin(userInitiated = true) {
+                    client.registerLecture(projectTimeId)
+                }
                 runCatching {
                     val snapshot = client.fetchFullSnapshot()
                     _sjcxState.value = store.commitSuccess(snapshot, SjcxParser.PARSER_VERSION)
@@ -218,8 +250,9 @@ class SjcxSyncService private constructor(
         syncMutex.withLock {
             _syncing.value = true
             try {
-                restoreSidPortalCookies()
-                val msg = client.cancelLectureRegistration(creProjectStuId)
+                val msg = executeWithAutoRelogin(userInitiated = true) {
+                    client.cancelLectureRegistration(creProjectStuId)
+                }
                 runCatching {
                     val snapshot = client.fetchFullSnapshot()
                     _sjcxState.value = store.commitSuccess(snapshot, SjcxParser.PARSER_VERSION)
@@ -243,8 +276,9 @@ class SjcxSyncService private constructor(
         syncMutex.withLock {
             _syncing.value = true
             try {
-                restoreSidPortalCookies()
-                val msg = client.saveLectureExperience(creProjectStuId, experience)
+                val msg = executeWithAutoRelogin(userInitiated = true) {
+                    client.saveLectureExperience(creProjectStuId, experience)
+                }
                 runCatching {
                     val snapshot = client.fetchFullSnapshot()
                     _sjcxState.value = store.commitSuccess(snapshot, SjcxParser.PARSER_VERSION)

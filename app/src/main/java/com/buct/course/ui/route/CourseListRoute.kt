@@ -1771,6 +1771,16 @@ private class CourseListLogicHelper(
     
     fun parseIndexParamsAndFetch(html: String) {
         if (!isCurrentRequest()) return
+        if (html.contains("login_slogin") ||
+            html.contains("sidportal.buct.edu.cn") ||
+            (html.contains("用户登录") && html.contains("password"))
+        ) {
+            CourseApiClient.getInstance().notifyCookieExpired(requestSession)
+            if (!com.buct.course.utils.SessionRenewer.canRenew()) {
+                onError("登录已失效，请重新登录")
+            }
+            return
+        }
         // Logic from parseIndexParams
          try {
             val pattern = """<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"[^>]*>""".toRegex()

@@ -96,7 +96,16 @@ fun AcademicCourseListRoute(school: SchoolConfig) {
                 coursesLoaded = true
             }
         } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { if (sessions.isCurrent(expectedSession)) error = e.message ?: "课程加载失败，请重试" }
+        catch (e: Exception) {
+            if (sessions.isCurrent(expectedSession)) {
+                if (e is AcademicException && e.status == AcademicStatus.SESSION_EXPIRED) {
+                    com.buct.course.network.CourseApiClient.getInstance().notifyCookieExpired(expectedSession)
+                    error = if (com.buct.course.utils.SessionRenewer.canRenew()) "" else (e.message ?: "登录已失效，请重新登录")
+                } else {
+                    error = e.message ?: "课程加载失败，请重试"
+                }
+            }
+        }
         finally { if (sessions.isCurrent(expectedSession) && kotlinx.coroutines.currentCoroutineContext()[Job]?.isActive == true) loading = false }
     }
 
@@ -333,7 +342,16 @@ fun AcademicSelectedCoursesRoute(school: SchoolConfig, refreshRevision: Int = 0,
             val loaded = withContext(Dispatchers.IO) { AcademicCourseBridge.selectedCourses(school, account, expectedSession) }
             if (sessions.isCurrent(expectedSession)) { courses = loaded; loadedRevision = refreshRevision }
         } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { if (sessions.isCurrent(expectedSession)) error = e.message ?: "已选课程加载失败" }
+        catch (e: Exception) {
+            if (sessions.isCurrent(expectedSession)) {
+                if (e is AcademicException && e.status == AcademicStatus.SESSION_EXPIRED) {
+                    com.buct.course.network.CourseApiClient.getInstance().notifyCookieExpired(expectedSession)
+                    error = if (com.buct.course.utils.SessionRenewer.canRenew()) "" else (e.message ?: "登录已失效，请重新登录")
+                } else {
+                    error = e.message ?: "已选课程加载失败"
+                }
+            }
+        }
         finally { if (sessions.isCurrent(expectedSession) && kotlinx.coroutines.currentCoroutineContext()[Job]?.isActive == true) loading = false }
     }
     if (error.isNotBlank()) Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {

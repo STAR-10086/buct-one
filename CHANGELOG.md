@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### 优化与修复
+- **统一身份认证凭证过期自动静默重登**：新增跨模块单飞静默重登协调器 `SsoSilentRelogin`，当北化在线、实践教学、第二课堂、体测与体育、空闲教室及选课接口检测到会话失效时，优先使用安全存储的统一身份认证凭据自动重登并刷新 `SidPortalSessionVault` / `jwglxt` 会话，消除“请重新登录”打断。
 - **修复全局玻璃 Toast 切页重复弹出与子页遮挡**：为 `GlassToaster` 增加一次性消费语义（`consume`）与过期淘汰机制，并结合 `LocalLifecycleOwner` 仅由前台 `RESUMED` 宿主持有消费、离屏自动隐藏，彻底解决打开校园卡/体测等独立页面时复现上一页面 Toast 的问题；同时将主界面 `GlassToastHost` 移至 `DialogHost` 之后，避免选课/空闲教室等全屏子页遮挡提示。
 
 ---

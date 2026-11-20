@@ -197,23 +197,8 @@ private fun SjcxScreen(
         }
     }
 
-    suspend fun trySilentRelogin(): Boolean {
-        val user = UserManager.getInstance().apply { init(context) }
-        val pwd = user.accountPassword
-        val uname = user.username.ifBlank { user.studentId.orEmpty() }
-        if (pwd.isNullOrEmpty() || uname.isBlank()) return false
-        return service.loginAndSync(uname, pwd.toCharArray()).isSuccess
-    }
-
     suspend fun registerLectureWithRelogin(projectTimeId: String): Result<String> {
-        val first = service.registerLecture(projectTimeId)
-        if (first.isSuccess) return first
-        val firstMsg = first.exceptionOrNull()?.message.orEmpty()
-        if (!isAuthRequiredError(firstMsg)) return first
-        if (trySilentRelogin()) {
-            return service.registerLecture(projectTimeId)
-        }
-        return first
+        return service.registerLecture(projectTimeId)
     }
 
     fun startLecturePolling(lecture: SjcxLectureBatchItem) {
@@ -274,14 +259,11 @@ private fun SjcxScreen(
     }
 
     LaunchedEffect(Unit) {
-        if (slice.provenance.refreshState == RefreshState.NEVER && service.hasSavedSsoSession()) {
-            val res = service.refresh()
-            if (res.isFailure) {
-                val msg = res.exceptionOrNull()?.message.orEmpty()
-                if (isAuthRequiredError(msg)) {
-                    trySilentRelogin()
-                }
-            }
+        if ((slice.provenance.refreshState == RefreshState.NEVER ||
+                slice.provenance.refreshState == RefreshState.FAILED_FALLBACK ||
+                !slice.lastError.isNullOrBlank()) && service.canAutoSync()
+        ) {
+            service.refresh()
         }
     }
 
@@ -325,14 +307,12 @@ private fun SjcxScreen(
                     onClick = {
                         scope.launch {
                             feedbackMsg = null
-                            val res = service.refresh()
+                            val res = service.refresh(userInitiated = true)
                             if (res.isFailure) {
-                                if (trySilentRelogin()) {
-                                    GlassToaster.show("实践教学数据已刷新")
-                                } else {
-                                    val err = res.exceptionOrNull()?.message ?: "刷新失败"
-                                    feedbackMsg = err
-                                    GlassToaster.show(err)
+                                val err = res.exceptionOrNull()?.message ?: "刷新失败"
+                                feedbackMsg = err
+                                GlassToaster.show(err)
+                                if (isAuthRequiredError(err)) {
                                     showLoginDialog = true
                                 }
                             } else {
@@ -872,18 +852,16 @@ private fun SjcxScreen(
                         val id = target.creProjectStuId
                         confirmCancelItem = null
                         scope.launch {
-                            var res = service.cancelLectureRegistration(id)
-                            if (res.isFailure && isAuthRequiredError(res.exceptionOrNull()?.message.orEmpty())) {
-                                if (trySilentRelogin()) {
-                                    res = service.cancelLectureRegistration(id)
-                                }
-                            }
+                            val res = service.cancelLectureRegistration(id)
                             res.onSuccess { msg ->
                                 GlassToaster.show(msg)
                             }.onFailure { err ->
                                 val msg = err.message ?: "取消失败"
                                 feedbackMsg = msg
                                 GlassToaster.show(msg)
+                                if (isAuthRequiredError(msg)) {
+                                    showLoginDialog = true
+                                }
                             }
                         }
                     },
@@ -926,18 +904,16 @@ private fun SjcxScreen(
                             val content = text
                             editingExperienceItem = null
                             scope.launch {
-                                var res = service.saveLectureExperience(stuId, content)
-                                if (res.isFailure && isAuthRequiredError(res.exceptionOrNull()?.message.orEmpty())) {
-                                    if (trySilentRelogin()) {
-                                        res = service.saveLectureExperience(stuId, content)
-                                    }
-                                }
+                                val res = service.saveLectureExperience(stuId, content)
                                 res.onSuccess { msg ->
                                     GlassToaster.show(msg)
                                 }.onFailure { err ->
                                     val msg = err.message ?: "保存失败"
                                     feedbackMsg = msg
                                     GlassToaster.show(msg)
+                                    if (isAuthRequiredError(msg)) {
+                                        showLoginDialog = true
+                                    }
                                 }
                             }
                         },

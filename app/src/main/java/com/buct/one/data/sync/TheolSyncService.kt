@@ -76,12 +76,36 @@ class TheolSyncService private constructor(
 
     fun hasSavedSsoSession(): Boolean = SidPortalSessionVault.hasAnyCookie(appContext)
 
+    fun canAutoSync(): Boolean = hasSavedSsoSession() || SsoSilentRelogin.hasSavedCredentials(appContext)
+
+    private suspend fun ensureSessionActiveWithAutoRelogin(
+        forceSso: Boolean = false,
+        bypassCooldown: Boolean = false
+    ): Boolean {
+        restoreEncryptedSession()
+        if (!forceSso && client.isSessionRecentlyVerified()) return true
+        if (client.ensureSessionActive(forceSso = forceSso)) return true
+        val sidBefore = SidPortalSessionVault.readCookies(appContext).first
+        val relogined = SsoSilentRelogin.attemptRelogin(
+            context = appContext,
+            sidSnapshotBefore = sidBefore,
+            bypassCooldown = bypassCooldown
+        ) { username, passwordChars ->
+            val ok = client.loginWithCredentials(username, passwordChars).isSuccess
+            if (ok) persistEncryptedSession()
+            ok
+        }
+        if (!relogined) return false
+        restoreEncryptedSession()
+        return client.isSessionRecentlyVerified() || client.ensureSessionActive(forceSso = true)
+    }
+
     /**
-     * 尝试复用已有统一身份认证（sidportal）或 MEOL 会话静默同步北化在线作业：
+     * 尝试复用已有统一身份认证（sidportal）或 MEOL 会话静默同步北化在线作业，凭证过期时自动尝试静默重登：
      * 阶段一（前台秒出）：优先拉取待办提醒页课程，立刻展示未交作业与测验；
      * 阶段二（后台静默）：在后台逐门补齐在修课程列表中的已提交历史作业与测验，期间不阻塞查看详情或下载附件。
      */
-    suspend fun refreshIfSessionValid(): Result<DomainSlice<TheolSnapshot>> = withContext(Dispatchers.IO) {
+    suspend fun refreshIfSessionValid(userInitiated: Boolean = false): Result<DomainSlice<TheolSnapshot>> = withContext(Dispatchers.IO) {
         backgroundJob?.cancel()
         val gen = syncGeneration.incrementAndGet()
         _backgroundSyncing.value = false
@@ -92,16 +116,32 @@ class TheolSyncService private constructor(
                 // 每次同步前检查加密库是否有来自教务登录页的最新凭证
                 restoreEncryptedSession()
                 val probedReminder = client.probeReminderHtml()
-                if (probedReminder == null && !client.ensureSessionActive(forceSso = true)) {
+                if (probedReminder == null &&
+                    !ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = userInitiated)
+                ) {
                     val failed = store.commitFailure("北化在线会话未建立，请重新登录教务系统或点击右上角登录", TheolParser.PARSER_VERSION)
                     _theolState.value = failed
                     return@withLock Result.failure(IllegalStateException(failed.lastError))
                 }
                 persistEncryptedSession()
-                val phase = client.fetchPendingPhaseSnapshot(
-                    nowMillis = System.currentTimeMillis(),
-                    prefetchedReminderHtml = probedReminder
-                )
+                val phase = try {
+                    client.fetchPendingPhaseSnapshot(
+                        nowMillis = System.currentTimeMillis(),
+                        prefetchedReminderHtml = probedReminder
+                    )
+                } catch (e: Exception) {
+                    if (SsoSilentRelogin.isAuthFailure(e) &&
+                        ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = userInitiated)
+                    ) {
+                        persistEncryptedSession()
+                        client.fetchPendingPhaseSnapshot(
+                            nowMillis = System.currentTimeMillis(),
+                            prefetchedReminderHtml = null
+                        )
+                    } else {
+                        throw e
+                    }
+                }
                 pendingPhase = phase
                 val committed = commitMergedPhase1(phase.snapshot)
                 Result.success(committed)
@@ -139,6 +179,7 @@ class TheolSyncService private constructor(
                         _theolState.value = failed
                         return@withLock Result.failure(loginResult.exceptionOrNull() ?: IllegalStateException(msg))
                     }
+                    SsoSilentRelogin.resetCooldown()
                     persistEncryptedSession()
                     val phase = client.fetchPendingPhaseSnapshot(System.currentTimeMillis())
                     pendingPhase = phase
@@ -149,6 +190,7 @@ class TheolSyncService private constructor(
                     _theolState.value = failed
                     Result.failure(e)
                 } finally {
+                    passwordChars.fill('\u0000')
                     _syncing.value = false
                 }
             }
@@ -343,12 +385,22 @@ class TheolSyncService private constructor(
                 }
                 try {
                     restoreEncryptedSession()
-                    if (!client.isSessionRecentlyVerified() && !client.ensureSessionActive()) {
+                    if (!ensureSessionActiveWithAutoRelogin(bypassCooldown = true)) {
                         return@withLock Result.failure(
                             IllegalStateException("北化在线会话未建立，请重新登录教务系统或点击右上角登录")
                         )
                     }
-                    val detail = fetcher()
+                    val detail = try {
+                        fetcher()
+                    } catch (e: Exception) {
+                        if (SsoSilentRelogin.isAuthFailure(e) &&
+                            ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = true)
+                        ) {
+                            fetcher()
+                        } else {
+                            throw e
+                        }
+                    }
                     persistEncryptedSession()
                     cache[key] = detail
                     persistCache(cache)
@@ -371,7 +423,7 @@ class TheolSyncService private constructor(
         syncMutex.withLock {
             try {
                 restoreEncryptedSession()
-                if (!client.isSessionRecentlyVerified() && !client.ensureSessionActive()) {
+                if (!ensureSessionActiveWithAutoRelogin(bypassCooldown = true)) {
                     return@withLock Result.failure(
                         IllegalStateException("北化在线会话未建立，请先同步或重新登录")
                     )
@@ -379,7 +431,7 @@ class TheolSyncService private constructor(
                 val cleanLid = courseLid.trim()
                 if (!targetIsCourseHome && cleanLid.isNotBlank() && !client.isCourseContextFresh(cleanLid)) {
                     if (!client.enterCourseContext(cleanLid)) {
-                        if (!client.ensureSessionActive(forceSso = true) ||
+                        if (!ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = true) ||
                             !client.enterCourseContext(cleanLid, force = true)
                         ) {
                             return@withLock Result.failure(
@@ -410,17 +462,32 @@ class TheolSyncService private constructor(
         syncMutex.withLock {
             try {
                 restoreEncryptedSession()
-                if (!client.isSessionRecentlyVerified() && !client.ensureSessionActive()) {
+                if (!ensureSessionActiveWithAutoRelogin(bypassCooldown = true)) {
                     return@withContext Result.failure(
                         IllegalStateException("请先登录教务统一身份认证（sidportal）")
                     )
                 }
-                val file = client.downloadAttachment(
-                    url = url,
-                    suggestedName = suggestedName,
-                    courseLid = courseLid,
-                    cacheRootDir = appContext.cacheDir
-                )
+                val file = try {
+                    client.downloadAttachment(
+                        url = url,
+                        suggestedName = suggestedName,
+                        courseLid = courseLid,
+                        cacheRootDir = appContext.cacheDir
+                    )
+                } catch (e: Exception) {
+                    if (SsoSilentRelogin.isAuthFailure(e) &&
+                        ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = true)
+                    ) {
+                        client.downloadAttachment(
+                            url = url,
+                            suggestedName = suggestedName,
+                            courseLid = courseLid,
+                            cacheRootDir = appContext.cacheDir
+                        )
+                    } else {
+                        throw e
+                    }
+                }
                 persistEncryptedSession()
                 Result.success(file)
             } catch (e: Exception) {

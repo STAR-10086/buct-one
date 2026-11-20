@@ -187,14 +187,20 @@ fun HomeworkRoute() {
         }
     }
 
-    // 首次进入作业页且本地已有教务统一认证凭证时，自动静默复用凭证同步北化在线与实践教学实验报告
+    // 首次进入作业页且本地已有统一认证会话或保存凭据时，自动静默同步北化在线与实践教学实验报告
     LaunchedEffect(Unit) {
-        if (!autoTried && service.hasSavedSsoSession()) {
+        if (!autoTried) {
             autoTried = true
-            if (theolSlice.provenance.refreshState == RefreshState.NEVER) {
+            if ((theolSlice.provenance.refreshState == RefreshState.NEVER ||
+                    theolSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK ||
+                    !theolSlice.lastError.isNullOrBlank()) && service.canAutoSync()
+            ) {
                 launch { service.refreshIfSessionValid() }
             }
-            if (sjcxSlice.provenance.refreshState == RefreshState.NEVER) {
+            if ((sjcxSlice.provenance.refreshState == RefreshState.NEVER ||
+                    sjcxSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK ||
+                    !sjcxSlice.lastError.isNullOrBlank()) && sjcxService.canAutoSync()
+            ) {
                 launch { sjcxService.refresh() }
             }
         }
@@ -262,7 +268,7 @@ fun HomeworkRoute() {
                             scope.launch {
                                 feedbackMsg = null
                                 if (selectedTab == 3) {
-                                    val res = sjcxService.refresh()
+                                    val res = sjcxService.refresh(userInitiated = true)
                                     if (res.isFailure) {
                                         feedbackMsg = res.exceptionOrNull()?.message
                                         if (feedbackMsg?.contains("登录") == true || feedbackMsg?.contains("过期") == true) {
@@ -270,8 +276,8 @@ fun HomeworkRoute() {
                                         }
                                     }
                                 } else {
-                                    launch { sjcxService.refresh() }
-                                    val res = service.refreshIfSessionValid()
+                                    launch { sjcxService.refresh(userInitiated = true) }
+                                    val res = service.refreshIfSessionValid(userInitiated = true)
                                     if (res.isFailure) {
                                         feedbackMsg = res.exceptionOrNull()?.message
                                         if (feedbackMsg?.contains("登录") == true || feedbackMsg?.contains("过期") == true) {

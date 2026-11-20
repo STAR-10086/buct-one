@@ -183,19 +183,11 @@ private fun TyglScreen(
     }
 
     LaunchedEffect(Unit) {
-        if (slice.provenance.refreshState == RefreshState.NEVER && service.hasSavedSsoSession()) {
-            val res = service.refresh()
-            if (res.isFailure) {
-                val msg = res.exceptionOrNull()?.message.orEmpty()
-                if (msg.contains("登录") || msg.contains("过期") || msg.contains("会话")) {
-                    val user = UserManager.getInstance().apply { init(context) }
-                    val pwd = user.accountPassword
-                    val uname = user.username.ifBlank { user.studentId.orEmpty() }
-                    if (!pwd.isNullOrEmpty() && uname.isNotBlank()) {
-                        service.loginAndSync(uname, pwd.toCharArray())
-                    }
-                }
-            }
+        if ((slice.provenance.refreshState == RefreshState.NEVER ||
+                slice.provenance.refreshState == RefreshState.FAILED_FALLBACK ||
+                !slice.lastError.isNullOrBlank()) && service.canAutoSync()
+        ) {
+            service.refresh()
         }
     }
 
@@ -245,7 +237,7 @@ private fun TyglScreen(
                     onClick = {
                         scope.launch {
                             feedbackMsg = null
-                            val res = service.refresh()
+                            val res = service.refresh(userInitiated = true)
                             if (res.isFailure) {
                                 val err = res.exceptionOrNull()?.message ?: "体测数据刷新失败"
                                 feedbackMsg = err
