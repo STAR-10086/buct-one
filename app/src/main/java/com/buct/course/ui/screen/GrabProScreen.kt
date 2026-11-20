@@ -99,12 +99,12 @@ import com.buct.course.ui.system.SystemSecondaryButton
 import com.buct.course.ui.system.SystemSegmentedControl
 import com.buct.course.ui.system.rememberGlassAccessibilityMode
 import androidx.compose.ui.semantics.Role
-import com.buct.course.ui.system.SystemTopBar
 import com.buct.course.ui.theme.SemanticSuccess
 import com.buct.course.ui.theme.SemanticWarning
 
 
 
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun GrabProScreen(
     isRunning: Boolean,
@@ -213,13 +213,6 @@ fun GrabProScreen(
             else -> "从课程列表添加到队列"
         }
     )
-    val collapseTravel = with(LocalDensity.current) { 96.dp.toPx() }
-    val headerCollapse by remember(collapseTravel) {
-        derivedStateOf {
-            if (scrollState.firstVisibleItemIndex > 0) 1f
-            else (scrollState.firstVisibleItemScrollOffset / collapseTravel).coerceIn(0f, 1f)
-        }
-    }
     val canStart = when {
         isRunning -> true
         localScheduledMode && hasScheduledTask -> onCancelScheduledTask != null
@@ -303,12 +296,6 @@ fun GrabProScreen(
                 BlurEffect(blur, blur, TileMode.Clamp) else null
         }).then(if (controlsState.expanded) Modifier.clearAndSetSemantics {} else Modifier),
         containerColor = Color.Transparent,
-        topBar = {
-            Box(Modifier.moduleEntrance(0)) {
-            SystemTopBar(title = "抢课工作台", collapseFraction = headerCollapse,
-                subtitle = schoolName.takeIf { it.isNotBlank() } ?: "管理队列与执行任务")
-            }
-        },
         bottomBar = {
             Spacer(Modifier.height(overlayInset + TaskControlsReservedHeight))
         }

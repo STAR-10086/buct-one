@@ -87,6 +87,7 @@ import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
+import com.buct.course.ui.system.GlassWindowHost
 import com.buct.course.ui.system.SystemCompactSegmentedControl
 import com.buct.course.ui.system.SystemDialog
 import com.buct.course.ui.system.SystemDivider
@@ -126,10 +127,12 @@ class JwNoticeActivity : ComponentActivity() {
         val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 1)
         setContent {
             CourseSelectorTheme {
-                JwNoticeScreen(
-                    initialTab = initialTab,
-                    onBack = { finish() }
-                )
+                GlassWindowHost {
+                    JwNoticeScreen(
+                        initialTab = initialTab,
+                        onBack = { finish() }
+                    )
+                }
             }
         }
     }

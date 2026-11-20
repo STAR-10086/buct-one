@@ -289,13 +289,19 @@ fun SystemTopBar(
             ) {
                 navigationIcon?.invoke()
                 Column(modifier = Modifier.weight(1f)) {
+                    val expandedTitleSp = when {
+                        title.length >= 7 -> 20f
+                        title.length >= 6 -> 22f
+                        else -> 28f
+                    }
                     Text(
                         text = title,
-                        fontSize = lerpSp(28f, 17f, collapse),
+                        fontSize = lerpSp(expandedTitleSp, 17f, collapse),
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.sp,
                         color = titleColor,
-                        maxLines = if (collapse < 0.5f) 2 else 1,
+                        maxLines = 1,
+                        softWrap = false,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                     if (!subtitle.isNullOrBlank()) {
@@ -308,7 +314,7 @@ fun SystemTopBar(
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -318,7 +324,7 @@ fun SystemTopBar(
                                 )
                                 Text(
                                     text = subtitle,
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp, letterSpacing = 0.sp),
                                     fontWeight = FontWeight.Medium,
                                     color = appearance.onSurfaceVariant.copy(alpha = 0.80f),
                                     maxLines = 1,
@@ -330,7 +336,7 @@ fun SystemTopBar(
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                     content = actions
                 )
             }

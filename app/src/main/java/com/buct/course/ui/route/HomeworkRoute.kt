@@ -46,8 +46,6 @@ import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.UploadFile
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -230,16 +228,16 @@ fun HomeworkRoute() {
         RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED ->
             "更新于 ${timeFormatter.format(Date(theolSlice.provenance.capturedAt))}"
         RefreshState.STALE ->
-            "历史快照 · ${timeFormatter.format(Date(theolSlice.provenance.capturedAt))}"
+            "快照 · ${timeFormatter.format(Date(theolSlice.provenance.capturedAt))}"
         RefreshState.FAILED_FALLBACK ->
-            "同步失败（已保留旧快照）"
+            "同步失败 · 保留快照"
     }
-    val subtitle = if (theolBgSyncing) "$baseSubtitle · 后台补齐已交课程中…" else baseSubtitle
+    val subtitle = if (theolBgSyncing) "$baseSubtitle · 后台同步中…" else baseSubtitle
 
     Column(modifier = Modifier.fillMaxSize()) {
         SystemTopBar(
             title = "作业",
-            subtitle = "北化在线 · $subtitle",
+            subtitle = subtitle,
             actions = {
                 SystemIconButton(
                     icon = Icons.Outlined.FilterList,
@@ -752,67 +750,40 @@ private fun HomeworkGlassCard(
                         color = badgeColor
                     )
                 }
-                Box {
-                    Icon(
-                        imageVector = Icons.Outlined.MoreVert,
-                        contentDescription = "作业操作",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .clickable { menuExpanded = true }
-                            .padding(4.dp)
-                    )
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("查看作业详情") },
-                            onClick = {
-                                menuExpanded = false
-                                onOpenDetail()
-                            }
-                        )
-                        if (hw.canSubmit) {
-                            DropdownMenuItem(
-                                text = { Text("直接去交作业") },
-                                onClick = {
-                                    menuExpanded = false
-                                    onOpenSubmit()
-                                }
-                            )
-                        } else if (hw.hasResult || hw.resultHref.isNotBlank()) {
-                            DropdownMenuItem(
-                                text = { Text("查看已交结果") },
-                                onClick = {
-                                    menuExpanded = false
-                                    onOpenSubmit()
-                                }
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("删除此作业") },
-                            onClick = {
-                                menuExpanded = false
-                                onHideHomework()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "拉黑课程「${hw.courseName.ifBlank { "该课程" }}」",
-                                    color = Color(0xFFFF453A)
-                                )
-                            },
-                            onClick = {
-                                menuExpanded = false
-                                onBlacklistCourse()
-                            }
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = Icons.Outlined.MoreVert,
+                    contentDescription = "作业操作",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable { menuExpanded = true }
+                        .padding(4.dp)
+                )
             }
+        }
+        if (menuExpanded) {
+            TheolCardActionDialog(
+                title = hw.title.ifBlank { "作业操作" },
+                courseName = hw.courseName,
+                onDismiss = { menuExpanded = false },
+                actions = buildList {
+                    add(TheolCardMenuAction("查看作业详情", onClick = onOpenDetail))
+                    if (hw.canSubmit) {
+                        add(TheolCardMenuAction("直接去交作业", primary = true, onClick = onOpenSubmit))
+                    } else if (hw.hasResult || hw.resultHref.isNotBlank()) {
+                        add(TheolCardMenuAction("查看已交结果", onClick = onOpenSubmit))
+                    }
+                    add(TheolCardMenuAction("删除此作业", onClick = onHideHomework))
+                    add(
+                        TheolCardMenuAction(
+                            label = "拉黑课程「${hw.courseName.ifBlank { "该课程" }}」",
+                            destructive = true,
+                            onClick = onBlacklistCourse
+                        )
+                    )
+                }
+            )
         }
         Text(
             text = hw.title,
@@ -1236,57 +1207,34 @@ private fun TestGlassCard(
                         color = badgeColor
                     )
                 }
-                Box {
-                    Icon(
-                        imageVector = Icons.Outlined.MoreVert,
-                        contentDescription = "测验操作",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .clickable { menuExpanded = true }
-                            .padding(4.dp)
-                    )
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("查看测验详情") },
-                            onClick = {
-                                menuExpanded = false
-                                onOpenDetail()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("直接进入测验") },
-                            onClick = {
-                                menuExpanded = false
-                                onOpenTest()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("隐藏此测验") },
-                            onClick = {
-                                menuExpanded = false
-                                onHideTest()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "拉黑课程「${test.courseName.ifBlank { "该课程" }}」",
-                                    color = Color(0xFFFF453A)
-                                )
-                            },
-                            onClick = {
-                                menuExpanded = false
-                                onBlacklistCourse()
-                            }
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = Icons.Outlined.MoreVert,
+                    contentDescription = "测验操作",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable { menuExpanded = true }
+                        .padding(4.dp)
+                )
             }
+        }
+        if (menuExpanded) {
+            TheolCardActionDialog(
+                title = test.title.ifBlank { "测验操作" },
+                courseName = test.courseName,
+                onDismiss = { menuExpanded = false },
+                actions = listOf(
+                    TheolCardMenuAction("查看测验详情", onClick = onOpenDetail),
+                    TheolCardMenuAction("直接进入测验", primary = true, onClick = onOpenTest),
+                    TheolCardMenuAction("隐藏此测验", onClick = onHideTest),
+                    TheolCardMenuAction(
+                        label = "拉黑课程「${test.courseName.ifBlank { "该课程" }}」",
+                        destructive = true,
+                        onClick = onBlacklistCourse
+                    )
+                )
+            )
         }
         Text(
             text = test.title,
@@ -1314,6 +1262,73 @@ private fun TestGlassCard(
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
                 color = MaterialTheme.colorScheme.primary
             )
+        }
+    }
+}
+
+private data class TheolCardMenuAction(
+    val label: String,
+    val primary: Boolean = false,
+    val destructive: Boolean = false,
+    val onClick: () -> Unit
+)
+
+@Composable
+private fun TheolCardActionDialog(
+    title: String,
+    courseName: String,
+    actions: List<TheolCardMenuAction>,
+    onDismiss: () -> Unit
+) {
+    SystemDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        dismissButton = {
+            SystemSecondaryButton(
+                text = "取消",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = courseName.ifBlank { "北化在线课程" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            actions.forEach { action ->
+                val invoke: () -> Unit = {
+                    onDismiss()
+                    action.onClick()
+                }
+                when {
+                    action.destructive -> SystemDestructiveButton(
+                        text = action.label,
+                        onClick = invoke,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    action.primary -> SystemPrimaryButton(
+                        text = action.label,
+                        onClick = invoke,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    else -> SystemSecondaryButton(
+                        text = action.label,
+                        onClick = invoke,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
         }
     }
 }

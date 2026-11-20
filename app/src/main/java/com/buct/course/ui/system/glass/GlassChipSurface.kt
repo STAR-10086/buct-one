@@ -58,7 +58,8 @@ fun Modifier.liquidChip(
     elevation: Dp = 0.dp,
     interactive: Boolean = true,
     appearance: GlassChipAppearance = GlassChipAppearance.Default,
-    opticalFeedback: Boolean = interactive
+    opticalFeedback: Boolean = interactive,
+    drawContour: Boolean = true
 ): Modifier {
     val toolbar = com.buct.course.ui.system.LocalTopBarMotion.current
     val isLight = !rememberGlassDarkTheme()
@@ -184,6 +185,9 @@ fun Modifier.liquidChip(
                 // 31/32 上背景已由 glassLens 以折射方式画过，不能再画一遍
                 if (lensAnchor == null) drawBackdrop()
             },
+            highlight = { null },
+            shadow = { null },
+            innerShadow = { null },
             layerBlock = if (allowInteraction) {
                 {
                     applyChipGlassDeformation(
@@ -208,7 +212,8 @@ fun Modifier.liquidChip(
             intensity = rimStrength,
             isLightTheme = isLight,
             pressProgress = { optics.pressProgress },
-            pointerOffset = { if (allowOpticalFeedback) optics.pointerPosition else Offset.Unspecified }
+            pointerOffset = { if (allowOpticalFeedback) optics.pointerPosition else Offset.Unspecified },
+            drawContour = drawContour
         )
         .then(if (allowInteraction) optics.gestureModifier else Modifier)
 }
@@ -234,7 +239,8 @@ fun Modifier.glassChip(
     elevation: Dp = 0.dp,
     rimIntensity: Float = 1f,
     dimmed: Boolean = false,
-    pressProgress: () -> Float = { 0f }
+    pressProgress: () -> Float = { 0f },
+    drawContour: Boolean = true
 ): Modifier {
     val isLight = !rememberGlassDarkTheme()
     val strength = if (dimmed) GlassRecipe.ChipDisabledSurfaceScale else 1f
@@ -274,7 +280,7 @@ fun Modifier.glassChip(
         )
         .clip(shape)
         .background(surfaceBrush)
-        .glassRim(shape, rim, isLight, pressProgress)
+        .glassRim(shape, rim, isLight, pressProgress, drawContour = drawContour)
 }
 
 /**
@@ -296,7 +302,8 @@ fun Modifier.glassRim(
     intensity: Float = 1f,
     isLightTheme: Boolean = true,
     pressProgress: () -> Float = { 0f },
-    pointerOffset: () -> Offset = { Offset.Unspecified }
+    pointerOffset: () -> Offset = { Offset.Unspecified },
+    drawContour: Boolean = true
 ): Modifier = drawWithCache {
     val outline = shape.createOutline(size, layoutDirection, this)
     val contourWidth = 1.dp.toPx()
@@ -359,13 +366,15 @@ fun Modifier.glassRim(
             drawOutline(innerOutline, brush = innerBrush, style = Stroke(innerWidth))
         }
 
-        // 外轮廓：均匀一圈，界定形状。按下时收紧变实，像被压出的应力边
-        val contourColor = if (isLightTheme) {
-            Color.Black.copy(alpha = baseContour * intensity * (1f + 0.5f * p))
-        } else {
-            Color.White.copy(alpha = baseContour * intensity * (1f + 0.5f * p))
+        if (drawContour) {
+            // 外轮廓：均匀一圈，界定形状。按下时收紧变实，像被压出的应力边
+            val contourColor = if (isLightTheme) {
+                Color.Black.copy(alpha = baseContour * intensity * (1f + 0.5f * p))
+            } else {
+                Color.White.copy(alpha = baseContour * intensity * (1f + 0.5f * p))
+            }
+            drawOutline(outline, color = contourColor, style = Stroke(contourWidth))
         }
-        drawOutline(outline, color = contourColor, style = Stroke(contourWidth))
     }
 }
 
@@ -385,7 +394,8 @@ fun Modifier.adaptiveGlassChip(
     optics: InteractiveOptics,
     enabled: Boolean = true,
     elevation: Dp = 0.dp,
-    interactive: Boolean = true
+    interactive: Boolean = true,
+    drawContour: Boolean = true
 ): Modifier {
     val toolbar = com.buct.course.ui.system.LocalTopBarMotion.current
     val usable = backdrop?.takeIf { isBackdropSupported() }
@@ -396,7 +406,8 @@ fun Modifier.adaptiveGlassChip(
             optics = optics,
             enabled = enabled,
             elevation = elevation,
-            interactive = interactive
+            interactive = interactive,
+            drawContour = drawContour
         )
     }
 
@@ -421,7 +432,8 @@ fun Modifier.adaptiveGlassChip(
             shape = shape,
             elevation = elevation,
             dimmed = !enabled,
-            pressProgress = { optics.pressProgress }
+            pressProgress = { optics.pressProgress },
+            drawContour = drawContour
         )
         .then(if (allowInteraction) optics.gestureModifier else Modifier)
 }

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,13 +57,6 @@ fun CourseSectionRoute(onBack: (() -> Unit)? = null) {
                 selectedIndex = tab,
                 onSelect = { tab = it },
                 modifier = Modifier.widthIn(max = 220.dp)
-            )
-            Box(Modifier.weight(1f))
-            // 与课表页一致：二级目录标题右对齐提示当前所在处，字号取 labelSmall
-            androidx.compose.material3.Text(
-                text = if (tab == 0) "选课与课程表" else "抢课工作台",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Box(

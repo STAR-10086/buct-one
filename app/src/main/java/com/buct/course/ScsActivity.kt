@@ -65,6 +65,7 @@ import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassProgressBar
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
+import com.buct.course.ui.system.GlassWindowHost
 import com.buct.course.ui.system.SystemCompactSegmentedControl
 import com.buct.course.ui.system.SystemDialog
 import com.buct.course.ui.system.SystemDivider
@@ -102,10 +103,12 @@ class ScsActivity : ComponentActivity() {
         val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 1)
         setContent {
             CourseSelectorTheme {
-                ScsScreen(
-                    initialTab = initialTab,
-                    onBack = { finish() }
-                )
+                GlassWindowHost {
+                    ScsScreen(
+                        initialTab = initialTab,
+                        onBack = { finish() }
+                    )
+                }
             }
         }
     }

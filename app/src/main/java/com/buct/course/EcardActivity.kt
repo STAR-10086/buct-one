@@ -74,6 +74,7 @@ import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassLoadingState
 import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassTextField
+import com.buct.course.ui.system.GlassWindowHost
 import com.buct.course.ui.system.LiquidSwitch
 import com.buct.course.ui.system.SystemCompactSegmentedControl
 import com.buct.course.ui.system.SystemDestructiveButton
@@ -126,7 +127,8 @@ class EcardActivity : ComponentActivity() {
 
         setContent {
             CourseSelectorTheme {
-                val cardSlice by cardService.cardState.collectAsState()
+                GlassWindowHost {
+                    val cardSlice by cardService.cardState.collectAsState()
                 val syncing by cardService.syncing.collectAsState()
                 val hasSession by cardService.hasSession.collectAsState()
                 val hasSavedPassword by cardService.hasSavedPassword.collectAsState()
@@ -326,6 +328,7 @@ class EcardActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
                 }
             }
         }

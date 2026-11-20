@@ -77,6 +77,7 @@ import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassStatChip
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
+import com.buct.course.ui.system.GlassWindowHost
 import com.buct.course.ui.system.SystemCompactSegmentedControl
 import com.buct.course.ui.system.SystemDialog
 import com.buct.course.ui.system.SystemEmptyState
@@ -113,9 +114,11 @@ class PortalActivity : ComponentActivity() {
         val initialCol = intent.getIntExtra(EXTRA_NEWS_COLUMN, 0).coerceIn(0, PortalNewsColumn.entries.lastIndex)
         setContent {
             CourseSelectorTheme {
-                when (mode) {
-                    MODE_LIBRARY -> PortalLibraryScreen(onBack = { finish() })
-                    else -> PortalNewsScreen(initialColumnIndex = initialCol, onBack = { finish() })
+                GlassWindowHost {
+                    when (mode) {
+                        MODE_LIBRARY -> PortalLibraryScreen(onBack = { finish() })
+                        else -> PortalNewsScreen(initialColumnIndex = initialCol, onBack = { finish() })
+                    }
                 }
             }
         }

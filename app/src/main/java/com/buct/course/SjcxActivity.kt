@@ -74,6 +74,7 @@ import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
+import com.buct.course.ui.system.GlassWindowHost
 import com.buct.course.ui.system.SystemActionButton
 import com.buct.course.ui.system.SystemCapacityIndicator
 import com.buct.course.ui.system.SystemCompactSegmentedControl
@@ -122,10 +123,12 @@ class SjcxActivity : ComponentActivity() {
         val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 3)
         setContent {
             CourseSelectorTheme {
-                SjcxScreen(
-                    initialTab = initialTab,
-                    onBack = { finish() }
-                )
+                GlassWindowHost {
+                    SjcxScreen(
+                        initialTab = initialTab,
+                        onBack = { finish() }
+                    )
+                }
             }
         }
     }
@@ -277,13 +280,13 @@ private fun SjcxScreen(
     val timeFormatter = remember { SimpleDateFormat("MM-dd HH:mm", Locale.CHINA) }
 
     val sub = when (slice.provenance.refreshState) {
-        RefreshState.NEVER -> "尚未同步 · 统一身份认证免密换票"
-        RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED -> {
-            val termInfo = data?.yearterm?.takeIf { it.isNotBlank() }?.let { "$it · " }.orEmpty()
-            "${termInfo}第 ${data?.currentWeek ?: 1} 周 · 更新于 ${timeFormatter.format(Date(slice.provenance.capturedAt))}"
-        }
-        RefreshState.STALE -> "历史缓存 · ${timeFormatter.format(Date(slice.provenance.capturedAt))}"
-        RefreshState.FAILED_FALLBACK -> "同步失败（已保留本地快照）"
+        RefreshState.NEVER -> "尚未同步 · 点击刷新"
+        RefreshState.FRESH, RefreshState.EMPTY_CONFIRMED ->
+            "第${data?.currentWeek ?: 1}周 · 更新于 ${timeFormatter.format(Date(slice.provenance.capturedAt))}"
+        RefreshState.STALE ->
+            "快照 · ${timeFormatter.format(Date(slice.provenance.capturedAt))}"
+        RefreshState.FAILED_FALLBACK ->
+            "同步失败 · 保留快照"
     }
 
     GlassPageScaffold(

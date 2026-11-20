@@ -61,7 +61,7 @@ fun AccountChip(
     Row(
         modifier = modifier
             .height(chipHeight)
-            .adaptiveGlassChip(backdrop, CircleShape, optics, enabled = true, interactive = true)
+            .adaptiveGlassChip(backdrop, CircleShape, optics, enabled = true, interactive = true, drawContour = false)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

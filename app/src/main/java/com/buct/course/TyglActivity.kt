@@ -67,6 +67,7 @@ import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassProgressBar
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
+import com.buct.course.ui.system.GlassWindowHost
 import com.buct.course.ui.system.SystemActionButton
 import com.buct.course.ui.system.SystemCompactSegmentedControl
 import com.buct.course.ui.system.SystemDialog
@@ -112,10 +113,12 @@ class TyglActivity : ComponentActivity() {
         val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 3)
         setContent {
             CourseSelectorTheme {
-                TyglScreen(
-                    initialTab = initialTab,
-                    onBack = { finish() }
-                )
+                GlassWindowHost {
+                    TyglScreen(
+                        initialTab = initialTab,
+                        onBack = { finish() }
+                    )
+                }
             }
         }
     }

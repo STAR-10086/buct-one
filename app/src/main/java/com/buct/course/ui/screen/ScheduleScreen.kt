@@ -194,9 +194,9 @@ private val HeaderTitleGap = 6.dp
 /** 分段控件自身高度。它内部写死 36dp，容器给不足就会被压扁而不是被裁。 */
 private val HeaderSegmentHeight = 36.dp
 private val HeaderWeekRowExpanded = 48.dp
-private val HeaderWeekRowCollapsed = 32.dp
+private val HeaderWeekRowCollapsed = 36.dp
 private val HeaderBottomPadExpanded = 8.dp
-private val HeaderBottomPadCollapsed = 4.dp
+private val HeaderBottomPadCollapsed = 10.dp
 
 /**
  * 顶栏两态高度。**短屏只压展开态的空白**——折叠态、分段控件高度与玻璃条几何
@@ -242,7 +242,7 @@ private fun rememberScheduleHeaderMetrics(availableWidth: Dp): ScheduleHeaderMet
         val dateStyleCollapsed = titleStyle.copy(fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold)
         val weekdayStack = textHeight("一", dayStyle) + 2.dp + textHeight("28", dateStyle) + 2.dp + 3.dp
         val weekdayStackCollapsed =
-            textHeight("一", dayStyleCollapsed) + 1.dp + textHeight("28", dateStyleCollapsed) + 1.dp + 2.dp
+            textHeight("一", dayStyleCollapsed) + 1.dp + textHeight("28", dateStyleCollapsed) + 1.dp + 2.dp + 3.dp
         val weekRow = maxOf(screen.tall(HeaderWeekRowExpanded, 42.dp), weekdayStack, 30.dp * density.fontScale)
         val bottomPad = screen.tall(HeaderBottomPadExpanded, 4.dp)
         // Four 48dp targets keep their original row. Fit the text to the actual parent,
@@ -873,7 +873,7 @@ fun WeekHeaderCompact(
                         Box(
                             modifier = Modifier
                                 .height(HeaderSegmentHeight * segmentFraction)
-                                .clipToBounds(),
+                                .then(if (collapse > 0.001f) Modifier.clipToBounds() else Modifier),
                             contentAlignment = Alignment.CenterStart
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
