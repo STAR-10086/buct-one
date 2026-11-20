@@ -598,7 +598,16 @@ fun ScheduleRoute() {
             detailSourceBounds = focusRegistry.bounds(it.id)
             detailId = it.id
         },
-        onEmptyCellClick = { day, period -> emptyClassroomRequest = EmptyClassroomRequest(currentWeek, day, period) },
+        onEmptyCellClick = { day, period ->
+            com.buct.course.EmptyClassroomActivity.launch(
+                context = context,
+                semester = resolvedTermId,
+                week = currentWeek,
+                day = day,
+                period = period,
+                allowTimeSwitch = false
+            )
+        },
         onSettingsClick = { settingsTermOverride = null; showSettingsDialog = true },
         onExportClick = {
             if (courses.isEmpty()) {

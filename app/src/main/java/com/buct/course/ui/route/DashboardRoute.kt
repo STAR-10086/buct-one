@@ -1110,15 +1110,21 @@ fun DashboardRoute(
                                     classroomDayLabel = classroomDayLabel,
                                     onNavigateTab = ::navigateToPageOrWarn,
                                     onOpenClassroom = { campusId, periodOffset ->
-                                        emptyClassroomInitialCampus = campusId
-                                        emptyClassroomPeriodOffset = periodOffset
-                                        showEmptyClassroomDialog = true
+                                        com.buct.course.EmptyClassroomActivity.launch(
+                                            context = context,
+                                            semester = classroomSlot.semester,
+                                            week = classroomSlot.week,
+                                            day = classroomSlot.day,
+                                            period = (classroomSlot.period + periodOffset).coerceIn(1, 12),
+                                            allowTimeSwitch = true,
+                                            initialCampusId = campusId
+                                        )
                                     },
                                     onOpenCourseSelect = {
                                         if (BottomNavPreferences.isVisible(StartupPage.Courses)) {
                                             onSwitchPage(StartupPage.Courses)
                                         } else {
-                                            showCourseSelectSubpage = true
+                                            com.buct.course.CourseSelectionActivity.launch(context)
                                         }
                                     }
                                 )

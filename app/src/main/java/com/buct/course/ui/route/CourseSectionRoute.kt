@@ -45,8 +45,11 @@ import com.buct.course.ui.system.SystemIconButton
  * 就不会再叠一层，不会出现顶栏下面多一条空白。
  */
 @Composable
-fun CourseSectionRoute(onBack: (() -> Unit)? = null) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+fun CourseSectionRoute(
+    initialTab: Int = 0,
+    onBack: (() -> Unit)? = null
+) {
+    var tab by rememberSaveable { mutableIntStateOf(initialTab.coerceIn(0, 1)) }
     Column(Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier

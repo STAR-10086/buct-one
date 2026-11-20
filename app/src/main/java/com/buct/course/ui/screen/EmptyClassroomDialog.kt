@@ -87,6 +87,29 @@ fun EmptyClassroomDialog(
     initialCampusId: Int = 2,
     onDismiss: () -> Unit
 ) {
+    GlassSubpage(onDismiss = onDismiss) { close ->
+        EmptyClassroomContent(
+            semester = semester,
+            week = week,
+            day = day,
+            period = period,
+            allowTimeSwitch = allowTimeSwitch,
+            initialCampusId = initialCampusId,
+            onBack = close
+        )
+    }
+}
+
+@Composable
+fun EmptyClassroomContent(
+    semester: String,
+    week: Int,
+    day: Int,
+    period: Int,
+    allowTimeSwitch: Boolean = false,
+    initialCampusId: Int = 2,
+    onBack: () -> Unit
+) {
     val school = remember { UserManager.getInstance().currentSchool }
     val context = LocalContext.current
     var selectedWeek by remember(week) { mutableIntStateOf(week.coerceIn(1, 20)) }
@@ -104,10 +127,6 @@ fun EmptyClassroomDialog(
     var repairing by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
     val dayText = listOf("一", "二", "三", "四", "五", "六", "日").getOrElse(selectedDay - 1) { selectedDay.toString() }
-
-    LaunchedEffect(Unit) {
-        com.buct.course.analytics.UmamiTracker.trackPageVisit(context, "/module/empty_classroom", "空闲教室")
-    }
 
     LaunchedEffect(school, semester, selectedWeek, selectedDay, selectedPeriod, campusId, reload) {
         if (school == null) {
@@ -197,21 +216,20 @@ fun EmptyClassroomDialog(
         }
     }.joinToString(" · ")
 
-    GlassSubpage(onDismiss = onDismiss) { close ->
-        Box(modifier = Modifier.fillMaxSize()) {
-            GlassPageScaffold(
-                title = "空闲教室",
-                subtitle = "第 ${selectedWeek} 周 · 星期${dayText} · 第 ${selectedPeriod} 节",
-                onBack = close,
-                actions = {
-                    SystemIconButton(
-                        icon = Icons.Outlined.Refresh,
-                        contentDescription = "刷新",
-                        enabled = !loading,
-                        onClick = { reload++ }
-                    )
-                }
-            ) { padding ->
+    Box(modifier = Modifier.fillMaxSize()) {
+        GlassPageScaffold(
+            title = "空闲教室",
+            subtitle = "第 ${selectedWeek} 周 · 星期${dayText} · 第 ${selectedPeriod} 节",
+            onBack = onBack,
+            actions = {
+                SystemIconButton(
+                    icon = Icons.Outlined.Refresh,
+                    contentDescription = "刷新",
+                    enabled = !loading,
+                    onClick = { reload++ }
+                )
+            }
+        ) { padding ->
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -507,7 +525,6 @@ fun EmptyClassroomDialog(
                 onDismiss = { SessionRenewer.cancelVerification() }
             )
         }
-    }
 }
 
 private fun buildingFilterRank(name: String): Int {
