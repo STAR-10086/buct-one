@@ -188,6 +188,7 @@ object AppearanceSettingsManager {
     private const val STORE_VERSION = 2
 
     private const val KEY_GLASS_EFFECT = "glass_effect_enabled"
+    private const val KEY_PREDICTIVE_BACK = "predictive_back_enabled"
 
     private const val TAG = "AppearanceSettings"
 
@@ -231,6 +232,13 @@ object AppearanceSettingsManager {
      * 不需要任何新的渲染代码。
      */
     var glassEffectEnabled by mutableStateOf(true)
+        private set
+
+    /**
+     * 是否开启预测性返回手势（跟手侧滑预览上一级页面）。
+     * 关闭时应用内二级页/弹窗改走传统即时返回，Activity 层亦拦截系统跨页/回桌面预测预览。
+     */
+    var predictiveBackEnabled by mutableStateOf(true)
         private set
 
     /** 用户自定义底色，从未设置过则为 null。 */
@@ -291,6 +299,7 @@ object AppearanceSettingsManager {
             ?.let { name -> runCatching { WallpaperPreset.valueOf(name) }.getOrNull() }
             ?: WallpaperPreset.Aurora
         glassEffectEnabled = prefs?.getBoolean(KEY_GLASS_EFFECT, true) ?: true
+        predictiveBackEnabled = prefs?.getBoolean(KEY_PREDICTIVE_BACK, true) ?: true
         customColor = prefs
             ?.takeIf { it.contains(KEY_CUSTOM_COLOR) }
             ?.getInt(KEY_CUSTOM_COLOR, 0)
@@ -360,6 +369,13 @@ object AppearanceSettingsManager {
         if (glassEffectEnabled == enabled) return
         glassEffectEnabled = enabled
         prefs?.edit()?.putBoolean(KEY_GLASS_EFFECT, enabled)?.apply()
+    }
+
+    /** 预测性返回手势总开关。落盘即生效。 */
+    fun updatePredictiveBack(enabled: Boolean) {
+        if (predictiveBackEnabled == enabled) return
+        predictiveBackEnabled = enabled
+        prefs?.edit()?.putBoolean(KEY_PREDICTIVE_BACK, enabled)?.apply()
     }
 
     /**

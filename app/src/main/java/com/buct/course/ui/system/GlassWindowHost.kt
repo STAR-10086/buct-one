@@ -1,5 +1,9 @@
 package com.buct.course.ui.system
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -8,6 +12,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +64,7 @@ fun GlassWindowHost(
     val modalAnchor = if (modal != null) rememberGlassLensRegion("window-modal", dialogs.currentDialog) { coordinates ->
         drawBlurred(GlassRecipe.DialogBlurDp * density.density) { drawBackdropSource(modal, density, coordinates) }
     } else null
+    PredictiveBackFallbackHandler(hasBlockingSurface = dialogs.hasBlockingSurface)
     CompositionLocalProvider(
         LocalGlassWindowOwner provides view,
         LocalAppBackdrop provides wallpaper,
@@ -86,4 +92,34 @@ fun GlassWindowHost(
             }
         }
     }
+}
+
+/**
+ * 当用户在设置中关闭「预测性返回手势」时，在窗口根层级注册最低优先级的 BackHandler，
+ * 拦截系统级跨 Activity / 回桌面预测性返回预览，改为传统即时返回。
+ * 必须位于 GlassOverlayHost / 页面内容 / DialogHost 之前，以确保内部下拉菜单、弹窗与子页优先响应返回键。
+ */
+@Composable
+internal fun PredictiveBackFallbackHandler(hasBlockingSurface: Boolean) {
+    val view = LocalView.current
+    val activity = remember(view) { view.context.findActivity() }
+    BackHandler(
+        enabled = !AppearanceSettingsManager.predictiveBackEnabled &&
+            activity != null &&
+            !hasBlockingSurface
+    ) {
+        if (activity != null) {
+            if (activity.isTaskRoot) {
+                activity.moveTaskToBack(false)
+            } else {
+                activity.finish()
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

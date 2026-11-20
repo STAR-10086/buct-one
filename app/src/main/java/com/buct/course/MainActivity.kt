@@ -430,6 +430,10 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
         }
     }
 
+    com.buct.course.ui.system.PredictiveBackFallbackHandler(
+        hasBlockingSurface = dialogHostState.hasBlockingSurface
+    )
+
     GlassOverlayHost(modifier = Modifier.fillMaxSize()) {
         val useGlass = isBackdropSupported()
         // debug 平铺水印的开关。**它绝不能进任何 backdrop 捕获层**，见文件末尾

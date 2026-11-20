@@ -410,6 +410,8 @@ fun SettingsRoute(
         onThemeSelect = { showThemeDialog = true },
         glassEffectEnabled = AppearanceSettingsManager.glassEffectEnabled,
         onGlassEffectChange = { AppearanceSettingsManager.updateGlassEffect(it) },
+        predictiveBackEnabled = AppearanceSettingsManager.predictiveBackEnabled,
+        onPredictiveBackChange = { AppearanceSettingsManager.updatePredictiveBack(it) },
         isSuper = isSuper,
         quotaInfo = quotaInfo,
         canRefreshCookie = canRefreshCookie,

@@ -1,6 +1,8 @@
 package com.buct.course.ui.system
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
+import com.buct.course.manager.AppearanceSettingsManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -126,6 +128,7 @@ internal val LocalDialogModuleProgress = compositionLocalOf<State<Float>?> { nul
 @Composable
 fun DialogHost(state: DialogHostState, modifier: Modifier = Modifier) {
     val reducedMotion = rememberGlassAccessibilityMode().reduceMotion
+    val predictiveBackEnabled = AppearanceSettingsManager.predictiveBackEnabled
     val density = LocalDensity.current
     state.dialogs.forEach { dialog ->
         key(dialog.handle.key) {
@@ -143,7 +146,13 @@ fun DialogHost(state: DialogHostState, modifier: Modifier = Modifier) {
             val scope = rememberCoroutineScope()
             var hostSize by remember { mutableStateOf(IntSize.Zero) }
             var hostOrigin by remember { mutableStateOf(Offset.Zero) }
-            PredictiveBackHandler(enabled = state.dialogs.lastOrNull() === dialog && visibility.targetState) { events ->
+            val isTop = state.dialogs.lastOrNull() === dialog && visibility.targetState
+            LaunchedEffect(predictiveBackEnabled) {
+                if (!predictiveBackEnabled && backProgress.value != 0f) {
+                    backProgress.snapTo(0f)
+                }
+            }
+            PredictiveBackHandler(enabled = isTop && predictiveBackEnabled) { events ->
                 try {
                     events.collect {
                         if (dialog.bottomSheet != null) dialog.bottomSheet.predictiveProgress(it.progress)
@@ -158,6 +167,9 @@ fun DialogHost(state: DialogHostState, modifier: Modifier = Modifier) {
                         dialog.bottomSheet?.restore() ?: backProgress.animateTo(0f, com.buct.course.ui.theme.MotionSpring.snappy())
                     }
                 }
+            }
+            BackHandler(enabled = isTop && !predictiveBackEnabled) {
+                state.dismiss(dialog.handle)
             }
             AnimatedVisibility(visibleState = visibility, enter = EnterTransition.None, exit = ExitTransition.None) {
                 val progress = transition.animateFloat(transitionSpec = {

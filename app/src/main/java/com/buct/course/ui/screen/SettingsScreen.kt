@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.automirrored.outlined.Login
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Home
@@ -102,6 +103,8 @@ fun SettingsScreen(
     onThemeSelect: () -> Unit = {},
     glassEffectEnabled: Boolean = true,
     onGlassEffectChange: (Boolean) -> Unit = {},
+    predictiveBackEnabled: Boolean = true,
+    onPredictiveBackChange: (Boolean) -> Unit = {},
     isSuper: Boolean = false,
     quotaInfo: String = "",
     canRefreshCookie: Boolean = false,
@@ -279,11 +282,28 @@ fun SettingsScreen(
                     } else {
                         "已关闭，改用不透明材质，更省电也更清晰"
                     },
-                    showDivider = false,
+                    showDivider = true,
                     trailing = {
                         LiquidSwitch(
                             checked = glassEffectEnabled,
                             onCheckedChange = onGlassEffectChange
+                        )
+                    }
+                )
+                InsetGroupedRow(
+                    icon = Icons.AutoMirrored.Outlined.Undo,
+                    iconTint = Color(0xFF00C7BE),
+                    title = "预测性返回手势",
+                    subtitle = if (predictiveBackEnabled) {
+                        "边缘侧滑返回时跟手预览上一级页面"
+                    } else {
+                        "已关闭，恢复传统即时返回"
+                    },
+                    showDivider = false,
+                    trailing = {
+                        LiquidSwitch(
+                            checked = predictiveBackEnabled,
+                            onCheckedChange = onPredictiveBackChange
                         )
                     }
                 )
