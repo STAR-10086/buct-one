@@ -6,20 +6,11 @@ import org.junit.Test
 
 class PasswordLoginGatewayFactoryTest {
     @Test
-    fun createsTyustSsoGatewayOnlyForTyust() {
-        val tyust = SchoolConfig("tyust", "TYUST", "newjwc.tyust.edu.cn", "https")
+    fun createsBuctSsoGatewayOnlyForBuct() {
+        val buct = SchoolConfig("buct", "北京化工大学", "jwglxt.buct.edu.cn", "https")
         val other = SchoolConfig("other", "Other", "jw.example.edu.cn", "https")
 
-        assertTrue(PasswordLoginGatewayFactory.create(tyust) is TyustSsoLoginManager)
-        assertTrue(PasswordLoginGatewayFactory.create(other) is PasswordLoginManager)
-    }
-
-    @Test
-    fun createsZjutSsoGatewayOnlyForZjut() {
-        val zjut = SchoolConfig("zjut", "浙江工业大学", "www.gdjw.zjut.edu.cn", "http")
-        val other = SchoolConfig("other", "Other", "jw.example.edu.cn", "https")
-
-        assertTrue(PasswordLoginGatewayFactory.create(zjut) is ZjutSsoLoginManager)
+        assertTrue(PasswordLoginGatewayFactory.create(buct) is BuctSsoLoginManager)
         assertTrue(PasswordLoginGatewayFactory.create(other) is PasswordLoginManager)
     }
 }

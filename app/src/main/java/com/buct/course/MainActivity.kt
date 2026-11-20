@@ -94,8 +94,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import com.buct.course.activation.ActivationManager
-import com.buct.course.activation.ActivationScreen
 import com.buct.course.manager.AppearanceSettingsManager
 import com.buct.course.manager.SmartSelector
 import com.buct.course.manager.UserManager
@@ -178,33 +176,16 @@ class MainActivity : FragmentActivity() {
         setContent {
             CourseSelectorTheme {
                 var showOnboarding by remember { mutableStateOf(!hasSeenOnboarding && !userManager.isDemoMode) }
-                // 开源版授权检查不会拒绝设备，先呈现真实内容，再完成兼容检查。
-                var activationState by remember { mutableIntStateOf(2) }
 
-                LaunchedEffect(Unit) {
-                    if (!userManager.isDemoMode) {
-                        val activated = ActivationManager.checkActivation(this@MainActivity)
-                        if (!activated) activationState = 1
-                    }
-                }
-
-                when {
-                    activationState == 1 -> {
-                        ActivationScreen(onActivated = { activationState = 2 })
-                    }
-
-                    showOnboarding -> {
-                        OnboardingScreen(
-                            onFinish = {
-                                prefs.edit().putBoolean(KEY_HAS_SEEN_ONBOARDING, true).apply()
-                                showOnboarding = false
-                            }
-                        )
-                    }
-
-                    else -> {
-                        MainScreen(fragmentActivity = this@MainActivity)
-                    }
+                if (showOnboarding) {
+                    OnboardingScreen(
+                        onFinish = {
+                            prefs.edit().putBoolean(KEY_HAS_SEEN_ONBOARDING, true).apply()
+                            showOnboarding = false
+                        }
+                    )
+                } else {
+                    MainScreen(fragmentActivity = this@MainActivity)
                 }
             }
         }

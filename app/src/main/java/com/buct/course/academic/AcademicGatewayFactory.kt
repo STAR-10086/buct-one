@@ -13,11 +13,8 @@ object AcademicGatewayFactory {
     }
 
     /** Auto-detection opts into this flow but cannot create an adapter yet. */
-    fun hasSelectedAdapter(school: SchoolConfig): Boolean = when (AcademicSystem.fromId(school.academicSystem)) {
-        AcademicSystem.ZF, AcademicSystem.ZF_OLD, AcademicSystem.QZ, AcademicSystem.QZ_OLD,
-        AcademicSystem.SOUTHSOFT -> true
-        else -> false
-    }
+    fun hasSelectedAdapter(school: SchoolConfig): Boolean =
+        AcademicSystem.fromId(school.academicSystem) == AcademicSystem.SOUTHSOFT
 
     suspend fun detect(school: SchoolConfig, accountStorageKey: String): AcademicSystem? {
         val originalPath = school.basePath
@@ -45,17 +42,10 @@ object AcademicGatewayFactory {
 
     fun create(school: SchoolConfig, accountStorageKey: String): AcademicProtocolAdapter {
         val system = school.academicType()
-        require(system != AcademicSystem.LEGACY_ZF && system != AcademicSystem.AUTO) { "School has no selected academic adapter" }
+        require(system == AcademicSystem.SOUTHSOFT) { "Unsupported academic adapter: ${system.id}" }
         val session = sessions.session(school.id, accountStorageKey, school.getFullBasePath())
         val transport = AcademicHttpTransport(school, session)
-        return when (system) {
-            AcademicSystem.ZF -> ZfAcademicAdapter(school, session, transport)
-            AcademicSystem.ZF_OLD -> ZfOldAcademicAdapter(school, session, transport)
-            AcademicSystem.QZ -> QzAcademicAdapter(school, session, transport)
-            AcademicSystem.QZ_OLD -> QzOldAcademicAdapter(school, session, transport)
-            AcademicSystem.SOUTHSOFT -> SouthsoftAcademicAdapter(school, session, transport)
-            AcademicSystem.LEGACY_ZF, AcademicSystem.AUTO -> error("Academic adapter is not selected")
-        }
+        return SouthsoftAcademicAdapter(school, session, transport)
     }
 
     fun createStudy(school: SchoolConfig, accountStorageKey: String): AcademicStudyAdapter {

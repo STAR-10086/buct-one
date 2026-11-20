@@ -43,7 +43,6 @@ import com.buct.course.network.CourseApiClient
 import com.buct.course.ui.screen.SettingsScreen
 import com.buct.course.update.UpdateDialog
 import com.buct.course.update.rememberUpdateState
-import com.buct.course.activation.ActivationManager
 import com.buct.course.manager.StudentLimitManager
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
@@ -101,7 +100,6 @@ fun SettingsRoute(
     val isDemoMode = remember { UserManager.getInstance().isDemoMode }
     
     var studentName by remember { mutableStateOf("") }
-    var deviceId by remember { mutableStateOf("") }
     var schoolName by remember { mutableStateOf("") }
     
     // UI States
@@ -112,7 +110,6 @@ fun SettingsRoute(
     var showStartupPageDialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val startupPagePreferences = remember(context) { StartupPagePreferences.from(context) }
     var startupPage by remember(startupPagePreferences) { mutableStateOf(startupPagePreferences.read()) }
-    var showQuotaDialog by remember { mutableStateOf(false) }
     var showAccountManagerDialog by remember { mutableStateOf(false) }
     var pendingPasswordDelete by remember { mutableStateOf<UserManager.AccountRecord?>(null) }
     var pendingAccountDelete by remember { mutableStateOf<UserManager.AccountRecord?>(null) }
@@ -125,13 +122,6 @@ fun SettingsRoute(
     var onlineSyncEnabled by remember(context) { mutableStateOf(com.buct.course.manager.SyncSettings.enabled(context)) }
     var analyticsEnabled by remember(context) { mutableStateOf(com.buct.course.analytics.UmamiTracker.isEnabled(context)) }
     
-    // Quota States
-    var isSuper by remember { mutableStateOf(false) }
-    var quotaInfo by remember { mutableStateOf("") }
-    var quotaUsedCount by remember { mutableIntStateOf(0) }
-    var quotaMaxCount by remember { mutableIntStateOf(0) }
-    var quotaBoundNames by remember { mutableStateOf<List<String>>(emptyList()) }
-    var quotaAccounts by remember { mutableStateOf<List<UserManager.AccountRecord>>(emptyList()) }
     // 账号管理走全量列表（跨学校）：这里是"管理"，不该被当前学校过滤掉
     var allAccounts by remember { mutableStateOf<List<UserManager.AccountRecord>>(emptyList()) }
     var accountsWithPassword by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -146,8 +136,6 @@ fun SettingsRoute(
     val recovery by com.buct.course.utils.SessionRenewer.state.collectAsState()
     val isRefreshingCookie = recovery.token == session.token &&
         recovery.phase == com.buct.course.utils.RecoveryPhase.Restoring
-    var showFeedback by remember { mutableStateOf(false) }
-    var feedbackUnread by remember { mutableIntStateOf(0) }
     var showWidgetSettings by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showPermissionDialog by remember { mutableStateOf(false) }
@@ -245,34 +233,18 @@ fun SettingsRoute(
 
         if (isDemoMode) {
             studentName = name ?: "演示用户"
-            deviceId = "LOCAL-DEMO"
             schoolName = school?.name ?: "正方演示大学（演示数据）"
-            isSuper = true
-            quotaUsedCount = 0
-            quotaMaxCount = 0
-            quotaBoundNames = emptyList()
-            quotaAccounts = emptyList()
             allAccounts = emptyList()
             accountsWithPassword = emptySet()
             currentAccountKey = userManager.currentAccountKey
             userProfile = UserProfileStore.load(context, currentAccountKey)
             canRefreshCookie = false
-            quotaInfo = "本地演示"
             return
         }
 
         studentName = name ?: "同学"
-        deviceId = ActivationManager.getSavedDeviceId(context)
         schoolName = school?.name ?: "未选择"
 
-        val maxStudents = ActivationManager.getMaxStudents(context)
-        val usedNames = StudentLimitManager.getUsedStudentNames(context)
-        val usedCount = StudentLimitManager.getUsedCount(context)
-        isSuper = maxStudents <= 0
-        quotaUsedCount = usedCount
-        quotaMaxCount = maxStudents
-        quotaBoundNames = usedNames.toList()
-        quotaAccounts = userManager.accountsForCurrentSchool
         allAccounts = userManager.savedAccounts
         accountsWithPassword = allAccounts
             .filter { userManager.hasSavedPassword(it.key) }
@@ -281,11 +253,6 @@ fun SettingsRoute(
         currentAccountKey = userManager.currentAccountKey
         userProfile = UserProfileStore.load(context, currentAccountKey)
         canRefreshCookie = userManager.loginMode == "password"
-        quotaInfo = if (isSuper) {
-            "无限制"
-        } else {
-            "$usedCount / $maxStudents"
-        }
     }
 
     LaunchedEffect(session.token) {
@@ -366,7 +333,6 @@ fun SettingsRoute(
     
     SettingsScreen(
         studentName = studentName,
-        studentId = deviceId,
         schoolName = schoolName,
         currentVersion = currentVersion,
         onSchoolSelect = {
@@ -389,7 +355,6 @@ fun SettingsRoute(
         startupPageName = startupPage.label,
         onStartupPageSelect = { showStartupPageDialog = true },
         onLogout = { showLogoutDialog = true },
-        onQuotaClick = { showQuotaDialog = true },
         onRefreshCookieClick = { refreshCookieManually() },
         onWallpaperSelect = { showWallpaperDialog = true },
         wallpaperName = currentWallpaperName,
@@ -412,8 +377,6 @@ fun SettingsRoute(
         onGlassEffectChange = { AppearanceSettingsManager.updateGlassEffect(it) },
         predictiveBackEnabled = AppearanceSettingsManager.predictiveBackEnabled,
         onPredictiveBackChange = { AppearanceSettingsManager.updatePredictiveBack(it) },
-        isSuper = isSuper,
-        quotaInfo = quotaInfo,
         canRefreshCookie = canRefreshCookie,
         isRefreshingCookie = isRefreshingCookie,
         analyticsEnabled = analyticsEnabled,
@@ -431,11 +394,6 @@ fun SettingsRoute(
             } else {
                 com.buct.course.ui.system.GlassToaster.show("在线同步已关闭，将使用本地数据，避免教务被顶号")
             }
-        },
-        feedbackUnread = feedbackUnread,
-        onFeedbackClick = {
-            feedbackUnread = 0
-            showFeedback = true
         },
         widgetCount = widgetCount,
         onWidgetManage = { showWidgetSettings = true },
@@ -479,11 +437,6 @@ fun SettingsRoute(
         }
     }
 
-    if (showFeedback) {
-        com.buct.course.ui.system.GlassSubpage(onDismiss = { showFeedback = false }) { close ->
-            com.buct.course.ui.screen.FeedbackScreen(onBack = close)
-        }
-    }
     val availableUpdate = updateState.updateInfo()
     if (updateState.showDialog() && availableUpdate != null) {
         UpdateDialog(
@@ -760,22 +713,6 @@ fun SettingsRoute(
             }
         }
     }
-    
-    if (showQuotaDialog) {
-        QuotaStatusDialog(
-            deviceId = deviceId,
-            isSuper = isSuper,
-            usedCount = quotaUsedCount,
-            maxCount = quotaMaxCount,
-            boundNames = quotaBoundNames,
-            accounts = quotaAccounts,
-            currentAccountKey = currentAccountKey,
-            onSwitchAccount = { accountKey ->
-                switchAccount(accountKey) { showQuotaDialog = false }
-            },
-            onDismiss = { showQuotaDialog = false }
-        )
-    }
 
     if (showAccountManagerDialog) {
         AccountManagerDialog(
@@ -880,217 +817,6 @@ fun SettingsRoute(
                     Spacer(modifier = Modifier.height(4.dp))
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun QuotaStatusDialog(
-    deviceId: String,
-    isSuper: Boolean,
-    usedCount: Int,
-    maxCount: Int,
-    boundNames: List<String>,
-    accounts: List<UserManager.AccountRecord>,
-    currentAccountKey: String,
-    onSwitchAccount: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val safeMax = maxCount.coerceAtLeast(0)
-    val safeUsed = usedCount.coerceAtLeast(0)
-    val usageRatio = if (!isSuper && safeMax > 0) {
-        (safeUsed.toFloat() / safeMax.toFloat()).coerceIn(0f, 1f)
-    } else {
-        1f
-    }
-    val statusText = if (isSuper) "超级用户" else "普通用户"
-    val quotaText = if (isSuper) "无限制" else "$safeUsed / $safeMax"
-
-    SystemDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = "当前账号配额",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center
-                )
-                Text(
-                    text = "设备绑定与名额使用情况",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-            }
-        },
-        confirmButton = {
-            SystemPrimaryButton(
-                text = "知道了",
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 420.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    QuotaInfoRow(label = "身份", value = statusText)
-                    QuotaInfoRow(label = "配额", value = quotaText)
-                    if (!isSuper) {
-                        LinearProgressIndicator(
-                            progress = { usageRatio },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(999.dp)),
-                            color = if (usageRatio >= 1f) SemanticWarning else NeuPrimary,
-                            trackColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
-                        )
-                    }
-                }
-            }
-
-            SystemDivider(alpha = 0.5f)
-
-            Text("设备 ID：${deviceId.ifBlank { "未获取" }}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "已绑定账号",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (boundNames.isEmpty()) {
-                    Text(
-                        text = "当前设备尚未绑定账号。",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        boundNames.forEachIndexed { index, name ->
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Surface(
-                                        modifier = Modifier.size(24.dp),
-                                        color = NeuPrimary.copy(alpha = 0.12f),
-                                        shape = CircleShape
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = "${index + 1}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = NeuPrimary,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (accounts.isNotEmpty()) {
-                SystemDivider(alpha = 0.5f)
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "切换账号",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    accounts.forEach { account ->
-                        val isCurrent = account.key == currentAccountKey
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = !isCurrent) { onSwitchAccount(account.key) },
-                            color = if (isCurrent) NeuPrimary.copy(alpha = 0.12f)
-                                else MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Text(
-                                        text = account.displayName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = "${account.accountIdText} · ${if (account.loginMode == "password") "密码登录" else "Cookie 登录"}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                SystemStatusBadge(
-                                    text = if (isCurrent) "当前" else "切换",
-                                    tone = if (isCurrent) SystemTone.Info else SystemTone.Neutral
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Text(
-                text = "说明：同一设备可绑定不同学校的学生账号，不限制数量；切换账号会同步切换 Cookie 与本地账号上下文。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 18.sp
-            )
         }
     }
 }
@@ -1255,27 +981,6 @@ private fun AccountActionButton(
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
             color = tint
-        )
-    }
-}
-
-@Composable
-private fun QuotaInfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.SemiBold
         )
     }
 }

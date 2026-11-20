@@ -28,9 +28,6 @@ import com.buct.course.academic.AcademicSystem
 import com.buct.course.manager.AppearanceSettingsManager
 import com.buct.course.manager.WallpaperMode
 import com.buct.course.model.SchoolConfig
-import com.buct.course.ui.screen.AddSchoolDialog
-import com.buct.course.ui.screen.EditSchoolConfigDialog
-import com.buct.course.ui.screen.UsageNoticeDialog
 import com.buct.course.ui.screen.MeasuredGradesHeader
 import com.buct.course.ui.screen.WeekHeaderCompact
 import com.buct.course.ui.system.*
@@ -156,37 +153,6 @@ class FeedbackFixesDeviceTest {
         } finally { compose.runOnIdle { AppearanceSettingsManager.updateGlassEffect(oldGlass) } }
     }
 
-    @Test fun allFiveSchoolTypesSurviveAddressParsingAndFormSave() {
-        val case = mutableIntStateOf(0)
-        val show = mutableStateOf(true)
-        var saved: SchoolConfig? = null
-        compose.setContent {
-            CourseSelectorTheme {
-                GlassWindowHost {
-                    key(case.intValue) {
-                        if (show.value) AddSchoolDialog(onDismiss = { show.value = false }, onConfirm = {
-                            saved = it.toSchoolConfig(); show.value = false
-                        })
-                    }
-                }
-            }
-        }
-        for ((index, type) in AcademicCapabilities.selectableSystems.withIndex()) {
-            if (index > 0) compose.runOnIdle { case.intValue = index; saved = null; show.value = true }
-            compose.onNodeWithTag("school-system-picker", useUnmergedTree = true).performScrollTo().performTouchInput { click() }
-            compose.onNode(hasText(AcademicCapabilities.selectionLabel(type)) and isSelectable()).performClick()
-            compose.onAllNodes(hasSetTextAction())[0].performScrollTo().performTextInput("http://jw.example.edu.cn:8080/custom/framework/xsMainV.htmlx")
-            compose.onNodeWithText("解析网址").performScrollTo().assertIsEnabled().performClick()
-            compose.onNodeWithText("添加", substring = false).assertIsEnabled().performClick()
-            compose.waitForIdle()
-            val restored = SchoolConfig.fromJson(requireNotNull(saved).toJson())
-            assertEquals(type.id, restored.academicSystem)
-            assertEquals("/custom", restored.basePath)
-            assertEquals("http", restored.protocol)
-            assertEquals("jw.example.edu.cn:8080", restored.domain)
-        }
-    }
-
     @Test fun customImageHeadersDoNotWashOutTheWallpaperAtTheirEdges() {
         assumeTrue("This visual regression uses an imported image in the isolated preview app",
             AppearanceSettingsManager.mode == WallpaperMode.Image)
@@ -249,43 +215,6 @@ class FeedbackFixesDeviceTest {
                 capture("image-header-$header-$dark-collapsed")
             }
         }
-    }
-
-    @Test fun editingTheExistingCompatibilityTypeKeepsItAndItsCustomPaths() {
-        val existing = SchoolConfig("existing", "兼容大学", "jw.example.edu.cn", "https").apply {
-            academicSystem = AcademicSystem.LEGACY_ZF.id
-            courseListPath = "/custom/list"
-        }
-        var saved: SchoolConfig? = null
-        compose.setContent {
-            CourseSelectorTheme { GlassWindowHost {
-                EditSchoolConfigDialog(existing, {}, { saved = it })
-            } }
-        }
-        compose.onNodeWithText("保存", substring = false).performClick()
-        compose.runOnIdle {
-            assertEquals(AcademicSystem.LEGACY_ZF.id, saved?.academicSystem)
-            assertEquals("/custom/list", saved?.courseListPath)
-        }
-    }
-
-    @Test fun privacyExplanationIsReadableAtLargeFontAndDefaultsOn() {
-        var choice: Boolean? = null
-        compose.setContent {
-            val density = LocalDensity.current.density
-            CompositionLocalProvider(LocalDensity provides Density(density, 1.6f)) {
-                CourseSelectorTheme {
-                    Box(Modifier.requiredWidth(320.dp).height(560.dp).testTag("feedback-frame")) {
-                        GlassWindowHost { UsageNoticeDialog { choice = it } }
-                    }
-                }
-            }
-        }
-        compose.onNodeWithText("匿名使用统计").assertIsDisplayed()
-        compose.onNodeWithText("参与匿名统计").performScrollTo().assertIsDisplayed()
-        capture("usage-notice-320-large")
-        compose.onNodeWithTag("usage-notice-confirm").assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals(true, choice) }
     }
 
     @Test fun circularQuarterMenuRecordsLongPressDragAndWaitsForRetraction() {

@@ -74,7 +74,6 @@ fun LoginScreen(
     onSchoolSelected: (SchoolConfig) -> Unit,
     onLoginClick: (cookie: String) -> Unit,
     onOpenWebView: () -> Unit = {},
-    onSchoolAdded: () -> Unit = {},
     onDemoMode: () -> Unit = {},
     onBack: (() -> Unit)? = null,
     isLoading: Boolean = false,
@@ -154,7 +153,6 @@ fun LoginScreen(
     }
     var showPassword by remember { mutableStateOf(false) }
     var visible by remember { mutableStateOf(false) }
-    var showEditSchoolDialog by remember { mutableStateOf(false) }
     val accessibility = rememberGlassAccessibilityMode()
     val loginPanelEnter = if (accessibility.reduceMotion) {
         androidx.compose.animation.EnterTransition.None
@@ -263,26 +261,6 @@ fun LoginScreen(
                 enter = loginPanelEnter
             ) {
                 val cardInner: @Composable ColumnScope.() -> Unit = {
-                    // Settings button
-                        Box(
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            // Settings button
-                            IconButton(
-                                onClick = { showEditSchoolDialog = true },
-                                modifier = Modifier.align(Alignment.CenterEnd).size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = "编辑学校配置",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
                         // School Selector
                         Text(
                             text = "选择学校",
@@ -295,14 +273,13 @@ fun LoginScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         
                         var selectedSchool by remember { mutableStateOf<SchoolConfig?>(null) }
-                        var showAddSchoolDialog by remember { mutableStateOf(false) }
                         val passwordOnlyLogin = selectedSchool?.passwordOnly == true
 
                         LaunchedEffect(passwordOnlyLogin) {
                             if (passwordOnlyLogin) loginTab = 0
                         }
                         
-                        // Keep the user's current choice when the list refreshes after add/edit.
+                        // Keep the user's current choice when the list refreshes.
                         LaunchedEffect(schools) {
                             val chosenId = selectedSchool?.id
                                 ?: UserManager.getInstance().currentSchool?.id
@@ -325,8 +302,6 @@ fun LoginScreen(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             placeholder = "请选择学校",
-                            actionLabel = "添加学校",
-                            onAction = { showAddSchoolDialog = true },
                             backdrop = backdrop,
                             maxLabelLines = 2
                         )
@@ -353,36 +328,6 @@ fun LoginScreen(
                                     )
                                 }
                             }
-                        }
-                        
-                        // Add School Dialog
-                        if (showAddSchoolDialog) {
-                            AddSchoolDialog(
-                                onDismiss = { showAddSchoolDialog = false },
-                                onConfirm = { draft ->
-                                    val newSchool = draft.toSchoolConfig()
-                                    com.buct.course.manager.UserManager.getInstance().addCustomSchool(newSchool)
-                                    selectedSchool = newSchool
-                                    onSchoolSelected(newSchool)
-                                    onSchoolAdded()
-                                    showAddSchoolDialog = false
-                                }
-                            )
-                        }
-                        
-                        // Edit School Config Dialog
-                        if (showEditSchoolDialog && selectedSchool != null) {
-                            EditSchoolConfigDialog(
-                                school = selectedSchool!!,
-                                onDismiss = { showEditSchoolDialog = false },
-                                onSave = { updatedSchool ->
-                                    showEditSchoolDialog = false
-                                    com.buct.course.manager.UserManager.getInstance().updateSchoolConfig(updatedSchool)
-                                    selectedSchool = updatedSchool
-                                    onSchoolSelected(updatedSchool)
-                                    onSchoolAdded()
-                                }
-                            )
                         }
                         
                         Spacer(modifier = Modifier.height(20.dp))
@@ -1033,141 +978,6 @@ fun BindingConfirmationDialog(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AddSchoolDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (com.buct.course.model.SchoolFormDraft) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var urlInput by remember { mutableStateOf("") }
-    var domain by remember { mutableStateOf("") }
-    var basePath by remember { mutableStateOf("") }
-    var protocol by remember { mutableStateOf("https") }
-    var academicSystem by remember { mutableStateOf("auto") }
-    var addressError by remember { mutableStateOf<String?>(null) }
-    
-    fun parseUrl(url: String) {
-        val parsed = com.buct.course.academic.AcademicAddress.parse(url)
-        if (parsed == null) {
-            addressError = "无法解析，请检查教务网址"
-            return
-        }
-        addressError = null
-        protocol = parsed.protocol
-        domain = parsed.domain
-        basePath = parsed.basePath
-    }
-    
-    val draft = com.buct.course.model.SchoolFormDraft(name, domain, protocol, basePath, academicSystem)
-    val showError = domain.isNotBlank() && !draft.isValidDomain
-    
-    SystemDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "添加学校",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-        },
-        confirmButton = {
-            SystemPrimaryButton(
-                text = "添加",
-                onClick = {
-                    onConfirm(draft)
-                },
-                enabled = draft.isValid && addressError == null,
-                modifier = Modifier.fillMaxWidth()
-            )
-        },
-        dismissButton = {
-            SystemSecondaryButton(
-                text = "取消",
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-    ) {
-        Column(
-            modifier = Modifier
-                .heightIn(max = 420.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            SchoolFormPanel {
-                SchoolFormPanelTitle(
-                    icon = Icons.Default.AutoAwesome,
-                    text = "从网址填写"
-                )
-                SchoolFormField(
-                    label = "教务系统网址",
-                    value = urlInput,
-                    onValueChange = { urlInput = it; addressError = null },
-                    placeholder = "http://jwxt.example.edu.cn/jwglxt",
-                    helper = "粘贴教务登录页或登录后的页面网址，解析域名、协议和基础路径",
-                    error = addressError
-                )
-                SystemPrimaryButton(
-                    text = "解析网址",
-                    onClick = { parseUrl(urlInput) },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = urlInput.isNotBlank()
-                )
-            }
-
-            SchoolFormSectionTitle("基本信息")
-
-            SchoolAcademicSystemField(academicSystem) { academicSystem = it }
-
-            SchoolFormField(
-                label = "学校名称（可选）",
-                value = name,
-                onValueChange = { name = it },
-                placeholder = "例如：XX 大学"
-            )
-
-            SchoolFormField(
-                label = "教务系统域名",
-                value = domain,
-                onValueChange = { domain = it },
-                placeholder = "jwxt.example.edu.cn",
-                helper = "非标准端口可直接带上，如 jw.example.edu.cn:30443",
-                error = if (showError) "请输入有效域名" else null
-            )
-
-            SchoolFormField(
-                label = "基础路径",
-                value = basePath,
-                onValueChange = { basePath = it },
-                placeholder = "/jwglxt、/jsxsd 或留空",
-                helper = "优先从完整网址解析；教务位于网站根目录时留空"
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "协议",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                // 两个选项用分段控件，不用下拉：一次点击就能选完，也和全 App 一致
-                SystemSegmentedControl(
-                    options = listOf("HTTPS", "HTTP"),
-                    selectedIndex = if (protocol == "https") 0 else 1,
-                    onSelect = { index -> protocol = if (index == 0) "https" else "http" },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                    text = if (protocol == "https") "加密连接，推荐优先尝试" else "非加密连接",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                )
-            }
         }
     }
 }

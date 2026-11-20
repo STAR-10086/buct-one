@@ -48,35 +48,6 @@ class AcademicCompatibilityTest {
         } finally { StudentLimitManager.clearRecords(isolated) }
     }
 
-    @Test fun qzScriptParsingWorksWithAndroidRegex() {
-        val html = """
-            <script>
-            var table = { sAjaxSource: '/jsxsd/list'
-            };
-            function xsxkOper(jx0404id, kcid) {
-                $.ajax({
-                    url: '/jsxsd/select',
-                    type: 'POST',
-                    data: { jx0404id: jx0404id, kcid: kcid }
-                });
-            }
-            function xstkOper(jx0404id) {
-                $.ajax({
-                    url: '/jsxsd/drop',
-                    type: 'POST',
-                    data: { jx0404id: jx0404id }
-                });
-            }
-            </script>
-        """.trimIndent()
-        val parsed = QzScriptParser.parse(html, "https://jw.example.edu.cn/jsxsd/category")!!
-        assertEquals("https://jw.example.edu.cn/jsxsd/list", parsed.listUrl)
-        assertEquals("POST", parsed.submitMethod)
-        assertEquals(setOf("jx0404id", "kcid"), parsed.bodyFields)
-        assertEquals("S1", QzScriptParser.expand(parsed.submitFields.getValue("jx0404id"), mapOf("jx0404id" to "S1")))
-        assertEquals(setOf("jx0404id"), parsed.dropFields.keys)
-    }
-
     @Test fun privateStatusBroadcastWorksOnThisAndroidVersion() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val received = CountDownLatch(1)

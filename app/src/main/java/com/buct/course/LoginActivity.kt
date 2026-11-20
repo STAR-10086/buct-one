@@ -138,17 +138,7 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
         UserManager.getInstance().init(this)
         selectedLoginSchool = UserManager.getInstance().currentSchool
         
-            // 🔄 每次启动 App 都同步云端激活配置（获取最新的 max_students）
         lifecycleScope.launch {
-            if (!BuildConfig.UI_PREVIEW) try {
-                withContext(Dispatchers.IO) {
-                    com.buct.course.activation.ActivationManager.checkActivation(this@LoginActivity)
-                }
-                Log.d(TAG, "已同步云端配置")
-            } catch (e: Exception) {
-                Log.w(TAG, "启动同步失败: ${e.message}")
-            }
-            
             // 🔧 关键修复：如果是为了“重新登录”而跳转过来的，不要执行自动登录检查
             val forceRelogin = intent.getBooleanExtra("force_relogin", false)
             if (forceRelogin) {
@@ -199,10 +189,6 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                     },
                     onOpenWebView = {
                         openWebView()
-                    },
-                    onSchoolAdded = {
-                        // Refresh schools list after adding
-                        schools = UserManager.getInstance().supportedSchools
                     },
                     onDemoMode = {
                         handleDemoMode()
@@ -824,22 +810,7 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
         isLoading = true
         errorMessage = null
         pendingPasswordLogin = false
-
-        // 🔄 先同步云端激活配置（获取最新的 max_students）
-        lifecycleScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    com.buct.course.activation.ActivationManager.checkActivation(this@LoginActivity)
-                }
-                Log.d(TAG, "激活配置已同步，max_students=${com.buct.course.activation.ActivationManager.getMaxStudents(this@LoginActivity)}")
-            } catch (e: Exception) {
-                Log.w(TAG, "激活配置同步失败: ${e.message}")
-            }
-            
-            // 同步完成后继续登录流程
-            pendingPasswordLogin = false
-            performLoginValidation(currentSchool, cookieStr)
-        }
+        performLoginValidation(currentSchool, cookieStr)
     }
     
     private fun performLoginValidation(currentSchool: SchoolConfig, cookieStr: String) {
@@ -937,7 +908,7 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                         bindingStudentName = studentNameParsed
                         bindingStudentId = studentIdParsed
                         
-                        val maxStudents = com.buct.course.activation.ActivationManager.getMaxStudents(this@LoginActivity)
+                        val maxStudents = com.buct.course.manager.StudentLimitManager.MAX_STUDENTS
                         val bindingCheck = com.buct.course.manager.StudentLimitManager.checkCanUseStudent(
                             context = this@LoginActivity,
                             schoolId = currentSchool.id,
@@ -996,7 +967,7 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                 proceedToMain(userManager, studentNameParsed, cookieStr)
             } else {
                 bindingStudentName = studentNameParsed; bindingStudentId = studentIdParsed
-                bindingMaxStudents = com.buct.course.activation.ActivationManager.getMaxStudents(this)
+                bindingMaxStudents = com.buct.course.manager.StudentLimitManager.MAX_STUDENTS
                 bindingUsedNames = bindingCheck.usedNames; bindingUsedCount = bindingCheck.usedCount
                 pendingCookie = cookieStr; showBindingDialog = true
             }
@@ -1086,14 +1057,7 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                     Log.d(TAG, "密码登录成功")
                     pendingPasswordLogin = true
                     // 复用现有验证流程
-                    lifecycleScope.launch {
-                        try {
-                            withContext(Dispatchers.IO) {
-                                com.buct.course.activation.ActivationManager.checkActivation(this@LoginActivity)
-                            }
-                        } catch (_: Exception) {}
-                        performLoginValidation(school, cookie)
-                    }
+                    performLoginValidation(school, cookie)
                 }
             }
 
@@ -1182,14 +1146,7 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                         return@runOnUiThread
                     }
                     pendingPasswordLogin = true
-                    lifecycleScope.launch {
-                        try {
-                            withContext(Dispatchers.IO) {
-                                com.buct.course.activation.ActivationManager.checkActivation(this@LoginActivity)
-                            }
-                        } catch (_: Exception) {}
-                        performLoginValidation(school, cookie)
-                    }
+                    performLoginValidation(school, cookie)
                 }
             }
 
@@ -1388,14 +1345,7 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                     secondarySmsSentUntil = 0L
                     isLoading = false
                     pendingPasswordLogin = true
-                    lifecycleScope.launch {
-                        try {
-                            withContext(Dispatchers.IO) {
-                                com.buct.course.activation.ActivationManager.checkActivation(this@LoginActivity)
-                            }
-                        } catch (_: Exception) {}
-                        performLoginValidation(school, cookie)
-                    }
+                    performLoginValidation(school, cookie)
                 }
             }
 
