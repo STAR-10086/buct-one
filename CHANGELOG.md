@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### 优化与修复
+- **修复全局玻璃 Toast 切页重复弹出与子页遮挡**：为 `GlassToaster` 增加一次性消费语义（`consume`）与过期淘汰机制，并结合 `LocalLifecycleOwner` 仅由前台 `RESUMED` 宿主持有消费、离屏自动隐藏，彻底解决打开校园卡/体测等独立页面时复现上一页面 Toast 的问题；同时将主界面 `GlassToastHost` 移至 `DialogHost` 之后，避免选课/空闲教室等全屏子页遮挡提示。
+
 ---
 
 ## [0.3.1] - 2026-11-20

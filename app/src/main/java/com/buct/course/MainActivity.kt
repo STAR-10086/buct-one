@@ -654,17 +654,17 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
             )
             }
 
-            // 全局玻璃 Toast：悬浮在底栏上方
+            DialogHost(
+                state = dialogHostState,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // 全局玻璃 Toast：置于 DialogHost 之上，确保子页与弹窗内触发的提示同样可见
             GlassToastHost(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = navBarContentInset + if (items.getOrNull(safeSelectedTab)?.page == StartupPage.Courses)
                         com.buct.course.ui.system.TaskControlsReservedHeight + 12.dp else 12.dp)
-            )
-
-            DialogHost(
-                state = dialogHostState,
-                modifier = Modifier.fillMaxSize()
             )
 
             // 短信二次验证（「更新登录状态」触发）：全局挂载，任何页面发起都能就地验证
