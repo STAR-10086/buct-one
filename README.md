@@ -13,7 +13,7 @@
 [![Code Check](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/check.yml?style=flat-square&label=code-check)](https://github.com/STAR-10086/buct-one/actions/workflows/check.yml)
 [![Build APK](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/build-apk.yml?style=flat-square&label=build-apk)](https://github.com/STAR-10086/buct-one/actions/workflows/build-apk.yml)
 
-[官网下载 (buct.one)](https://buct.one) · [GitHub Releases](https://github.com/STAR-10086/buct-one/releases) · [更新日志 (CHANGELOG)](CHANGELOG.md) · [上游声明 (NOTICE)](NOTICE) · [规划](docs/规划.md) · [数据层设计](docs/plan-1-data-layer.md) · [签名接入](docs/签名接入.md)
+[官网下载 (buct.one)](https://buct.one) · [GitHub Releases](https://github.com/STAR-10086/buct-one/releases) · [更新日志 (CHANGELOG)](CHANGELOG.md) · [上游声明 (NOTICE)](NOTICE) · [签名接入](docs/签名接入.md)
 
 </div>
 
@@ -158,7 +158,7 @@ model/    → 零任何外部 import
 app/src/main/java/
   com/buct/course/    主应用 UI、独立页（一卡通/实践教学/第二课堂/体测/校园邮箱）、教务适配、自动更新、桌面小组件
   com/buct/one/data/  纯分层数据内核（model / session / source / store / sync）
-docs/                 项目规划、数据层设计与签名配置文档
+docs/                 正式发布签名配置文档（签名接入.md）
 .github/workflows/    GitHub Actions 静态门禁（check.yml）、APK 构建（build-apk.yml）与标签发版（release-apk.yml）
 NOTICE                上游开源工程溯源与许可声明
 LICENSE               GNU General Public License v3.0
