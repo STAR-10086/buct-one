@@ -206,7 +206,7 @@ internal object EcardParser {
     fun mapErrorMessage(codeOrMsg: String): String {
         val raw = codeOrMsg.trim()
         return when (raw.uppercase(Locale.ROOT)) {
-            "CORE20003", "WEB10001" -> "校园卡密码错误（默认一般为身份证后六位）"
+            "CORE20003", "WEB10001" -> "校园卡密码错误（默认身份证后六位，有字母用 1 代替）"
             "CORE20004", "WEB20001", "WEB20002" -> "未找到该学工号对应的校园卡账户"
             "CORE21120" -> "登录失败次数过多，请稍后再试"
             "WEB10003" -> "初始密码禁用登录，请先在企业微信或圈存机修改卡密码"

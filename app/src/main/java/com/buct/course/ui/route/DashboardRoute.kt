@@ -2580,7 +2580,7 @@ private fun RenderLargeModuleCard(
             ) {
                 if (cardData == null) {
                     Text(
-                        text = "校园卡平台（ecard.buct.edu.cn）独立于统一身份认证，默认密码一般为身份证后六位。点击登录查询实时余额。",
+                        text = "校园卡平台（ecard.buct.edu.cn）独立于统一身份认证，默认密码为身份证后六位（有字母用 1 代替）。点击登录查询实时余额。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 3,

@@ -460,7 +460,7 @@ private fun EcardLoginPane(
             }
 
             Text(
-                text = "校园卡系统（ecard.buct.edu.cn）未接入统一身份认证，默认密码通常为本人身份证后六位；凭据经 AES+RSA 加密直连校方服务器，开启记住密码后仅用 Android Keystore 加密存于本机且不参与云备份。",
+                text = "校园卡系统（ecard.buct.edu.cn）未接入统一身份认证，默认查询密码为本人身份证后六位（含字母时用数字 1 代替）；凭据经 AES+RSA 加密直连校方服务器，开启记住密码后仅用 Android Keystore 加密存于本机且不参与云备份。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -497,7 +497,7 @@ private fun EcardLoginPane(
                     idInput = it
                     localError = null
                 },
-                placeholder = "学工号（请输入学号或教工号）",
+                placeholder = "请输入学号或教工号",
                 leadingIcon = Icons.Outlined.Person,
                 singleLine = true,
                 enabled = !syncing,
@@ -508,34 +508,42 @@ private fun EcardLoginPane(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            GlassTextField(
-                value = passwordInput,
-                onValueChange = {
-                    passwordInput = it
-                    localError = null
-                },
-                placeholder = "校园卡查询密码（默认一般为身份证后六位）",
-                leadingIcon = Icons.Outlined.Lock,
-                trailing = {
-                    Icon(
-                        imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                        contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clickable { passwordVisible = !passwordVisible }
-                    )
-                },
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                singleLine = true,
-                enabled = !syncing,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(onDone = { triggerLogin() }),
-                modifier = Modifier.fillMaxWidth()
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                GlassTextField(
+                    value = passwordInput,
+                    onValueChange = {
+                        passwordInput = it
+                        localError = null
+                    },
+                    placeholder = "请输入校园卡查询密码",
+                    leadingIcon = Icons.Outlined.Lock,
+                    trailing = {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                            contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clickable { passwordVisible = !passwordVisible }
+                        )
+                    },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    enabled = !syncing,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { triggerLogin() }),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "默认查询密码为身份证后六位，若含字母（如 X）请用 1 代替",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
 
             Row(
                 modifier = Modifier
