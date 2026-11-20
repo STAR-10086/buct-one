@@ -48,6 +48,7 @@ import com.buct.course.manager.ScheduleSettingsManager
 import com.buct.course.manager.SyncSettings
 import com.buct.course.manager.UserManager
 import com.buct.one.data.model.shortHolidayBadge
+import com.buct.one.data.sync.JwNoticeSyncService
 import com.buct.one.data.sync.PortalSyncService
 import com.buct.course.network.CourseApiClient
 import com.buct.course.ui.screen.PeriodTimeUi
@@ -214,6 +215,30 @@ fun ScheduleRoute() {
         else scheduleCache.currentTerm(routeAccountKey, UserManager.getInstance().currentSchool?.id ?: "buct").id
     }
     val reminderScheduler = remember(context) { ScheduleReminderScheduler.get(context) }
+    val isUndergradBuct = !isDemoMode && initialSchoolId == "buct"
+    val jwNoticeService = remember(context) { JwNoticeSyncService.getInstance(context) }
+    val jwNoticeSlice by jwNoticeService.noticeState.collectAsState()
+    val jwNoticeUnreadCount = remember(jwNoticeSlice.data, isUndergradBuct) {
+        if (!isUndergradBuct) {
+            0
+        } else {
+            val snap = jwNoticeSlice.data
+            if (snap == null) {
+                0
+            } else {
+                val nowMs = System.currentTimeMillis()
+                val reminderCutoffMs = nowMs - 14L * 86_400_000L
+                val annCutoffMs = nowMs - 30L * 86_400_000L
+                val unreadReminders = snap.reminders.count { item ->
+                    !item.isRead && (ScheduleDates.parseDateMillis(item.createdAt)?.let { it >= reminderCutoffMs } == true)
+                }
+                val unreadAnnouncements = snap.announcements.count { item ->
+                    !item.isRead && (ScheduleDates.parseDateMillis(item.publishedAt)?.let { it >= annCutoffMs } == true)
+                }
+                unreadReminders + unreadAnnouncements
+            }
+        }
+    }
     val portalSyncService = remember(context) { PortalSyncService.getInstance(context) }
     val portalCalendarSlice by portalSyncService.calendarState.collectAsState()
     val portalSyncing by portalSyncService.syncing.collectAsState()
@@ -524,6 +549,13 @@ fun ScheduleRoute() {
         portalSyncService.refreshCalendar(userInitiated = false)
     }
 
+    LaunchedEffect(routeAccountKey, isDemoMode, initialSchoolId, session.token) {
+        if (!isUndergradBuct || !SyncSettings.enabled(context) || !jwNoticeService.canAutoSync()) {
+            return@LaunchedEffect
+        }
+        jwNoticeService.refresh(userInitiated = false)
+    }
+
     LaunchedEffect(portalCalendarSlice.data, routeAccountKey, isDemoMode) {
         val data = portalCalendarSlice.data ?: return@LaunchedEffect
         if (!isDemoMode) {
@@ -661,7 +693,13 @@ fun ScheduleRoute() {
         },
         accountLabel = effectiveAccountLabel,
         onAccountClick = { showAccountSwitcher = true },
-        holidaysByDate = holidaysByDate
+        holidaysByDate = holidaysByDate,
+        jwNoticeUnreadCount = jwNoticeUnreadCount,
+        onJwNoticeClick = if (isUndergradBuct) {
+            { com.buct.course.JwNoticeActivity.launch(context) }
+        } else {
+            null
+        }
     )
     }
     if (showAccountSwitcher) {

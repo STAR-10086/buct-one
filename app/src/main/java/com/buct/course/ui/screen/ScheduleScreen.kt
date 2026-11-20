@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -385,7 +386,10 @@ fun ScheduleScreen(
     accountLabel: String = "",
     onAccountClick: () -> Unit = {},
     /** 法定节假日（YYYY-MM-DD -> 2 字短徽标） */
-    holidaysByDate: Map<String, String> = emptyMap()
+    holidaysByDate: Map<String, String> = emptyMap(),
+    /** 教务近期未读消息与公告数（仅 BUCT 本科账号） */
+    jwNoticeUnreadCount: Int = 0,
+    onJwNoticeClick: (() -> Unit)? = null
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val coroutineScope = rememberCoroutineScope()
@@ -554,7 +558,9 @@ fun ScheduleScreen(
                     showToday = dayView && selectedDay in 1..7 &&
                         (currentWeek != actualWeek || selectedDay != ((Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1)),
                     onTodayClick = onTodayClick,
-                    holidaysByDate = holidaysByDate
+                    holidaysByDate = holidaysByDate,
+                    jwNoticeUnreadCount = jwNoticeUnreadCount,
+                    onJwNoticeClick = onJwNoticeClick
                 )
             }
         }
@@ -700,7 +706,9 @@ fun WeekHeaderCompact(
     /** 不在「今天」时显示回到今天入口 */
     showToday: Boolean = false,
     onTodayClick: () -> Unit = {},
-    holidaysByDate: Map<String, String> = emptyMap()
+    holidaysByDate: Map<String, String> = emptyMap(),
+    jwNoticeUnreadCount: Int = 0,
+    onJwNoticeClick: (() -> Unit)? = null
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
     val calendar = Calendar.getInstance()
@@ -840,6 +848,14 @@ fun WeekHeaderCompact(
                                 AcademicYearChip(
                                     label = academicYearLabel,
                                     onClick = onAcademicYearClick,
+                                    collapse = collapse
+                                )
+                            }
+                            if (onJwNoticeClick != null && collapse < 0.45f) {
+                                Spacer(Modifier.width(6.dp))
+                                JwNoticeChip(
+                                    unreadCount = jwNoticeUnreadCount,
+                                    onClick = onJwNoticeClick,
                                     collapse = collapse
                                 )
                             }
@@ -1225,6 +1241,65 @@ private fun AcademicYearChip(
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(14.dp)
         )
+    }
+}
+
+@Composable
+private fun JwNoticeChip(
+    unreadCount: Int,
+    onClick: () -> Unit,
+    collapse: Float = 0f
+) {
+    val backdrop = LocalControlBackdrop.current
+    val optics = rememberInteractiveOptics()
+    val alpha = (1f - collapse / 0.45f).coerceIn(0f, 1f)
+
+    Row(
+        modifier = Modifier
+            .height(26.dp)
+            .graphicsLayer { this.alpha = alpha }
+            .adaptiveGlassChip(backdrop, CircleShape, optics, enabled = true, interactive = true)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Notifications,
+            contentDescription = "教务消息与公告",
+            tint = if (unreadCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(13.dp)
+        )
+        Text(
+            text = "消息",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (unreadCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false
+        )
+        if (unreadCount > 0) {
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFFFF3B30), CircleShape)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                    fontSize = 10.sp,
+                    lineHeight = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
     }
 }
 
