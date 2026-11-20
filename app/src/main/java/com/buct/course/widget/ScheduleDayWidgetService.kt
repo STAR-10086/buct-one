@@ -167,7 +167,7 @@ class ScheduleDayRemoteViewsFactory(
 
             var allExams: List<ExamRow> = emptyList()
             val examPrefs = context.getSharedPreferences("exam_cache", Context.MODE_PRIVATE)
-            val examJson = if (friendJson == null) examPrefs.getString("exams", null) else null
+            val examJson = examPrefs.getString("exams", null)
             if (examJson != null) {
                 val arr = JSONArray(examJson)
                 allExams = buildList {

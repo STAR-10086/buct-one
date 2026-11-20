@@ -601,7 +601,7 @@ fun ScheduleRoute() {
         onEmptyCellClick = { day, period -> emptyClassroomRequest = EmptyClassroomRequest(currentWeek, day, period) },
         onSettingsClick = { settingsTermOverride = null; showSettingsDialog = true },
         onExportClick = {
-            if (displayCourses.isEmpty()) {
+            if (courses.isEmpty()) {
                 GlassToaster.show("课表为空，无法导出")
             } else {
                 try {
@@ -613,7 +613,7 @@ fun ScheduleRoute() {
                     } else {
                     ICalExporter.exportAndShare(
                         context = context,
-                        courses = displayCourses,
+                        courses = courses,
                         semesterStartDate = semesterStart,
                         totalWeeks = ScheduleMaxWeeks,
                         periodTimes = periodTimes.associate { it.period to (it.startTime to it.endTime) }
