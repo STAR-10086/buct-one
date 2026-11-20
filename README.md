@@ -4,7 +4,7 @@
 
 **北化人的原生液态玻璃校园工作台**
 
-一次原生登录学校统一身份认证，串起课表、桌面小组件、成绩与培养方案、选课抢课、北化在线、第二课堂五育综测、实践教学与校园一卡通——纯本地优先、零第三方上报。
+一次原生登录学校统一身份认证，串起课表、桌面小组件、成绩与培养方案、选课抢课、北化在线、第二课堂五育综测、实践教学、体测与体育、校园邮箱与校园一卡通——本地优先、零第三方上报。
 
 [![Release](https://img.shields.io/github/v/release/STAR-10086/buct-one?style=flat-square&label=Release&color=0A84FF)](https://github.com/STAR-10086/buct-one/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)](LICENSE)
@@ -21,17 +21,17 @@
 
 ## 设计理念
 
-- **一次认证，多站联动**：全原生 Kotlin 实现 `sidportal.buct.edu.cn` 统一身份认证（SM2/AES + 短信二次验证 + Passkey/WebAuthn，无 WebView 登录），单次登录后免密直连教务、北化在线、第二课堂与实践教学。
+- **一次认证，多站联动**：全原生 Kotlin 实现 `sidportal.buct.edu.cn` 统一身份认证（SM2/AES + 短信二次验证 + Passkey/WebAuthn，无 WebView 登录），单次登录后免密直连教务、北化在线、第二课堂、实践教学、体测与体育及校园邮箱，并由跨模块 `SsoSilentRelogin` 协调器在会话失效时单飞静默续期。
 - **校内校外混合 DNS 解析（`BuctDns`）**：仅限校内/VPN 的第二课堂优先直连校内 DNS `202.4.130.100`，其余校内业务优先走系统 DNS 并支持故障回退，兼顾校内外访问体验。
-- **本地优先，离线可用**：全部快照按域原子落盘；遵循数据层四条铁律，同步失败绝不清空已有缓存，课表、成绩、作业与桌面小组件时刻可读。
-- **隐私与安全底线**：关闭全部第三方统计与遥测；学号密码绝不落盘；凭据使用 `Android Keystore` AES-GCM 独立加密，全网强制校方证书链校验（`BuctTlsTrustManager`）。
+- **本地优先，离线可用**：全部快照按域原子落盘；遵循数据层四条铁律，同步失败绝不清空已有缓存，课表、成绩、作业、邮件与桌面小组件时刻可读。
+- **隐私与安全底线**：关闭全部第三方统计与遥测；本地按开关记住的凭据均经 `Android Keystore`（AES-256-GCM）独立别名加密存储，显式排除出云备份与设备迁移；内存 `char[]` 用后清零，全网强制校方证书链校验（`BuctTlsTrustManager`）。
 
 ---
 
 ## 核心功能一览
 
 ### 1. 2D 自由栅格工作台
-- **4 列 × N 行自由坐标骨架**：聚焦 `北化在线`、`第二课堂`、`校园卡`、`实践教学`、`空闲教室` 与 `选课抢课` 六大无重复核心模块，每张卡片均可自由设为 **`2×1` 大卡片 / `1×1` 中卡片 / `0.5×0.5` 迷你小卡片**；支持单列竖排并保留空白格位，不再强行填满行。
+- **4 列 × N 行自由坐标骨架**：聚焦 `北化在线`、`第二课堂`、`校园卡`、`实践教学`、`体测与体育`、`校园邮箱`、`空闲教室` 与 `选课抢课` 八大无重复核心模块，每张卡片均可自由设为 **`2×1` 大卡片 / `1×1` 中卡片 / `0.5×0.5` 迷你小卡片**；支持单列竖排并保留空白格位，不再强行填满行。
 - **全屏悬浮编辑与动画补位**：进入自定义后，长按卡片直接**悬浮拖放到任意坐标槽位**，周围卡片以弹簧物理动效平滑让位；点击或拖动卡片**外置右上角双向斜箭头**实时调节尺寸，外置左上角 `×` 隐藏并用底部停靠栏加回，标题文字零遮挡。
 - **顶部固定操作栏**：编辑态顶栏常驻屏幕最上方（纯图标 **撤回 / 重置** + 完整 **取消 / 保存**），支持最多 30 步撤回。
 
@@ -49,17 +49,20 @@
 
 | 模块 | 接入域名 | 核心能力 |
 | :--- | :--- | :--- |
+| **校园邮箱** | `mail.buct.edu.cn` | CAS 单点登录免密换票直连网易企业邮箱 `/js6/s`；收件箱 / 未读 / 多文件夹 / 搜索 / 分页，点击未读即实时同步官方已读状态，支持移至已删除、彻底删除、从已删除还原与未读页一键全部标已读，安全 HTML 阅读正文并原生下载打开附件 |
+| **体测与体育** | `tygl.buct.edu.cn` | 历年体质测试总分与单项成绩明细、学期阳光跑 / 课外锻炼进度与打卡记录，内置 2014《国家学生体质健康标准》离线算分模拟器 |
 | **第二课堂** | `scs.buct.edu.cn` / `eapi.buct.edu.cn` | 校内网/VPN 下直连；原生 CAS 换取 JWT，德智体美劳五育综测总分、分项基础/拓展得分明细、二课活动清单与自评窗口状态 |
-| **实践教学** | `sjcx.buct.edu.cn` | 实验排课课表、开放讲座一键抢报、已报讲座心得与创新学分明细查询 |
-| **校园一卡通** | `ecard.buct.edu.cn` | 独立口令登录后实时查询卡余额、挂失状态与消费流水；支持直达企业微信/微信 |
+| **实践教学** | `sjcx.buct.edu.cn` | 实验排课课表、开放讲座一键抢报（支持满员捡漏与前台蹲守）、已报讲座心得与创新学分明细查询 |
+| **校园一卡通** | `ecard.buct.edu.cn` | 独立认证直连查询实时余额、挂失状态与消费流水；支持可选开启本机 `Android Keystore` 加密记住密码并在会话过期时自动静默重登，认证失败或退出登录自动抹除凭据；支持直达企业微信 / 微信 |
 | **本科 / 研究生教务** | `jwglxt.buct.edu.cn` / `gmis.buct.edu.cn` | 在「我的 → 教务系统（本科 / 研究生）」切换，覆盖课表、GPA 统计、成绩分布、培养方案与考试倒计时 |
 
 ---
 
-## 「我的」与界面系统
+## 「我的」、更新与界面系统
 
 - **五栏液态玻璃底栏**：居中工作台「**课表 · 成绩 · 工作台 · 作业 · 我的**」，采用统一 16f 笔画的 Phosphor 双色线条动画图标（「我的」为人像轮廓动画），支持暗色模式、自定义壁纸与关闭毛玻璃降级。
-- **自定义头像与签名**：支持从系统相册选取头像、填写展示昵称与个性签名，并与「更新 Cookie」（迁入数据与同步分组）、通知/精确闹钟权限管理同页收纳。
+- **个人名片与权限管理**：顶部卡片支持从系统相册选取自定义头像、填写展示昵称与个性签名，并与「更新 Cookie」（数据与同步分组）、通知 / 精确闹钟权限自检同页收纳。
+- **App 内自动更新与手动检查**：接入 `https://update.buct.one/update.json` 与 `dl.buct.one`（Cloudflare R2 + GitHub Release 双源分发），按设备 ABI 自动匹配安装包，执行 SHA-256 与正式签名双重校验；支持「我的 → 应用与支持 → 检查更新」手动立即检查。
 
 ---
 
@@ -71,8 +74,10 @@
 sidportal 统一身份认证 ──┬─→ jwglxt / gmis       教务系统（课表 / 成绩 / 培养方案 / 考试 / 选课）
   （全原生 Kotlin）     ├─→ course.buct.edu.cn   北化在线（两阶段同步作业 / 测验 / 附件）
                         ├─→ sjcx.buct.edu.cn     实践教学（实验课表 / 抢讲座 / 创新学分）
-                        └─→ scs.buct.edu.cn      第二课堂（五育综测 / 二课活动）
-ecard.buct.edu.cn      ───→ 校园卡独立会话       余额 / 消费流水 / 企微充值跳转
+                        ├─→ scs.buct.edu.cn      第二课堂（五育综测 / 二课活动）
+                        ├─→ tygl.buct.edu.cn     体测与体育（体测成绩 / 阳光跑 / 国标算分）
+                        └─→ mail.buct.edu.cn     校园邮箱（收件箱 / 未读同步 / 删除还原 / 附件）
+ecard.buct.edu.cn      ───→ 校园卡独立会话       余额 / 流水 / Keystore 加密静默续期 / 企微跳转
                                    │
                    分域采集 → 版本化解析 → 原子落盘（失败不覆盖旧快照）
                                    │
@@ -99,8 +104,8 @@ model/    → 零任何外部 import
 
 ### 安全机制清单
 
-- **凭据安全**：内存使用 `char[]` 用后清零，学号与密码绝不写盘；三条 session vault 分别采用独立 `Android Keystore`（AES-GCM）别名加密。
-- **备份隔离**：`backup_rules.xml` 与 `data_extraction_rules.xml` 显式排除全部 vault 文件。
+- **凭据安全**：内存使用 `char[]` 用后清零，学号与密码绝不写明文；多个 session/凭据 vault 分别采用独立 `Android Keystore`（AES-256-GCM）别名加密，校园卡/统一身份认证密码校验失败或退出登录时立即擦除对应密文。
+- **备份隔离**：`backup_rules.xml` 与 `data_extraction_rules.xml` 显式排除全部 vault 文件，防止系统云备份或设备迁移带出密文。
 - **网络安全**：强制走 `BuctTlsTrustManager` 校方证书链，CI 静态禁止任何 `trustAllCerts` / 放行任意 `HostnameVerifier`。
 - **日志脱敏**：保留诊断所需域名与状态码，学号、姓名与成绩数值自动掩码。
 
@@ -115,13 +120,13 @@ model/    → 零任何外部 import
 | 包名标识 | `com.buct.one`（源码包名 `com.buct.course` / `com.buct.one.data`） |
 | 网络与安全 | OkHttp + BouncyCastle（SM2）+ `BuctTlsTrustManager` + `Android Keystore` |
 | 持久化 | 分域 JSON 原子落盘 + 加密会话 Vault + `SharedPreferences` |
-| 构建与交付 | 单 module，全云端 GitHub Actions CI（JDK 21，100MB APK 体积硬门禁） |
+| 构建与交付 | 单 module，全云端 GitHub Actions CI（JDK 21，100MB APK 体积硬门禁，R2 + Release 双源发布） |
 
 ---
 
 ## 从源码构建
 
-项目已配置全云端 CI（推送 `main` 或发起 PR 自动运行 `code-check` 与 `build-apk`）。如需本地调试，请准备 **JDK 21**、`compileSdk android-37.0` 与 `build-tools 37.0.0`：
+项目已配置全云端 CI（推送 `main` 或发起 PR 自动运行 `code-check` 与 `build-apk`；推送 `v*` 标签自动运行 `release-apk`）。如需本地调试，请准备 **JDK 21**、`compileSdk android-37.0` 与 `build-tools 37.0.0`：
 
 ```bash
 ./gradlew assembleRelease
@@ -137,11 +142,13 @@ model/    → 零任何外部 import
 - [x] 选课与队列抢课原生工作台（可选列表 / 已选退课 / 定时并发抢课）
 - [x] 北化在线全量在修课程两阶段后台静默同步与作业交取闭环
 - [x] 第二课堂 `scs.buct.edu.cn` 五育综测成绩、明细与活动原生接入（含校内 DNS 优先解析）
-- [x] 实践教学（实验课表 / 抢讲座 / 创新学分）与校园一卡通直连
+- [x] 实践教学（实验课表 / 抢讲座 / 创新学分）与校园一卡通直连（含本机 Keystore 加密自动重登）
+- [x] 体测与体育管理平台 `tygl.buct.edu.cn` 原生接入与 2014 国标离线算分工具
+- [x] 北化校园邮箱 `mail.buct.edu.cn` 原生 CAS SSO 收件箱（点击标已读同步官方 / 删除与还原 / 一键全部已读 / 附件下载）
+- [x] 统一身份认证跨模块自动静默重登（`SsoSilentRelogin`）与 App 内自动更新（`dl.buct.one` / `update.buct.one`）
 - [x] 桌面小组件 HyperOS / OriginOS 无标题布局、增量翻页与圆角适配
 - [ ] 全量课程资料目录浏览与课程通知聚合
-- [ ] 校园邮箱只读收件（IMAP 授权码接入）与统一校内消息聚合
-- [ ] 场馆余量状态与体测成绩估算工具
+- [ ] 校内通知公告聚合与场馆余量状态查询
 
 ---
 
@@ -149,10 +156,10 @@ model/    → 零任何外部 import
 
 ```text
 app/src/main/java/
-  com/buct/course/    主应用 UI、活动页（一卡通/实践教学/第二课堂）、教务适配、桌面小组件
+  com/buct/course/    主应用 UI、独立页（一卡通/实践教学/第二课堂/体测/校园邮箱）、教务适配、自动更新、桌面小组件
   com/buct/one/data/  纯分层数据内核（model / session / source / store / sync）
 docs/                 项目规划、数据层设计与签名配置文档
-.github/workflows/    GitHub Actions 静态门禁（check.yml）与 APK 构建发版（build-apk.yml）
+.github/workflows/    GitHub Actions 静态门禁（check.yml）、APK 构建（build-apk.yml）与标签发版（release-apk.yml）
 NOTICE                上游开源工程溯源与许可声明
 LICENSE               GNU General Public License v3.0
 ```
