@@ -37,6 +37,7 @@
     <application
         android:name=".CourseApplication"
         android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -58,7 +59,6 @@
             android:name=".MainActivity"
             android:theme="@style/Theme.CourseSelector.Starting"
             android:configChanges="uiMode"
-            android:enableOnBackInvokedCallback="true"
             android:exported="true"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
