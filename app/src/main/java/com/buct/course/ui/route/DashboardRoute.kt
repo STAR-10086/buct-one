@@ -54,6 +54,8 @@ import androidx.compose.material.icons.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.LibraryAdd
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.MailOutline
+import androidx.compose.material.icons.outlined.MarkEmailUnread
 import androidx.compose.material.icons.outlined.MeetingRoom
 import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.Refresh
@@ -107,6 +109,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.buct.course.EcardActivity
+import com.buct.course.MailActivity
 import com.buct.course.ScsActivity
 import com.buct.course.SjcxActivity
 import com.buct.course.TyglActivity
@@ -130,6 +133,7 @@ import com.buct.one.data.model.CardSnapshot
 import com.buct.one.data.model.CardTransaction
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
+import com.buct.one.data.model.MailSnapshot
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.ScsSnapshot
 import com.buct.one.data.model.ScsTermScore
@@ -140,6 +144,7 @@ import com.buct.one.data.model.TheolTestItem
 import com.buct.one.data.model.TyglSnapshot
 import com.buct.one.data.model.formatFenToYuan
 import com.buct.one.data.sync.CardSyncService
+import com.buct.one.data.sync.MailSyncService
 import com.buct.one.data.sync.ScsSyncService
 import com.buct.one.data.sync.SjcxSyncService
 import com.buct.one.data.sync.TheolSyncService
@@ -251,6 +256,15 @@ private enum class DashboardModuleId(
         icon = Icons.Outlined.FitnessCenter,
         defaultSize = CardSize.MEDIUM,
         defaultCol = 0,
+        defaultRow = 8
+    ),
+    MAIL(
+        id = "mail",
+        title = "校园邮箱",
+        shortTitle = "校园邮箱",
+        icon = Icons.Outlined.MailOutline,
+        defaultSize = CardSize.MEDIUM,
+        defaultCol = 2,
         defaultRow = 8
     );
 
@@ -526,6 +540,9 @@ fun DashboardRoute(
     val tyglService = remember(context) { TyglSyncService.getInstance(context) }
     val tyglSlice by tyglService.tyglState.collectAsState()
     val tyglSyncing by tyglService.syncing.collectAsState()
+    val mailService = remember(context) { MailSyncService.getInstance(context) }
+    val mailSlice by mailService.mailState.collectAsState()
+    val mailSyncing by mailService.syncing.collectAsState()
 
     var showEmptyClassroomDialog by remember { mutableStateOf(false) }
     var emptyClassroomInitialCampus by remember { mutableIntStateOf(2) }
@@ -653,7 +670,7 @@ fun DashboardRoute(
     }
     val bottomInset = LocalAppOverlayBottomInset.current
     val scrollState = rememberScrollState()
-    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing
+    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing || mailSyncing
 
     val latestDraftState by rememberUpdatedState(draftConfigs)
 
@@ -730,6 +747,9 @@ fun DashboardRoute(
                             }
                             if (tyglService.canAutoSync()) {
                                 scope.launch { tyglService.refresh(userInitiated = true) }
+                            }
+                            if (mailService.canAutoSync()) {
+                                scope.launch { mailService.refresh(userInitiated = true) }
                             }
                             if (cardHasSession) {
                                 scope.launch { cardService.refresh() }
@@ -1046,6 +1066,7 @@ fun DashboardRoute(
                                     sjcxSlice = sjcxSlice,
                                     scsSlice = scsSlice,
                                     tyglSlice = tyglSlice,
+                                    mailSlice = mailSlice,
                                     classroomSlot = classroomSlot,
                                     classroomDayLabel = classroomDayLabel,
                                     onNavigateTab = ::navigateToPageOrWarn,
@@ -1552,6 +1573,7 @@ private fun RenderModuleCard(
     sjcxSlice: DomainSlice<SjcxSnapshot>,
     scsSlice: DomainSlice<ScsSnapshot>,
     tyglSlice: DomainSlice<TyglSnapshot>,
+    mailSlice: DomainSlice<MailSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1573,6 +1595,7 @@ private fun RenderModuleCard(
             sjcxSlice = sjcxSlice,
             scsSlice = scsSlice,
             tyglSlice = tyglSlice,
+            mailSlice = mailSlice,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1594,6 +1617,7 @@ private fun RenderModuleCard(
             sjcxSlice = sjcxSlice,
             scsSlice = scsSlice,
             tyglSlice = tyglSlice,
+            mailSlice = mailSlice,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1613,6 +1637,7 @@ private fun RenderModuleCard(
                 sjcxSlice = sjcxSlice,
                 scsSlice = scsSlice,
                 tyglSlice = tyglSlice,
+                mailSlice = mailSlice,
                 classroomSlot = classroomSlot,
                 classroomDayLabel = classroomDayLabel,
                 onNavigateTab = onNavigateTab,
@@ -1650,6 +1675,7 @@ private fun buildCompactSummary(
     sjcxSlice: DomainSlice<SjcxSnapshot>,
     scsSlice: DomainSlice<ScsSnapshot>,
     tyglSlice: DomainSlice<TyglSnapshot>,
+    mailSlice: DomainSlice<MailSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1751,6 +1777,30 @@ private fun buildCompactSummary(
             TyglActivity.launch(context, initialTab = 0)
         }
     }
+
+    DashboardModuleId.MAIL -> {
+        val mailData = mailSlice.data
+        val unread = mailData?.unreadTotal ?: 0
+        val valText = when {
+            mailData == null -> "校园邮箱"
+            unread > 0 -> "$unread 封未读"
+            else -> "已全部已读"
+        }
+        val miniText = when {
+            mailData == null -> "邮箱"
+            unread > 0 -> "${unread}未读"
+            else -> "已读"
+        }
+        val latestSubject = mailData?.inboxMessages?.firstOrNull()?.subject?.takeIf { it.isNotBlank() }
+        val sub = when {
+            latestSubject != null -> latestSubject
+            mailData != null -> "收件箱 ${mailData.inboxTotal} 封"
+            else -> "mail.buct.edu.cn"
+        }
+        ModuleCompactSummary("校园邮箱", valText, sub, miniText) {
+            MailActivity.launch(context, initialTab = 0)
+        }
+    }
 }
 
 @Composable
@@ -1827,6 +1877,7 @@ private fun RenderMediumModuleCard(
     sjcxSlice: DomainSlice<SjcxSnapshot>,
     scsSlice: DomainSlice<ScsSnapshot>,
     tyglSlice: DomainSlice<TyglSnapshot>,
+    mailSlice: DomainSlice<MailSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -2169,6 +2220,57 @@ private fun RenderMediumModuleCard(
                 )
             }
         }
+
+        DashboardModuleId.MAIL -> {
+            val mailData = mailSlice.data
+            val latestMsg = mailData?.inboxMessages?.firstOrNull()
+            MediumGlassCardFrame(
+                title = "校园邮箱",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { MailActivity.launch(context, initialTab = 0) }
+            ) {
+                if (mailData == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "点击登录",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "mail.buct.edu.cn",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    MediumBottomActionPill(text = "收件箱 ›")
+                } else {
+                    val unread = mailData.unreadTotal
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = if (unread > 0) "$unread 未读" else "共 ${mailData.inboxTotal} 封",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = if (unread > 0) Color(0xFFFF9F0A) else Color(0xFF34C759),
+                            maxLines = 1
+                        )
+                        Text(
+                            text = latestMsg?.let { msg ->
+                                msg.subject.ifBlank { "(无主题)" }
+                            } ?: "收件箱暂无邮件",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    MediumBottomActionPill(text = "收件箱 ›")
+                }
+            }
+        }
     }
 }
 
@@ -2261,6 +2363,7 @@ private fun RenderLargeModuleCard(
     sjcxSlice: DomainSlice<SjcxSnapshot>,
     scsSlice: DomainSlice<ScsSnapshot>,
     tyglSlice: DomainSlice<TyglSnapshot>,
+    mailSlice: DomainSlice<MailSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -2791,6 +2894,115 @@ private fun RenderLargeModuleCard(
                     }
                     QuickActionTile("国标算分", Icons.Outlined.Calculate, Modifier.weight(1f), !isEditing) {
                         TyglActivity.launch(context, initialTab = 3)
+                    }
+                }
+            }
+        }
+
+        DashboardModuleId.MAIL -> {
+            val mailData = mailSlice.data
+            val unread = mailData?.unreadTotal ?: 0
+            val mailBadge = when {
+                mailSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK -> "同步失败"
+                mailSlice.provenance.refreshState == RefreshState.NEVER && mailData == null -> "点击进入"
+                unread > 0 -> "$unread 封未读"
+                mailData != null -> "共 ${mailData.inboxTotal} 封"
+                else -> "校园邮箱"
+            }
+            val mailBadgeColor = when {
+                mailSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK -> Color(0xFFFF453A)
+                unread > 0 -> Color(0xFFFF9F0A)
+                mailData != null -> Color(0xFF34C759)
+                else -> MaterialTheme.colorScheme.primary
+            }
+            DashboardGlassCard(
+                title = "校园邮箱",
+                badge = mailBadge,
+                badgeColor = mailBadgeColor,
+                heightDp = slotHeightDp,
+                onClick = if (isEditing) null else ({ MailActivity.launch(context, initialTab = 0) })
+            ) {
+                val previews = mailData?.inboxMessages.orEmpty().take(2)
+                if (mailData == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "mail.buct.edu.cn",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "通过统一身份认证一键同步收件箱与附件",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else if (previews.isEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = mailData.account.email.ifBlank { "收件箱暂无邮件" },
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "点击进入收件箱或切换文件夹查看",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        previews.forEach { msg ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = buildString {
+                                        if (!msg.isRead) append("• ")
+                                        val sender = msg.fromName.ifBlank { msg.fromAddress }
+                                        if (sender.isNotBlank()) {
+                                            append(sender)
+                                            append(" · ")
+                                        }
+                                        append(msg.subject.ifBlank { "(无主题)" })
+                                    },
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (!msg.isRead) FontWeight.SemiBold else FontWeight.Normal
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = msg.receivedDate.ifBlank { msg.sentDate },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (!msg.isRead) Color(0xFFFF9F0A) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickActionTile("收件箱", Icons.Outlined.MailOutline, Modifier.weight(1f), !isEditing) {
+                        MailActivity.launch(context, initialTab = 0)
+                    }
+                    QuickActionTile("未读邮件", Icons.Outlined.MarkEmailUnread, Modifier.weight(1f), !isEditing) {
+                        MailActivity.launch(context, initialTab = 1)
                     }
                 }
             }
