@@ -40,7 +40,6 @@ fun PhosphorNavigationIcon(
                 AppSymbolSpec.Courses -> drawBooks(t, tint, fill)
                 AppSymbolSpec.Schedule -> drawCalendar(t, tint, fill)
                 AppSymbolSpec.Grab -> drawLightning(t, tint, fill)
-                AppSymbolSpec.Friends -> drawPeople(t, tint, fill)
                 AppSymbolSpec.Grades -> drawChart(t, tint, fill)
                 AppSymbolSpec.Settings -> drawUserProfile(t, tint, fill)
             }
@@ -78,31 +77,6 @@ private fun DrawScope.drawHomeworkBoard(t: Float, tint: Color, fill: Color) {
     drawRoundRect(color = tint, topLeft = Offset(92f, 32f - lift * 0.5f), size = Size(72f, 32f), cornerRadius = CornerRadius(12f, 12f), style = outlineStroke)
     drawLine(color = tint, start = Offset(88f, 112f), end = Offset(168f, 112f), strokeWidth = 16f, cap = StrokeCap.Round)
     drawLine(color = tint, start = Offset(88f, 152f), end = Offset(152f, 152f), strokeWidth = 16f, cap = StrokeCap.Round)
-}
-
-/**
- * 「好友」图标：两个头 + 两段肩线，笔画体系与其它 Phosphor 图标一致（16f 线宽）。
- * 选中时肩部填充淡色，和duotone 其它图标同一个 fill 语义。
- */
-private fun DrawScope.drawPeople(t: Float, tint: Color, fill: Color) {
-    val lift = (1f - t) * 6f
-    // 后面那个人（略小、偏右）
-    drawCircle(color = tint, radius = 30f, center = Offset(176f, 100f + lift), style = outlineStroke)
-    drawArc(
-        color = tint, startAngle = 200f, sweepAngle = 140f, useCenter = false,
-        topLeft = Offset(140f, 142f + lift), size = Size(96f, 92f), style = outlineStroke
-    )
-    // 前面那个人
-    drawCircle(color = fill, radius = 38f, center = Offset(92f, 92f), style = Fill)
-    drawCircle(color = tint, radius = 38f, center = Offset(92f, 92f), style = outlineStroke)
-    drawArc(
-        color = fill, startAngle = 195f, sweepAngle = 150f, useCenter = true,
-        topLeft = Offset(32f, 128f), size = Size(124f, 116f)
-    )
-    drawArc(
-        color = tint, startAngle = 195f, sweepAngle = 150f, useCenter = false,
-        topLeft = Offset(32f, 128f), size = Size(124f, 116f), style = outlineStroke
-    )
 }
 
 private fun path(data: String): Path = PathParser().parsePathString(data).toPath()

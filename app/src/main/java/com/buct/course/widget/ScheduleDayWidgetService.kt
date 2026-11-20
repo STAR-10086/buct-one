@@ -139,8 +139,7 @@ class ScheduleDayRemoteViewsFactory(
             periodTimes = settingsManager.getPeriodTimes()
             defaultPeriodTimes = settingsManager.getDefaultPeriodTimes()
 
-            val friendJson = WidgetScheduleSource.loadFriendJson(context, appWidgetId)
-            val scheduleJson = friendJson ?: WidgetScheduleSource.loadOwnScheduleJson(context, appWidgetId)
+            val scheduleJson = WidgetScheduleSource.loadOwnScheduleJson(context, appWidgetId)
 
             if (scheduleJson != null) {
                 courses = ScheduleJson.parse(scheduleJson) ?: emptyList()

@@ -114,8 +114,6 @@ fun ScheduleRoute() {
     val session by sessions.state.collectAsState()
     val requests = remember { com.buct.course.manager.SessionRequestGate(sessions) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
-    // 选中的「朋友的课表」（本地文件 id），非空时课表页展示对方的课表（只读）
-    var viewingFriendId by rememberSaveable { mutableStateOf<String?>(null) }
     val savedAccounts = remember(routeAccountKey, showAccountSwitcher) {
         runCatching { UserManager.getInstance().savedAccounts }.getOrNull().orEmpty()
     }
@@ -124,7 +122,6 @@ fun ScheduleRoute() {
     }
     fun switchAccount(key: String) {
         showAccountSwitcher = false
-        viewingFriendId = null
         val user = UserManager.getInstance()
         if (key == user.currentAccountKey) return
         // 切号前取消在途请求，避免旧账号的响应写进新账号的缓存
@@ -198,10 +195,6 @@ fun ScheduleRoute() {
     var emptyClassroomRequest by remember { mutableStateOf<EmptyClassroomRequest?>(null) }
     var editingId by rememberSaveable(routeAccountKey) { mutableStateOf<String?>(null) }
     var resolvedTermId by rememberSaveable(routeAccountKey) { mutableStateOf(restoredSnapshot?.termId.orEmpty()) }
-    // 「发送课表」要带学期号：学期变化时同步进共享缓存（parseSchedule 里那份可能早于赋值执行）
-    androidx.compose.runtime.LaunchedEffect(resolvedTermId) {
-        com.buct.course.social.ScheduleShareCache.termLabel = resolvedTermId
-    }
     var appliedCalendar by rememberSaveable(routeAccountKey) { mutableStateOf(restoredSnapshot?.appliedCalendar) }
     var notificationCourseJson by rememberSaveable(routeAccountKey) { mutableStateOf<String?>(null) }
     var settingsTermOverride by rememberSaveable(routeAccountKey) { mutableStateOf<String?>(null) }
@@ -307,12 +300,6 @@ fun ScheduleRoute() {
         val c = entry.course
         ScheduleCourseUi(c.name, c.teacher, c.location, c.day, c.startPeriod, c.endPeriod, c.weeks,
             courseColors[ScheduleIdentity.colorIndex(c.id, courseColors.size)], sourceId = entry.sourceId, id = c.id)
-    }.also {
-        // 顺手留一份原始 JSON，好友页「发送课表」直接用，不必重新联网拉
-        if (it != null) {
-            com.buct.course.social.ScheduleShareCache.rawJson = json
-            com.buct.course.social.ScheduleShareCache.termLabel = resolvedTermId
-        }
     }
 
     fun reloadCustomCourses(currentList: List<ScheduleCourseUi>): List<ScheduleCourseUi> {
@@ -327,21 +314,6 @@ fun ScheduleRoute() {
         val nonCustom = currentList.filter { !it.isCustom }
         return nonCustom + customUi
     }
-
-    // ---- 朋友的课表：存在本机固定目录，切换账号面板里直接可选 ----
-    val viewingFriendEntry = remember(viewingFriendId, showAccountSwitcher, routeAccountKey) {
-        viewingFriendId?.let { com.buct.course.social.FriendScheduleStore.find(context, it) }
-    }
-    val friendCourses = remember(viewingFriendEntry) {
-        viewingFriendEntry?.let { entry ->
-            com.buct.course.social.FriendScheduleStore.readJson(entry)?.let { parseSchedule(it) }
-        }.orEmpty()
-    }
-    val friendSchedulesForDialog = remember(showAccountSwitcher) {
-        com.buct.course.social.FriendScheduleStore.list(context)
-    }
-    val displayCourses = if (viewingFriendEntry != null) friendCourses else courses
-    val effectiveAccountLabel = viewingFriendEntry?.let { "${it.label}的课表" } ?: accountLabel
 
     // Load Schedule Function
     val loadSchedule = remember(selectedYear, semesterIndex, session.token) {
@@ -611,9 +583,9 @@ fun ScheduleRoute() {
     CompositionLocalProvider(com.buct.course.ui.screen.LocalScheduleFocus provides focusRegistry) {
     ScheduleScreen(
         currentWeek = currentWeek,
-        courses = displayCourses,
-        isLoading = if (viewingFriendEntry != null) false else isLoading,
-        errorMessage = if (viewingFriendEntry != null) "" else loadError,
+        courses = courses,
+        isLoading = isLoading,
+        errorMessage = loadError,
         onRetry = { loadSchedule(true) },
         periodTimes = periodTimes,
         periodCount = periodCount,
@@ -691,7 +663,7 @@ fun ScheduleRoute() {
                 )
             }
         },
-        accountLabel = effectiveAccountLabel,
+        accountLabel = accountLabel,
         onAccountClick = { showAccountSwitcher = true },
         holidaysByDate = holidaysByDate,
         jwNoticeUnreadCount = jwNoticeUnreadCount,
@@ -711,14 +683,7 @@ fun ScheduleRoute() {
                 showAccountSwitcher = false
                 showSettingsDialog = true
             },
-            onDismiss = { showAccountSwitcher = false },
-            friendSchedules = friendSchedulesForDialog,
-            currentFriendId = viewingFriendId,
-            onSelectFriend = { id ->
-                viewingFriendId = id
-                showAccountSwitcher = false
-                GlassToaster.show("已切换到朋友的课表（只读）")
-            }
+            onDismiss = { showAccountSwitcher = false }
         )
     }
     emptyClassroomRequest?.let { request ->
@@ -834,11 +799,8 @@ fun ScheduleRoute() {
     
     val notificationCourse = notificationCourseJson?.let { runCatching { ReminderJson.reminder(JSONObject(it)) }.getOrNull() }
     val detailTerm = notificationCourse?.key?.term ?: resolvedTermId
-    val selectedDetail = if (viewingFriendEntry != null) {
-        displayCourses.firstOrNull { it.id == detailId }
-    } else {
-        courses.firstOrNull { it.id == detailId && detailTerm == resolvedTermId }
-    } ?: notificationCourse?.course?.let {
+    val selectedDetail = courses.firstOrNull { it.id == detailId && detailTerm == resolvedTermId }
+        ?: notificationCourse?.course?.let {
         ScheduleCourseUi(it.name, it.teacher, it.location, it.day, it.startPeriod, it.endPeriod, it.weeks,
             courseColors[ScheduleIdentity.colorIndex(it.id, courseColors.size)], it.custom, if (it.custom) it.id.removePrefix("custom:") else "", id = it.id)
     }

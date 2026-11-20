@@ -100,7 +100,6 @@ import com.buct.course.manager.AppearanceSettingsManager
 import com.buct.course.manager.SmartSelector
 import com.buct.course.manager.UserManager
 import com.buct.course.ui.screen.OnboardingScreen
-import com.buct.course.ui.screen.SchoolAdaptationCompletionReminder
 import com.buct.course.ui.system.CapsuleNavigationBar
 import com.buct.course.ui.system.DialogHost
 import com.buct.course.ui.system.GlassToastHost
@@ -229,7 +228,6 @@ sealed class BottomNavItem(
     object Courses : BottomNavItem(StartupPage.Courses, AppSymbolSpec.Courses)
     object Schedule : BottomNavItem(StartupPage.Schedule, AppSymbolSpec.Schedule)
     object Grab : BottomNavItem(StartupPage.Grab, AppSymbolSpec.Grab)
-    object Friends : BottomNavItem(StartupPage.Friends, AppSymbolSpec.Friends)
     object Grades : BottomNavItem(StartupPage.Grades, AppSymbolSpec.Grades)
     object Settings : BottomNavItem(StartupPage.Settings, AppSymbolSpec.Settings)
 
@@ -243,7 +241,6 @@ sealed class BottomNavItem(
             StartupPage.Courses -> Courses
             StartupPage.Schedule -> Schedule
             StartupPage.Grab -> Courses
-            StartupPage.Friends -> Friends
             StartupPage.Grades -> Grades
             StartupPage.Settings -> Settings
         }
@@ -433,10 +430,6 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
         }
     }
 
-    SchoolAdaptationCompletionReminder(
-        enabled = !isDemoMode && !session.expired && startupOverlaysReady && !showStarDialog,
-        accountScopeKey = currentAccountStorageKey
-    )
     GlassOverlayHost(modifier = Modifier.fillMaxSize()) {
         val useGlass = isBackdropSupported()
         // debug 平铺水印的开关。**它绝不能进任何 backdrop 捕获层**，见文件末尾
@@ -617,7 +610,6 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
                                           StartupPage.Homework -> com.buct.course.ui.route.HomeworkRoute()
                                           StartupPage.Courses -> com.buct.course.ui.route.CourseSectionRoute()
                                           StartupPage.Grab -> com.buct.course.ui.route.CourseSectionRoute()
-                                          StartupPage.Friends -> com.buct.course.ui.route.FriendsRoute()
                                           StartupPage.Schedule -> com.buct.course.ui.route.ScheduleRoute()
                                           StartupPage.Grades -> com.buct.course.ui.route.GradesRoute()
                                           StartupPage.Settings -> com.buct.course.ui.route.SettingsRoute()

@@ -53,7 +53,6 @@ import com.buct.course.widget.ScheduleDayWidget
 import com.buct.course.widget.ScheduleWidget
 import com.buct.course.widget.WidgetConfigStore
 import com.buct.course.widget.WidgetProviders
-import com.buct.course.widget.WidgetScheduleSource
 
 /** 一个已经摆在桌面上的小组件实例。 */
 internal data class WidgetInstance(
@@ -215,15 +214,11 @@ private fun loadRows(context: Context, accounts: List<AccountOption>): List<Widg
         )
     }
 
-/** 第三段说明：配置页里选了朋友课表就显示朋友，否则显示跟随/指定的账号。 */
 private fun sourceLabel(
     context: Context,
     instance: WidgetInstance,
     accounts: List<AccountOption>
 ): String {
-    WidgetScheduleSource.friendEntry(context, instance.appWidgetId)?.let { entry ->
-        return "${entry.label}的课表"
-    }
     val key = WidgetConfigStore.accountKey(context, instance.appWidgetId)
         ?: return "跟随当前账号"
     return accounts.firstOrNull { it.key == key }?.label ?: "指定账号"

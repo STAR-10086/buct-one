@@ -11,8 +11,7 @@ enum class StartupPage(val route: String, val label: String) {
     Settings("settings", "我的"),
     /** 兼容历史入口：课程/抢课与好友不再占据默认底栏 */
     Courses("courses", "课程"),
-    Grab("grab", "抢课"),
-    Friends("friends", "好友");
+    Grab("grab", "抢课");
 
     companion object {
         fun decode(value: String?): StartupPage {

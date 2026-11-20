@@ -58,7 +58,6 @@ import com.buct.course.widget.ScheduleDayWidget
 import com.buct.course.widget.ScheduleWidget
 import com.buct.course.widget.WidgetConfigStore
 import com.buct.course.widget.WidgetProviders
-import com.buct.course.widget.WidgetScheduleSource
 
 /** 标题输入上限（与 ScheduleSettingsManager.widgetTitle 的 take(12) 保持一致）。 */
 private const val MAX_TITLE_LENGTH = 12

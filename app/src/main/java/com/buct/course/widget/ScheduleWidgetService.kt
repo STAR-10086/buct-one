@@ -59,9 +59,7 @@ class ScheduleRemoteViewsFactory(
     override fun onDataSetChanged() {
         try {
             UserManager.getInstance().init(context)
-            // 来源优先级：实例配置的朋友课表 > 实例配置/当前账号的本机课表
-            val scheduleJson = WidgetScheduleSource.loadFriendJson(context, appWidgetId)
-                ?: loadOwnScheduleJson()
+            val scheduleJson = loadOwnScheduleJson()
 
             if (scheduleJson != null) {
                 courses = ScheduleJson.parse(scheduleJson) ?: emptyList()

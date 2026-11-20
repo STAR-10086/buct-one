@@ -102,8 +102,6 @@ object WidgetConfigStore {
             ScheduleSettingsManager.getInstance().apply { init(context) }.widgetTitle
         }.getOrNull()
         if (!global.isNullOrBlank()) return global
-        runCatching { WidgetScheduleSource.friendTitle(context, appWidgetId) }
-            .getOrNull()?.let { return it }
         return if (isDay) "今日课表" else "我的课表"
     }
 }

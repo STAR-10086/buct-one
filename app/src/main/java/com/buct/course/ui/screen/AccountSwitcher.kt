@@ -106,10 +106,7 @@ fun AccountSwitcherDialog(
     currentKey: String,
     onSelect: (String) -> Unit,
     onManage: () -> Unit,
-    onDismiss: () -> Unit,
-    friendSchedules: List<com.buct.course.social.FriendScheduleStore.Entry> = emptyList(),
-    currentFriendId: String? = null,
-    onSelectFriend: (String) -> Unit = {}
+    onDismiss: () -> Unit
 ) {
     SystemDialog(
         onDismissRequest = onDismiss,
@@ -145,7 +142,7 @@ fun AccountSwitcherDialog(
                 )
             } else {
                 accounts.forEach { record ->
-                    val current = record.key == currentKey && currentFriendId == null
+                    val current = record.key == currentKey
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -198,74 +195,6 @@ fun AccountSwitcherDialog(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = "切换后课表、成绩、考试会自动换成该账号的数据。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // 朋友传来的课表：保存到本机后自动出现在这里，选中即只读查看
-            if (friendSchedules.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "朋友的课表",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                friendSchedules.forEach { entry ->
-                    val current = currentFriendId == entry.id
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .widthIn(max = 420.dp)
-                            .background(
-                                if (current) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f),
-                                RoundedCornerShape(14.dp)
-                            )
-                            .clickable(enabled = !current) { onSelectFriend(entry.id) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            Modifier.size(30.dp).background(accountColor(entry.label), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = entry.label.take(1),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = "${entry.label}的课表",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1
-                            )
-                            Text(
-                                text = entry.subtitle.ifBlank { "只读 · 朋友传来" },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1
-                            )
-                        }
-                        if (current) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "正在查看",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-                Text(
-                    text = "朋友的课表只读，不会覆盖你自己的数据。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

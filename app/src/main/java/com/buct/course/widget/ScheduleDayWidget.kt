@@ -252,8 +252,7 @@ open class ScheduleDayWidget : AppWidgetProvider() {
 
             var earliestEndMin: Int? = null
             for (appWidgetId in dayIds) {
-                val json = WidgetScheduleSource.loadFriendJson(appContext, appWidgetId)
-                    ?: WidgetScheduleSource.loadOwnScheduleJson(appContext, appWidgetId)
+                val json = WidgetScheduleSource.loadOwnScheduleJson(appContext, appWidgetId)
                     ?: continue
                 val courses = runCatching { ScheduleJson.parse(json) }.getOrNull().orEmpty()
                 if (courses.isEmpty()) continue
