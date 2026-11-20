@@ -720,13 +720,13 @@ class SjcxClient {
     }
 
     /**
-     * 取消讲座报名（POST /fcredit/credit/creProjectStu/stu/cancelRegistration?creProjectStuId=<id>）。
+     * 取消讲座报名（POST /fcredit/credit/creProjectStu/stu/cancelRegistration?id=<creProjectStuId>）。
      */
     fun cancelLectureRegistration(creProjectStuId: String): String {
         ensureModuleContext(MENU_ID_CREDIT)
         val raw = executeSignedPost(
             path = "/fcredit/credit/creProjectStu/stu/cancelRegistration",
-            queryParams = mapOf("creProjectStuId" to creProjectStuId)
+            queryParams = mapOf("id" to creProjectStuId)
         )
         val root = JSONObject(raw)
         val code = root.optInt("code", -1)
