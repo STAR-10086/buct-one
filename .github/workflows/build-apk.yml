@@ -606,13 +606,49 @@ jobs:
           fi
           echo "Cloudflare R2 release upload complete for ${TAG}!"
 
-      - name: Trigger site rebuild (Cloudflare Pages Deploy Hook)
+      - name: Sync release snapshot & trigger website rebuild (buct-one-web)
         if: success() && inputs.publish_release == true && inputs.release_tag != '' && !contains(inputs.release_tag, '-')
         env:
+          TAG: ${{ inputs.release_tag }}
+          WEB_REPO_DEPLOY_KEY: ${{ secrets.WEB_REPO_DEPLOY_KEY }}
           PAGES_DEPLOY_HOOK: ${{ secrets.PAGES_DEPLOY_HOOK }}
         run: |
+          if [ -n "${WEB_REPO_DEPLOY_KEY:-}" ]; then
+            mkdir -p ~/.ssh
+            printf '%s\n' "$WEB_REPO_DEPLOY_KEY" > ~/.ssh/web_deploy_key
+            chmod 600 ~/.ssh/web_deploy_key
+            ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
+            export GIT_SSH_COMMAND="ssh -i ~/.ssh/web_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+
+            if git clone --depth 1 git@github.com:STAR-10086/buct-one-web.git /tmp/buct-one-web; then
+              python3 - "r2-dist/latest.json" "/tmp/buct-one-web/src/data/release-snapshot.json" << 'PY'
+          import json, sys, datetime
+          src_path, dst_path = sys.argv[1], sys.argv[2]
+          with open(src_path, "r", encoding="utf-8") as f:
+              data = json.load(f)
+          data["fetchedAt"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+          data["source"] = "r2"
+          with open(dst_path, "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+              f.write("\n")
+          PY
+              cp CHANGELOG.md /tmp/buct-one-web/src/data/changelog-fallback.md
+              cp CHANGELOG.md /tmp/buct-one-web/src/data/changelog-cache.md
+              cd /tmp/buct-one-web
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add src/data/release-snapshot.json src/data/changelog-fallback.md
+              if ! git diff --cached --quiet; then
+                git commit -m "chore: 自动同步 ${TAG} 发版快照与更新日志"
+              else
+                git commit --allow-empty -m "chore: 触发 ${TAG} 官网构建与快照同步"
+              fi
+              git push origin main || echo "::warning::Push to buct-one-web failed (non-fatal)"
+            else
+              echo "::warning::Clone buct-one-web failed (non-fatal)"
+            fi
+            rm -rf ~/.ssh/web_deploy_key /tmp/buct-one-web
+          fi
           if [ -n "${PAGES_DEPLOY_HOOK:-}" ]; then
             curl -fsS -X POST "${PAGES_DEPLOY_HOOK}" || echo "::warning::Pages deploy hook failed (non-fatal)"
-          else
-            echo "未配置 PAGES_DEPLOY_HOOK secret，跳过网站立即重建触发。"
           fi
