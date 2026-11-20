@@ -3,6 +3,9 @@ name: code-check
 on:
   push:
     branches: [main]
+    # 仅在涉及代码/资源/构建配置变更时触发；
+    # README.md、CHANGELOG.md、AGENTS.md、docs/**、release-notes/**、LICENSE、NOTICE、
+    # .gitignore 及所有 **/*.md 等不影响检查与编译的文件均不触发。
     paths:
       - 'app/**'
       - 'gradle/**'
@@ -10,6 +13,15 @@ on:
       - 'settings.gradle'
       - 'gradle.properties'
       - '.github/workflows/check.yml'
+      - '!**/*.md'
+      - '!**/*.markdown'
+      - '!**/README*'
+      - '!**/CHANGELOG*'
+      - '!**/LICENSE*'
+      - '!**/NOTICE*'
+      - '!app/version.properties'
+      - '!app/src/test/**'
+      - '!app/src/androidTest/**'
   pull_request:
     branches: [main]
     paths:
@@ -19,6 +31,15 @@ on:
       - 'settings.gradle'
       - 'gradle.properties'
       - '.github/workflows/check.yml'
+      - '!**/*.md'
+      - '!**/*.markdown'
+      - '!**/README*'
+      - '!**/CHANGELOG*'
+      - '!**/LICENSE*'
+      - '!**/NOTICE*'
+      - '!app/version.properties'
+      - '!app/src/test/**'
+      - '!app/src/androidTest/**'
   workflow_dispatch:
 
 concurrency:

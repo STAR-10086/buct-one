@@ -2,9 +2,9 @@
 
 # BUCT One · 北化一站
 
-**北化人的原生液态玻璃校园工作台**
+**北京化工大学（BUCT）原生液态玻璃校园工作台**
 
-一次原生登录学校统一身份认证，串起课表、桌面小组件、成绩与培养方案、选课抢课、北化在线、第二课堂五育综测、实践教学、体测与体育、校园邮箱与校园一卡通——本地优先、零第三方上报。
+面向北京化工大学（BUCT）师生的原生 Android 校园客户端：一次原生登录学校统一身份认证，串起课表、桌面小组件、成绩与培养方案、选课抢课、北化在线、第二课堂五育综测、实践教学、体测与体育、校园邮箱与校园一卡通——本地优先、零第三方上报。
 
 [![Release](https://img.shields.io/github/v/release/STAR-10086/buct-one?style=flat-square&label=Release&color=0A84FF)](https://github.com/STAR-10086/buct-one/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)](LICENSE)
@@ -13,7 +13,7 @@
 [![Code Check](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/check.yml?style=flat-square&label=code-check)](https://github.com/STAR-10086/buct-one/actions/workflows/check.yml)
 [![Build APK](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/build-apk.yml?style=flat-square&label=build-apk)](https://github.com/STAR-10086/buct-one/actions/workflows/build-apk.yml)
 
-[下载正式版 (Releases)](https://github.com/STAR-10086/buct-one/releases) · [更新日志 (CHANGELOG)](CHANGELOG.md) · [上游声明 (NOTICE)](NOTICE) · [规划](docs/规划.md) · [数据层设计](docs/plan-1-data-layer.md) · [签名接入](docs/签名接入.md)
+[官网下载 (buct.one)](https://buct.one) · [GitHub Releases](https://github.com/STAR-10086/buct-one/releases) · [更新日志 (CHANGELOG)](CHANGELOG.md) · [上游声明 (NOTICE)](NOTICE) · [规划](docs/规划.md) · [数据层设计](docs/plan-1-data-layer.md) · [签名接入](docs/签名接入.md)
 
 </div>
 
