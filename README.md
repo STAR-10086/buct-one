@@ -13,7 +13,7 @@
 [![Code Check](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/check.yml?style=flat-square&label=code-check)](https://github.com/STAR-10086/buct-one/actions/workflows/check.yml)
 [![Build APK](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/build-apk.yml?style=flat-square&label=build-apk)](https://github.com/STAR-10086/buct-one/actions/workflows/build-apk.yml)
 
-[官网下载 (buct.one)](https://buct.one) · [GitHub Releases](https://github.com/STAR-10086/buct-one/releases) · [更新日志 (CHANGELOG)](CHANGELOG.md) · [上游声明 (NOTICE)](NOTICE) · [签名接入](docs/签名接入.md)
+[官网下载 (buct.one)](https://buct.one) · [GitHub Releases](https://github.com/STAR-10086/buct-one/releases) · [更新日志 (CHANGELOG)](CHANGELOG.md) · [上游声明 (NOTICE)](NOTICE) · [路线规划](docs/规划.md) · [签名接入](docs/签名接入.md)
 
 </div>
 
@@ -147,8 +147,12 @@ model/    → 零任何外部 import
 - [x] 北化校园邮箱 `mail.buct.edu.cn` 原生 CAS SSO 收件箱（点击标已读同步官方 / 删除与还原 / 一键全部已读 / 附件下载）
 - [x] 统一身份认证跨模块自动静默重登（`SsoSilentRelogin`）与 App 内自动更新（`dl.buct.one` / `update.buct.one`）
 - [x] 桌面小组件 HyperOS / OriginOS 无标题布局、增量翻页与圆角适配
-- [ ] 全量课程资料目录浏览与课程通知聚合
-- [ ] 校内通知公告聚合与场馆余量状态查询
+- [ ] 北化在线课程资料 / 课件目录浏览与校内通知聚合
+- [ ] 本地轻量提醒（作业 DDL / 考试倒计时 / 校园卡低余额）与 DDL / 余额桌面小组件扩展
+- [ ] 新校园生活域调研与原生接入（校园网流量余额 / 图书馆借阅续借 / 宿舍电费 / 东区↔昌平校车与场馆余量）
+- [ ] 成绩 GPA 试算、校园卡消费统计与 6 大数据域 Parser 离线单测回归
+
+> 完整分阶段规划与接入边界详见 [路线规划 (docs/规划.md)](docs/规划.md)。
 
 ---
 
@@ -158,7 +162,7 @@ model/    → 零任何外部 import
 app/src/main/java/
   com/buct/course/    主应用 UI、独立页（一卡通/实践教学/第二课堂/体测/校园邮箱）、教务适配、自动更新、桌面小组件
   com/buct/one/data/  纯分层数据内核（model / session / source / store / sync）
-docs/                 正式发布签名配置文档（签名接入.md）
+docs/                 路线规划（规划.md）与正式发布签名配置（签名接入.md）
 .github/workflows/    GitHub Actions 静态门禁（check.yml）、APK 构建（build-apk.yml）与标签发版（release-apk.yml）
 NOTICE                上游开源工程溯源与许可声明
 LICENSE               GNU General Public License v3.0
