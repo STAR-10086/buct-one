@@ -1,18 +1,23 @@
 package com.buct.one.data.source.portal
 
+import com.buct.one.data.model.PortalBookItem
 import com.buct.one.data.model.PortalCalendarSnapshot
 import com.buct.one.data.model.PortalHolidayItem
+import com.buct.one.data.model.PortalLibrarySnapshot
+import com.buct.one.data.model.PortalNewsArticle
+import com.buct.one.data.model.PortalNewsColumnPage
 import com.buct.one.data.model.PortalTermInfo
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import java.net.URLDecoder
 
 /**
- * i北化信息门户（i.buct.edu.cn）纯函数响应解析器。
+ * i北化信息门户（i.buct.edu.cn & mnews.buct.edu.cn）纯函数响应解析器。
  * 遵循数据层铁律 3：改动解析逻辑必须递增 PARSER_VERSION。
  */
 object PortalParser {
-    const val PARSER_VERSION: Int = 1
+    const val PARSER_VERSION: Int = 2
 
     private val DATE_REGEX = Regex("\\d{4}-\\d{2}-\\d{2}")
 
@@ -127,5 +132,115 @@ object PortalParser {
             }
         }
         return byDate.values.sortedBy { it.date }
+    }
+
+    fun parseBorrowedBooks(rawJson: String): PortalLibrarySnapshot {
+        val root = JSONObject(rawJson.trim())
+        val result = root.optCleanString("result")
+        if (result != "1") {
+            val reason = root.optCleanString("reason")
+            throw IllegalStateException(reason.ifBlank { "信息门户图书借阅响应异常（result=$result）" })
+        }
+        val data = root.optJSONObject("data")
+            ?: throw IllegalStateException("信息门户图书借阅响应缺少 data")
+
+        val totalCount = data.optInt("count", 0).coerceAtLeast(0)
+        val arr = data.optJSONArray("list") ?: JSONArray()
+        val books = ArrayList<PortalBookItem>(arr.length())
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val title = obj.optCleanString("tsmc")
+            val barcode = obj.optCleanString("tstxm")
+            if (title.isBlank() && barcode.isBlank()) continue
+            books.add(
+                PortalBookItem(
+                    title = title.ifBlank { "未知书名" },
+                    barcode = barcode,
+                    borrowDate = obj.optCleanString("jsrq"),
+                    dueDate = obj.optCleanString("hsrq")
+                )
+            )
+        }
+        return PortalLibrarySnapshot(
+            totalCount = maxOf(totalCount, books.size),
+            books = books
+        )
+    }
+
+    fun parseNewsArticlesPage(columnId: String, rawJson: String): PortalNewsColumnPage {
+        val trimmed = rawJson.trim()
+        val objStart = trimmed.indexOf('{')
+        val objEnd = trimmed.lastIndexOf('}')
+        val jsonPayload = if (objStart >= 0 && objEnd > objStart) {
+            trimmed.substring(objStart, objEnd + 1)
+        } else {
+            trimmed
+        }
+
+        val root = JSONObject(jsonPayload)
+        val result = root.optCleanString("result")
+        if (result != "1") {
+            val reason = root.optCleanString("reason")
+            throw IllegalStateException(reason.ifBlank { "校内资讯响应异常（result=$result）" })
+        }
+        val data = root.optJSONObject("data")
+            ?: throw IllegalStateException("校内资讯响应缺少 data")
+
+        val totalCount = data.optInt("count", 0).coerceAtLeast(0)
+        val arr = data.optJSONArray("articles") ?: JSONArray()
+        val articles = ArrayList<PortalNewsArticle>(arr.length())
+        val seenIds = HashSet<String>(arr.length())
+
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val title = obj.optCleanString("title")
+            val rawId = obj.optCleanString("id")
+                .ifBlank { obj.optLong("id", 0L).takeIf { it > 0L }?.toString().orEmpty() }
+            if (rawId.isBlank() && title.isBlank()) continue
+
+            val sourceOrg = obj.optCleanString("from").ifBlank { obj.optCleanString("createOrg") }
+            val publishTs = obj.optCleanString("publishTimestamp").toLongOrNull()
+                ?: obj.optLong("publishTimestamp", 0L)
+            val effectiveId = rawId.ifBlank { "$columnId|$publishTs|$title" }
+            if (!seenIds.add(effectiveId)) continue
+
+            val rawLink = obj.optCleanString("linkUrl")
+                .ifBlank { obj.optCleanString("articleUrl") }
+                .ifBlank { obj.optCleanString("mobileArticleUrl") }
+
+            articles.add(
+                PortalNewsArticle(
+                    id = effectiveId,
+                    columnId = columnId,
+                    title = title.ifBlank { "校内资讯" },
+                    sourceOrg = sourceOrg,
+                    publishTimestampMs = publishTs,
+                    summary = obj.optCleanString("summary"),
+                    content = obj.optCleanString("content"),
+                    publicUrl = extractPublicArticleUrl(rawLink),
+                    isTop = obj.optCleanString("isTop") == "1",
+                    isHot = obj.optCleanString("isHot") == "1",
+                    isNewest = obj.optCleanString("isNewest") == "1",
+                    visitCount = obj.optCleanString("visitCount")
+                )
+            )
+        }
+
+        return PortalNewsColumnPage(
+            columnId = columnId,
+            totalCount = maxOf(totalCount, articles.size),
+            articles = articles
+        )
+    }
+
+    fun extractPublicArticleUrl(rawLink: String): String {
+        val clean = rawLink.trim()
+        if (clean.isEmpty()) return ""
+        val key = "linkUrl="
+        val idx = clean.indexOf(key)
+        if (idx < 0) return clean
+        val encoded = clean.substring(idx + key.length).substringBefore('&').trim()
+        if (encoded.isEmpty()) return clean
+        return runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrDefault(encoded).trim()
     }
 }

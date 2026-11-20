@@ -3,6 +3,9 @@ package com.buct.one.data.sync
 import android.content.Context
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.PortalCalendarSnapshot
+import com.buct.one.data.model.PortalLibrarySnapshot
+import com.buct.one.data.model.PortalNewsColumnPage
+import com.buct.one.data.model.PortalNewsSnapshot
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.one.data.source.portal.PortalClient
@@ -38,6 +41,18 @@ class PortalSyncService private constructor(
 
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
+
+    private val _libraryState = MutableStateFlow(store.readLibrary(PortalParser.PARSER_VERSION))
+    val libraryState: StateFlow<DomainSlice<PortalLibrarySnapshot>> = _libraryState.asStateFlow()
+
+    private val _librarySyncing = MutableStateFlow(false)
+    val librarySyncing: StateFlow<Boolean> = _librarySyncing.asStateFlow()
+
+    private val _newsState = MutableStateFlow(store.readNews(PortalParser.PARSER_VERSION))
+    val newsState: StateFlow<DomainSlice<PortalNewsSnapshot>> = _newsState.asStateFlow()
+
+    private val _newsSyncing = MutableStateFlow(false)
+    val newsSyncing: StateFlow<Boolean> = _newsSyncing.asStateFlow()
 
     init {
         restoreSidPortalCookies()
@@ -133,6 +148,7 @@ class PortalSyncService private constructor(
 
     companion object {
         private const val CACHE_TTL_MS = 12L * 3600L * 1000L
+        private const val DOMAIN_CACHE_TTL_MS = 30L * 60L * 1000L
 
         @Volatile
         private var instance: PortalSyncService? = null
@@ -144,6 +160,160 @@ class PortalSyncService private constructor(
                     store = PortalStore(context.applicationContext),
                     client = PortalClient()
                 ).also { instance = it }
+            }
+        }
+    }
+
+    /**
+     * 刷新图书馆在借清单；非手动触发且 30 分钟内已刷新成功时直接复用缓存。
+     */
+    suspend fun refreshLibrary(userInitiated: Boolean = false): Result<DomainSlice<PortalLibrarySnapshot>> =
+        withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                val cached = _libraryState.value
+                val state = cached.provenance.refreshState
+                val ageMs = System.currentTimeMillis() - cached.provenance.capturedAt
+                if (!userInitiated &&
+                    (state == RefreshState.FRESH || state == RefreshState.EMPTY_CONFIRMED) &&
+                    cached.data != null &&
+                    ageMs in 0 until DOMAIN_CACHE_TTL_MS
+                ) {
+                    return@withLock Result.success(cached)
+                }
+
+                _librarySyncing.value = true
+                try {
+                    val snapshot = executeWithAutoRelogin(userInitiated = userInitiated) {
+                        client.fetchBorrowedBooks()
+                    }
+                    val committed = store.commitLibrarySuccess(
+                        snapshot = snapshot,
+                        parserVersion = PortalParser.PARSER_VERSION
+                    )
+                    _libraryState.value = committed
+                    Result.success(committed)
+                } catch (e: Exception) {
+                    val failed = store.commitLibraryFailure(
+                        errorMessage = e.message ?: "图书借阅同步失败",
+                        parserVersion = PortalParser.PARSER_VERSION
+                    )
+                    _libraryState.value = failed
+                    Result.failure(e)
+                } finally {
+                    _librarySyncing.value = false
+                }
+            }
+        }
+
+    /**
+     * 刷新校内综合资讯四栏；非手动触发且 30 分钟内已刷新成功时直接复用缓存。
+     */
+    suspend fun refreshNews(userInitiated: Boolean = false): Result<DomainSlice<PortalNewsSnapshot>> =
+        withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                val cached = _newsState.value
+                val state = cached.provenance.refreshState
+                val ageMs = System.currentTimeMillis() - cached.provenance.capturedAt
+                if (!userInitiated &&
+                    (state == RefreshState.FRESH || state == RefreshState.EMPTY_CONFIRMED) &&
+                    cached.data != null &&
+                    ageMs in 0 until DOMAIN_CACHE_TTL_MS
+                ) {
+                    return@withLock Result.success(cached)
+                }
+
+                _newsSyncing.value = true
+                try {
+                    val snapshot = executeWithAutoRelogin(userInitiated = userInitiated) {
+                        client.fetchAllNewsSnapshot()
+                    }
+                    val committed = store.commitNewsSuccess(
+                        snapshot = snapshot,
+                        parserVersion = PortalParser.PARSER_VERSION
+                    )
+                    _newsState.value = committed
+                    Result.success(committed)
+                } catch (e: Exception) {
+                    val failed = store.commitNewsFailure(
+                        errorMessage = e.message ?: "校内资讯同步失败",
+                        parserVersion = PortalParser.PARSER_VERSION
+                    )
+                    _newsState.value = failed
+                    Result.failure(e)
+                } finally {
+                    _newsSyncing.value = false
+                }
+            }
+        }
+
+    suspend fun loadMoreNewsColumn(
+        columnId: String,
+        beginIndex: Int,
+        pageSize: Int = 15
+    ): Result<PortalNewsColumnPage> = withContext(Dispatchers.IO) {
+        syncMutex.withLock {
+            try {
+                val page = executeWithAutoRelogin(userInitiated = true) {
+                    client.fetchNewsColumn(columnId = columnId, beginIndex = beginIndex, pageSize = pageSize)
+                }
+                Result.success(page)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    /**
+     * 原生 sidportal 登录后同时刷新图书在借与校内资讯。
+     */
+    suspend fun loginAndSyncPortal(
+        username: String,
+        passwordChars: CharArray
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        syncMutex.withLock {
+            _librarySyncing.value = true
+            _newsSyncing.value = true
+            try {
+                val loginRes = client.loginWithSidCredentials(username, passwordChars)
+                if (loginRes.isFailure) {
+                    val err = loginRes.exceptionOrNull() ?: IllegalStateException("统一身份认证登录失败")
+                    val msg = err.message ?: "统一身份认证登录失败"
+                    _libraryState.value = store.commitLibraryFailure(msg, PortalParser.PARSER_VERSION)
+                    _newsState.value = store.commitNewsFailure(msg, PortalParser.PARSER_VERSION)
+                    return@withLock Result.failure(err)
+                }
+                SsoSilentRelogin.resetCooldown()
+                persistSidPortalCookies()
+
+                val libRes = runCatching { client.fetchBorrowedBooks() }
+                libRes.onSuccess { snap ->
+                    _libraryState.value = store.commitLibrarySuccess(snap, PortalParser.PARSER_VERSION)
+                }.onFailure { err ->
+                    _libraryState.value = store.commitLibraryFailure(
+                        err.message ?: "图书借阅同步失败",
+                        PortalParser.PARSER_VERSION
+                    )
+                }
+
+                val newsRes = runCatching { client.fetchAllNewsSnapshot() }
+                newsRes.onSuccess { snap ->
+                    _newsState.value = store.commitNewsSuccess(snap, PortalParser.PARSER_VERSION)
+                }.onFailure { err ->
+                    _newsState.value = store.commitNewsFailure(
+                        err.message ?: "校内资讯同步失败",
+                        PortalParser.PARSER_VERSION
+                    )
+                }
+
+                if (libRes.isFailure && newsRes.isFailure) {
+                    Result.failure(libRes.exceptionOrNull() ?: newsRes.exceptionOrNull() ?: IllegalStateException("同步失败"))
+                } else {
+                    Result.success(Unit)
+                }
+            } finally {
+                passwordChars.fill('\u0000')
+                _librarySyncing.value = false
+                _newsSyncing.value = false
             }
         }
     }

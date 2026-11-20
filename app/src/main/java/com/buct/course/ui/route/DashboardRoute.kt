@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material.icons.outlined.MarkEmailUnread
 import androidx.compose.material.icons.outlined.MeetingRoom
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.RestartAlt
@@ -110,9 +111,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.buct.course.EcardActivity
 import com.buct.course.MailActivity
+import com.buct.course.PortalActivity
 import com.buct.course.ScsActivity
 import com.buct.course.SjcxActivity
 import com.buct.course.TyglActivity
+import com.buct.course.portalBookDaysRemaining
 import com.buct.course.manager.BottomNavPreferences
 import com.buct.course.manager.ScheduleSettingsManager
 import com.buct.course.manager.StartupPage
@@ -134,6 +137,9 @@ import com.buct.one.data.model.CardTransaction
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.MailSnapshot
+import com.buct.one.data.model.PortalLibrarySnapshot
+import com.buct.one.data.model.PortalNewsColumn
+import com.buct.one.data.model.PortalNewsSnapshot
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.ScsSnapshot
 import com.buct.one.data.model.ScsTermScore
@@ -145,6 +151,7 @@ import com.buct.one.data.model.TyglSnapshot
 import com.buct.one.data.model.formatFenToYuan
 import com.buct.one.data.sync.CardSyncService
 import com.buct.one.data.sync.MailSyncService
+import com.buct.one.data.sync.PortalSyncService
 import com.buct.one.data.sync.ScsSyncService
 import com.buct.one.data.sync.SjcxSyncService
 import com.buct.one.data.sync.TheolSyncService
@@ -266,6 +273,24 @@ private enum class DashboardModuleId(
         defaultSize = CardSize.MEDIUM,
         defaultCol = 2,
         defaultRow = 8
+    ),
+    CAMPUS_NEWS(
+        id = "campus_news",
+        title = "校内资讯 · 通知与招聘",
+        shortTitle = "校内资讯",
+        icon = Icons.Outlined.Campaign,
+        defaultSize = CardSize.MEDIUM,
+        defaultCol = 0,
+        defaultRow = 10
+    ),
+    LIBRARY(
+        id = "library",
+        title = "图书借阅 · 待还提醒",
+        shortTitle = "图书借阅",
+        icon = Icons.Outlined.MenuBook,
+        defaultSize = CardSize.MEDIUM,
+        defaultCol = 2,
+        defaultRow = 10
     );
 
     val supportedSizes: List<CardSize>
@@ -546,6 +571,12 @@ fun DashboardRoute(
     val mailSlice by mailService.mailState.collectAsState()
     val mailSyncing by mailService.syncing.collectAsState()
 
+    val portalService = remember(context) { PortalSyncService.getInstance(context) }
+    val portalNewsSlice by portalService.newsState.collectAsState()
+    val portalLibrarySlice by portalService.libraryState.collectAsState()
+    val portalNewsSyncing by portalService.newsSyncing.collectAsState()
+    val portalLibrarySyncing by portalService.librarySyncing.collectAsState()
+
     var showEmptyClassroomDialog by remember { mutableStateOf(false) }
     var emptyClassroomInitialCampus by remember { mutableIntStateOf(2) }
     var emptyClassroomPeriodOffset by remember { mutableIntStateOf(0) }
@@ -672,7 +703,7 @@ fun DashboardRoute(
     }
     val bottomInset = LocalAppOverlayBottomInset.current
     val scrollState = rememberScrollState()
-    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing || mailSyncing
+    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing || mailSyncing || portalNewsSyncing || portalLibrarySyncing
 
     val latestDraftState by rememberUpdatedState(draftConfigs)
 
@@ -752,6 +783,10 @@ fun DashboardRoute(
                             }
                             if (mailService.canAutoSync()) {
                                 scope.launch { mailService.refresh(userInitiated = true) }
+                            }
+                            if (portalService.canAutoSync()) {
+                                scope.launch { portalService.refreshNews(userInitiated = true) }
+                                scope.launch { portalService.refreshLibrary(userInitiated = true) }
                             }
                             if (cardService.canAutoSync()) {
                                 scope.launch { cardService.refresh() }
@@ -1069,6 +1104,8 @@ fun DashboardRoute(
                                     scsSlice = scsSlice,
                                     tyglSlice = tyglSlice,
                                     mailSlice = mailSlice,
+                                    portalNewsSlice = portalNewsSlice,
+                                    portalLibrarySlice = portalLibrarySlice,
                                     classroomSlot = classroomSlot,
                                     classroomDayLabel = classroomDayLabel,
                                     onNavigateTab = ::navigateToPageOrWarn,
@@ -1576,6 +1613,8 @@ private fun RenderModuleCard(
     scsSlice: DomainSlice<ScsSnapshot>,
     tyglSlice: DomainSlice<TyglSnapshot>,
     mailSlice: DomainSlice<MailSnapshot>,
+    portalNewsSlice: DomainSlice<PortalNewsSnapshot>,
+    portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1598,6 +1637,8 @@ private fun RenderModuleCard(
             scsSlice = scsSlice,
             tyglSlice = tyglSlice,
             mailSlice = mailSlice,
+            portalNewsSlice = portalNewsSlice,
+            portalLibrarySlice = portalLibrarySlice,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1620,6 +1661,8 @@ private fun RenderModuleCard(
             scsSlice = scsSlice,
             tyglSlice = tyglSlice,
             mailSlice = mailSlice,
+            portalNewsSlice = portalNewsSlice,
+            portalLibrarySlice = portalLibrarySlice,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1640,6 +1683,8 @@ private fun RenderModuleCard(
                 scsSlice = scsSlice,
                 tyglSlice = tyglSlice,
                 mailSlice = mailSlice,
+                portalNewsSlice = portalNewsSlice,
+                portalLibrarySlice = portalLibrarySlice,
                 classroomSlot = classroomSlot,
                 classroomDayLabel = classroomDayLabel,
                 onNavigateTab = onNavigateTab,
@@ -1678,6 +1723,8 @@ private fun buildCompactSummary(
     scsSlice: DomainSlice<ScsSnapshot>,
     tyglSlice: DomainSlice<TyglSnapshot>,
     mailSlice: DomainSlice<MailSnapshot>,
+    portalNewsSlice: DomainSlice<PortalNewsSnapshot>,
+    portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1803,6 +1850,84 @@ private fun buildCompactSummary(
             MailActivity.launch(context, initialTab = 0)
         }
     }
+
+    DashboardModuleId.CAMPUS_NEWS -> {
+        val newsData = portalNewsSlice.data
+        val noticePage = newsData?.columns?.get(PortalNewsColumn.NOTICE.columnId)
+        val latest = noticePage?.articles?.firstOrNull()
+        val valText = when {
+            newsData == null -> "点击进入"
+            noticePage != null && noticePage.totalCount > 0 -> "${noticePage.totalCount} 条通知"
+            else -> "校内资讯"
+        }
+        val miniText = when {
+            newsData == null -> "资讯"
+            latest != null -> "最新"
+            else -> "资讯"
+        }
+        val sub = latest?.title?.ifBlank { null } ?: "通知 · 活动 · 招聘 · 新闻"
+        ModuleCompactSummary("校内资讯", valText, sub, miniText) {
+            PortalActivity.launchNews(context)
+        }
+    }
+
+    DashboardModuleId.LIBRARY -> {
+        val libState = portalLibrarySlice.provenance.refreshState
+        val libData = portalLibrarySlice.data
+        val isEmptyConfirmed = libState == RefreshState.EMPTY_CONFIRMED ||
+            (libData != null && libData.totalCount == 0 && libData.books.isEmpty())
+        val urgent = resolveLibraryUrgentInfo(libData)
+        val valText = when {
+            libState == RefreshState.NEVER && libData == null -> "点击同步"
+            isEmptyConfirmed -> "0 本待还"
+            libData != null -> "${libData.totalCount} 本待还"
+            else -> "图书借阅"
+        }
+        val miniText = when {
+            libState == RefreshState.NEVER && libData == null -> "借阅"
+            isEmptyConfirmed -> "0本"
+            libData != null -> "${libData.totalCount}本"
+            else -> "借阅"
+        }
+        val sub = when {
+            libState == RefreshState.NEVER && libData == null -> "i北化图书馆在借"
+            isEmptyConfirmed -> "当前无在借图书"
+            urgent != null -> urgent.shortStatus
+            else -> "点击查看应还日期"
+        }
+        ModuleCompactSummary("图书借阅", valText, sub, miniText) {
+            PortalActivity.launchLibrary(context)
+        }
+    }
+}
+
+private data class LibraryUrgentInfo(
+    val bookTitle: String,
+    val dueDate: String,
+    val daysRemaining: Int?,
+    val shortStatus: String,
+    val accentColor: Color
+)
+
+private fun resolveLibraryUrgentInfo(data: PortalLibrarySnapshot?): LibraryUrgentInfo? {
+    val books = data?.books.orEmpty()
+    if (books.isEmpty()) return null
+    val soonest = books.minByOrNull { portalBookDaysRemaining(it.dueDate) ?: Int.MAX_VALUE } ?: return null
+    val days = portalBookDaysRemaining(soonest.dueDate)
+    val (status, color) = when {
+        days == null -> "应还 ${soonest.dueDate.ifBlank { "--" }}" to Color(0xFF34C759)
+        days < 0 -> "已逾期 ${-days} 天" to Color(0xFFFF453A)
+        days == 0 -> "今天到期" to Color(0xFFFF9F0A)
+        days <= 7 -> "剩 $days 天到期" to Color(0xFFFF9F0A)
+        else -> "应还 ${soonest.dueDate}" to Color(0xFF34C759)
+    }
+    return LibraryUrgentInfo(
+        bookTitle = soonest.title,
+        dueDate = soonest.dueDate,
+        daysRemaining = days,
+        shortStatus = status,
+        accentColor = color
+    )
 }
 
 @Composable
@@ -1880,6 +2005,8 @@ private fun RenderMediumModuleCard(
     scsSlice: DomainSlice<ScsSnapshot>,
     tyglSlice: DomainSlice<TyglSnapshot>,
     mailSlice: DomainSlice<MailSnapshot>,
+    portalNewsSlice: DomainSlice<PortalNewsSnapshot>,
+    portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -2273,6 +2400,134 @@ private fun RenderMediumModuleCard(
                 }
             }
         }
+
+        DashboardModuleId.CAMPUS_NEWS -> {
+            val newsData = portalNewsSlice.data
+            val noticePage = newsData?.columns?.get(PortalNewsColumn.NOTICE.columnId)
+            val latest = noticePage?.articles?.firstOrNull()
+            MediumGlassCardFrame(
+                title = "校内资讯",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { PortalActivity.launchNews(context) }
+            ) {
+                if (newsData == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "点击进入",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "通知 · 活动 · 招聘 · 新闻",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    MediumBottomActionPill(text = "通知公告 ›")
+                } else {
+                    val noticeTotal = noticePage?.totalCount ?: 0
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = if (noticeTotal > 0) "$noticeTotal 条" else "已同步",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = latest?.title?.ifBlank { "通知 · 活动 · 招聘 · 新闻" } ?: "校内暂无公告",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    MediumBottomActionPill(text = "通知公告 ›")
+                }
+            }
+        }
+
+        DashboardModuleId.LIBRARY -> {
+            val libState = portalLibrarySlice.provenance.refreshState
+            val libData = portalLibrarySlice.data
+            val isEmptyConfirmed = libState == RefreshState.EMPTY_CONFIRMED ||
+                (libData != null && libData.totalCount == 0 && libData.books.isEmpty())
+            val urgent = remember(libData) { resolveLibraryUrgentInfo(libData) }
+            MediumGlassCardFrame(
+                title = "图书借阅",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { PortalActivity.launchLibrary(context) }
+            ) {
+                when {
+                    libState == RefreshState.NEVER && libData == null -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "点击同步",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "i北化图书馆在借",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        MediumBottomActionPill(text = "待还清单 ›")
+                    }
+
+                    isEmptyConfirmed -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "0 本待还",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = Color(0xFF34C759),
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "当前无在借图书",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        MediumBottomActionPill(text = "待还清单 ›")
+                    }
+
+                    else -> {
+                        val total = libData?.totalCount ?: 0
+                        val headlineColor = urgent?.takeIf { (it.daysRemaining ?: Int.MAX_VALUE) <= 7 }?.accentColor
+                            ?: MaterialTheme.colorScheme.primary
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "$total 本待还",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = headlineColor,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = urgent?.let { "《${it.bookTitle}》· ${it.shortStatus}" } ?: "点击查看应还日期",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = urgent?.takeIf { (it.daysRemaining ?: Int.MAX_VALUE) <= 7 }?.accentColor
+                                    ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        MediumBottomActionPill(text = "待还清单 ›")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2366,6 +2621,8 @@ private fun RenderLargeModuleCard(
     scsSlice: DomainSlice<ScsSnapshot>,
     tyglSlice: DomainSlice<TyglSnapshot>,
     mailSlice: DomainSlice<MailSnapshot>,
+    portalNewsSlice: DomainSlice<PortalNewsSnapshot>,
+    portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -3006,6 +3263,237 @@ private fun RenderLargeModuleCard(
                     QuickActionTile("未读邮件", Icons.Outlined.MarkEmailUnread, Modifier.weight(1f), !isEditing) {
                         MailActivity.launch(context, initialTab = 1)
                     }
+                }
+            }
+        }
+
+        DashboardModuleId.CAMPUS_NEWS -> {
+            val newsData = portalNewsSlice.data
+            val noticePage = newsData?.columns?.get(PortalNewsColumn.NOTICE.columnId)
+            val previews = noticePage?.articles.orEmpty().take(2)
+            val newsBadge = when {
+                portalNewsSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK -> "同步失败"
+                portalNewsSlice.provenance.refreshState == RefreshState.NEVER && newsData == null -> "点击进入"
+                noticePage != null && noticePage.totalCount > 0 -> "${noticePage.totalCount} 条"
+                newsData != null -> "最新"
+                else -> "校内资讯"
+            }
+            val newsBadgeColor = when {
+                portalNewsSlice.provenance.refreshState == RefreshState.FAILED_FALLBACK -> Color(0xFFFF453A)
+                newsData != null -> Color(0xFF34C759)
+                else -> MaterialTheme.colorScheme.primary
+            }
+            DashboardGlassCard(
+                title = "校内资讯 · 通知与招聘",
+                badge = newsBadge,
+                badgeColor = newsBadgeColor,
+                heightDp = slotHeightDp,
+                onClick = if (isEditing) null else ({ PortalActivity.launchNews(context) })
+            ) {
+                if (newsData == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "i北化 · mnews.buct.edu.cn",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "汇集通知公告、活动公告、招聘信息与北化新闻",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else if (previews.isEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "通知公告暂无新条目",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "点击切换活动公告、招聘信息或北化新闻",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        previews.forEach { article ->
+                            val dateText = if (article.publishTimestampMs > 0L) {
+                                SimpleDateFormat("MM-dd", Locale.CHINA).format(Date(article.publishTimestampMs))
+                            } else {
+                                article.sourceOrg
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = buildString {
+                                        if (article.sourceOrg.isNotBlank()) {
+                                            append(article.sourceOrg)
+                                            append(" · ")
+                                        }
+                                        append(article.title)
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (dateText.isNotBlank()) {
+                                    Text(
+                                        text = dateText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickActionTile("通知公告", Icons.Outlined.Campaign, Modifier.weight(1f), !isEditing) {
+                        PortalActivity.launchNews(context, initialColumnIndex = 0)
+                    }
+                    QuickActionTile("招聘信息", Icons.Outlined.School, Modifier.weight(1f), !isEditing) {
+                        PortalActivity.launchNews(context, initialColumnIndex = 2)
+                    }
+                }
+            }
+        }
+
+        DashboardModuleId.LIBRARY -> {
+            val libState = portalLibrarySlice.provenance.refreshState
+            val libData = portalLibrarySlice.data
+            val isEmptyConfirmed = libState == RefreshState.EMPTY_CONFIRMED ||
+                (libData != null && libData.totalCount == 0 && libData.books.isEmpty())
+            val urgent = remember(libData) { resolveLibraryUrgentInfo(libData) }
+            val libBadge = when {
+                libState == RefreshState.FAILED_FALLBACK -> "同步失败"
+                libState == RefreshState.NEVER && libData == null -> "点击同步"
+                isEmptyConfirmed -> "0 本待还"
+                urgent != null && (urgent.daysRemaining ?: Int.MAX_VALUE) < 0 -> "有逾期"
+                urgent != null && (urgent.daysRemaining ?: Int.MAX_VALUE) <= 7 -> "即将到期"
+                libData != null -> "${libData.totalCount} 本待还"
+                else -> "图书借阅"
+            }
+            val libBadgeColor = when {
+                libState == RefreshState.FAILED_FALLBACK -> Color(0xFFFF453A)
+                libState == RefreshState.NEVER && libData == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                isEmptyConfirmed -> Color(0xFF34C759)
+                urgent != null && (urgent.daysRemaining ?: Int.MAX_VALUE) <= 7 -> urgent.accentColor
+                else -> MaterialTheme.colorScheme.primary
+            }
+            DashboardGlassCard(
+                title = "图书借阅 · 待还提醒",
+                badge = libBadge,
+                badgeColor = libBadgeColor,
+                heightDp = slotHeightDp,
+                onClick = if (isEditing) null else ({ PortalActivity.launchLibrary(context) })
+            ) {
+                when {
+                    libState == RefreshState.NEVER && libData == null -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "i北化图书馆在借查询",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "尚未同步在借清单，点击卡片查看或登录后刷新",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    isEmptyConfirmed -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "当前无在借图书",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = Color(0xFF34C759),
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "名下暂无待还图书记录",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    else -> {
+                        val sortedBooks = remember(libData) {
+                            libData?.books.orEmpty()
+                                .sortedBy { portalBookDaysRemaining(it.dueDate) ?: Int.MAX_VALUE }
+                                .take(2)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            sortedBooks.forEach { book ->
+                                val days = portalBookDaysRemaining(book.dueDate)
+                                val dueColor = when {
+                                    days != null && days < 0 -> Color(0xFFFF453A)
+                                    days != null && days <= 7 -> Color(0xFFFF9F0A)
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = book.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = when {
+                                            days != null && days < 0 -> "逾期${-days}天"
+                                            days == 0 -> "今天到期"
+                                            days != null && days <= 7 -> "剩${days}天"
+                                            else -> book.dueDate
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = dueColor,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                QuickActionTile(
+                    label = "查看在借清单",
+                    icon = Icons.Outlined.MenuBook,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isEditing
+                ) {
+                    PortalActivity.launchLibrary(context)
                 }
             }
         }

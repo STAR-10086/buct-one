@@ -5,6 +5,10 @@ import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.PortalCalendarSnapshot
+import com.buct.one.data.model.PortalLibrarySnapshot
+import com.buct.one.data.model.PortalNewsColumn
+import com.buct.one.data.model.PortalNewsColumnPage
+import com.buct.one.data.model.PortalNewsSnapshot
 import okhttp3.Cookie
 import okhttp3.FormBody
 import okhttp3.HttpUrl
@@ -47,6 +51,8 @@ class PortalClient {
     companion object {
         const val SID_PORTAL_BASE = "https://sidportal.buct.edu.cn"
         const val PORTAL_BASE = "https://i.buct.edu.cn"
+        const val MNEWS_BASE = "https://mnews.buct.edu.cn"
+        const val MNEWS_SITE_ID = "100000251"
         private const val DEFAULT_PORTAL_CTX = "YXM9MiZ0PTYmZD0xMTYmcD0xJmY9MzAmbT1OJg__"
         private const val REFERER_MAIN = "$PORTAL_BASE/_s2/students_sy/main.psp"
         private const val UA =
@@ -274,11 +280,13 @@ class PortalClient {
 
     private fun isAllowedAuthHost(host: String): Boolean =
         host == "i.buct.edu.cn" ||
+            host == "mnews.buct.edu.cn" ||
             host == "portal.buct.edu.cn" ||
             host == "sidportal.buct.edu.cn"
 
     private fun upgradePortalHttpToHttps(url: HttpUrl): HttpUrl {
-        if (url.host.equals("i.buct.edu.cn", ignoreCase = true) && url.scheme == "http") {
+        val host = url.host.lowercase()
+        if ((host == "i.buct.edu.cn" || host == "mnews.buct.edu.cn") && url.scheme == "http") {
             return url.newBuilder().scheme("https").build()
         }
         return url
@@ -385,4 +393,113 @@ class PortalClient {
 
         return base.copy(holidays = holidays)
     }
+
+    /**
+     * 拉取 i北化首页「借阅图书」总本数与在借明细（getYktOrBook.jsp?type=book）。
+     */
+    fun fetchBorrowedBooks(page: Int = 1, rows: Int = 50): PortalLibrarySnapshot {
+        val url =
+            "$PORTAL_BASE/_web/fusionportal/getYktOrBook.jsp" +
+                "?page=$page&rows=$rows&type=book&_p=$DEFAULT_PORTAL_CTX"
+        val raw = fetchAuthenticatedGet(url)
+        return PortalParser.parseBorrowedBooks(raw)
+    }
+
+    private fun fetchMnewsGet(fullUrl: String): String {
+        var currentUrl: HttpUrl = upgradePortalHttpToHttps(fullUrl.toHttpUrl())
+        var hops = 0
+        while (hops < 14) {
+            hops++
+            val safeUrl = upgradePortalHttpToHttps(currentUrl)
+            val req = Request.Builder()
+                .url(safeUrl)
+                .header("User-Agent", UA)
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .header("Referer", REFERER_MAIN)
+                .get()
+                .build()
+
+            var redirectNext: HttpUrl? = null
+            var statusCode = 0
+            var body = ""
+            httpClient.newCall(req).execute().use { resp ->
+                statusCode = resp.code
+                if (statusCode in 300..399) {
+                    val loc = resp.header("Location").orEmpty()
+                    if (loc.isNotBlank()) {
+                        redirectNext = safeUrl.resolve(loc)
+                    }
+                } else {
+                    body = resp.body?.string().orEmpty()
+                }
+            }
+
+            if (redirectNext != null) {
+                val next = redirectNext!!
+                if (!isAllowedAuthHost(next.host.lowercase())) {
+                    throw MnewsAuthExpiredException()
+                }
+                currentUrl = upgradePortalHttpToHttps(next)
+                continue
+            }
+
+            if (statusCode == 401 || statusCode == 403) {
+                throw MnewsAuthExpiredException()
+            }
+            if (statusCode !in 200..299) {
+                throw IOException("校内资讯请求失败（HTTP $statusCode）")
+            }
+
+            val host = safeUrl.host.lowercase()
+            val trimmed = body.trimStart()
+            if (host == "sidportal.buct.edu.cn" ||
+                (trimmed.startsWith("<") && (body.contains("login-page-flowkey") || body.contains("统一身份认证")))
+            ) {
+                throw MnewsAuthExpiredException()
+            }
+            return body
+        }
+
+        throw IOException("校内资讯重定向次数过多")
+    }
+
+    /**
+     * 拉取 mnews.buct.edu.cn 单个栏目的校内资讯列表。
+     */
+    fun fetchNewsColumn(
+        columnId: String,
+        beginIndex: Int = 0,
+        pageSize: Int = 15
+    ): PortalNewsColumnPage {
+        val url =
+            "$MNEWS_BASE/mobile/getPortalArticleList16ByUser.rst" +
+                "?siteId=$MNEWS_SITE_ID&columnId=$columnId&pageSize=$pageSize&beginIndex=$beginIndex&scope=0"
+        val raw = fetchMnewsGet(url)
+        return PortalParser.parseNewsArticlesPage(columnId, raw)
+    }
+
+    /**
+     * 依次拉取全部 4 个校内综合资讯栏位（通知公告 / 活动公告 / 招聘信息 / 北化新闻）。
+     */
+    fun fetchAllNewsSnapshot(pageSize: Int = 15): PortalNewsSnapshot {
+        val columns = LinkedHashMap<String, PortalNewsColumnPage>()
+        var firstError: Throwable? = null
+        for (col in PortalNewsColumn.entries) {
+            val res = runCatching {
+                fetchNewsColumn(columnId = col.columnId, beginIndex = 0, pageSize = pageSize)
+            }
+            val err = res.exceptionOrNull()
+            if (err is MnewsAuthExpiredException) throw err
+            if (err != null && firstError == null) firstError = err
+            res.getOrNull()?.let { page ->
+                columns[col.columnId] = page
+            }
+        }
+        if (columns.isEmpty() && firstError != null) {
+            throw firstError
+        }
+        return PortalNewsSnapshot(columns = columns)
+    }
+
+    private class MnewsAuthExpiredException : IOException("校内资讯统一认证会话已过期，请重新登录")
 }
