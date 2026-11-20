@@ -20,20 +20,21 @@ fun FriendsRoute(onBack: (() -> Unit)? = null) {
     var chatTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var chatNickname by rememberSaveable { mutableStateOf("") }
 
-    val displayId = chatTarget
-    if (displayId != null) {
-        com.buct.course.ui.screen.FriendChatScreen(
-            displayId = displayId,
-            nickname = chatNickname,
-            onBack = { chatTarget = null }
-        )
-    } else {
-        com.buct.course.ui.screen.FriendsScreen(
-            onBack = onBack,
-            onOpenChat = { id, nickname ->
-                chatTarget = id
-                chatNickname = nickname
-            }
-        )
+    com.buct.course.ui.screen.FriendsScreen(
+        onBack = onBack,
+        onOpenChat = { id, nickname ->
+            chatTarget = id
+            chatNickname = nickname
+        }
+    )
+
+    chatTarget?.let { displayId ->
+        com.buct.course.ui.system.GlassSubpage(onDismiss = { chatTarget = null }) { close ->
+            com.buct.course.ui.screen.FriendChatScreen(
+                displayId = displayId,
+                nickname = chatNickname,
+                onBack = close
+            )
+        }
     }
 }

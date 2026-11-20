@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -75,6 +74,7 @@ import com.buct.course.schedule.ScheduleDates
 import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassPageScaffold
 import com.buct.course.ui.system.GlassStatChip
+import com.buct.course.ui.system.GlassSubpage
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.GlassWindowHost
@@ -195,16 +195,6 @@ private fun PortalNewsScreen(
         ) {
             service.refreshNews(userInitiated = false)
         }
-    }
-
-    if (selectedArticle != null) {
-        val article = selectedArticle!!
-        BackHandler { selectedArticle = null }
-        PortalNewsDetailView(
-            article = article,
-            onBack = { selectedArticle = null }
-        )
-        return
     }
 
     val currentColumn = columns[selectedColIdx]
@@ -399,6 +389,15 @@ private fun PortalNewsScreen(
                     }
                 }
             }
+        }
+    }
+
+    selectedArticle?.let { article ->
+        GlassSubpage(onDismiss = { selectedArticle = null }) { close ->
+            PortalNewsDetailView(
+                article = article,
+                onBack = close
+            )
         }
     }
 

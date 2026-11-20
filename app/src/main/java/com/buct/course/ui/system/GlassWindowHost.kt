@@ -29,12 +29,23 @@ private val LocalGlassWindowOwner = staticCompositionLocalOf<android.view.View?>
 
 /** Each actual window owns its sources; pages inside that window reuse the provided locals. */
 @Composable
-fun GlassWindowHost(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+fun GlassWindowHost(
+    modifier: Modifier = Modifier,
+    drawBackgroundIfNested: Boolean = false,
+    content: @Composable BoxScope.() -> Unit
+) {
     val view = LocalView.current
     val parentHasToastHost = LocalHasGlassToastHost.current
     val appWallpaper = com.buct.course.ui.theme.rememberAppWallpaperStyle()
     if (LocalGlassWindowOwner.current === view) {
-        Box(modifier.fillMaxSize()) { content() }
+        Box(modifier.fillMaxSize()) {
+            if (drawBackgroundIfNested) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawWallpaperPattern(appWallpaper, microTexture = isBackdropSupported())
+                }
+            }
+            content()
+        }
         return
     }
     val wallpaper = if (isBackdropSupported()) rememberLayerBackdrop() else null

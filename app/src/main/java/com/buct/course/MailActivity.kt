@@ -12,7 +12,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -88,6 +87,7 @@ import com.buct.course.manager.AppThemeCoordinator
 import com.buct.course.manager.UserManager
 import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassPageScaffold
+import com.buct.course.ui.system.GlassSubpage
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.GlassWindowHost
@@ -362,47 +362,6 @@ private fun MailScreen(
             }
         }
     }
-
-    if (selectedMessage != null) {
-        val currentMsg = selectedMessage!!
-        BackHandler { selectedMessage = null }
-        MailDetailView(
-            message = currentMsg,
-            detail = activeDetail,
-            loading = detailLoading,
-            error = detailError,
-            downloadingPartId = downloadingPartId,
-            onBack = { selectedMessage = null },
-            onReload = {
-                scope.launch {
-                    detailLoading = true
-                    detailError = null
-                    val res = service.fetchMessageDetail(currentMsg.id, forceRefresh = true)
-                    detailLoading = false
-                    res.onSuccess { activeDetail = it }
-                        .onFailure { detailError = it.message ?: "读取邮件正文失败" }
-                }
-            },
-            onToggleRead = { toggleMessageRead(currentMsg) },
-            onDeleteClick = {
-                deleteConfirmState = currentMsg to (currentMsg.folderId == MailFolderIds.TRASH)
-            },
-            onDownloadAttachment = { attachment ->
-                if (downloadingPartId == null) {
-                    scope.launch {
-                        downloadingPartId = attachment.partId
-                        val res = service.downloadAttachment(currentMsg.id, attachment)
-                        downloadingPartId = null
-                        res.onSuccess { file ->
-                            openMailAttachment(context, file)
-                        }.onFailure { err ->
-                            GlassToaster.show(err.message ?: "附件下载失败")
-                        }
-                    }
-                }
-            }
-        )
-    } else {
 
     val rawMessages = when (selectedTab) {
         0 -> inboxPaginatedMessages ?: snapshot?.inboxMessages.orEmpty()
@@ -723,6 +682,46 @@ private fun MailScreen(
             }
         }
     }
+
+    selectedMessage?.let { currentMsg ->
+        GlassSubpage(onDismiss = { selectedMessage = null }) { close ->
+            MailDetailView(
+                message = currentMsg,
+                detail = activeDetail,
+                loading = detailLoading,
+                error = detailError,
+                downloadingPartId = downloadingPartId,
+                onBack = close,
+                onReload = {
+                    scope.launch {
+                        detailLoading = true
+                        detailError = null
+                        val res = service.fetchMessageDetail(currentMsg.id, forceRefresh = true)
+                        detailLoading = false
+                        res.onSuccess { activeDetail = it }
+                            .onFailure { detailError = it.message ?: "读取邮件正文失败" }
+                    }
+                },
+                onToggleRead = { toggleMessageRead(currentMsg) },
+                onDeleteClick = {
+                    deleteConfirmState = currentMsg to (currentMsg.folderId == MailFolderIds.TRASH)
+                },
+                onDownloadAttachment = { attachment ->
+                    if (downloadingPartId == null) {
+                        scope.launch {
+                            downloadingPartId = attachment.partId
+                            val res = service.downloadAttachment(currentMsg.id, attachment)
+                            downloadingPartId = null
+                            res.onSuccess { file ->
+                                openMailAttachment(context, file)
+                            }.onFailure { err ->
+                                GlassToaster.show(err.message ?: "附件下载失败")
+                            }
+                        }
+                    }
+                }
+            )
+        }
     }
 
     if (showLoginDialog) {

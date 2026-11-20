@@ -15,6 +15,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -85,7 +86,9 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -287,23 +290,49 @@ fun SystemTopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                navigationIcon?.invoke()
+                CompositionLocalProvider(
+                    androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 40.dp
+                ) {
+                    navigationIcon?.invoke()
+                }
                 Column(modifier = Modifier.weight(1f)) {
-                    val expandedTitleSp = when {
-                        title.length >= 7 -> 20f
-                        title.length >= 6 -> 22f
+                    val baseExpandedSp = when {
+                        title.length >= 7 -> 21f
+                        title.length >= 6 -> 23f
                         else -> 28f
                     }
-                    Text(
-                        text = title,
-                        fontSize = lerpSp(expandedTitleSp, 17f, collapse),
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.sp,
-                        color = titleColor,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
+                    val density = LocalDensity.current
+                    val measurer = rememberTextMeasurer()
+                    val titleMeasureStyle = remember {
+                        TextStyle(fontWeight = FontWeight.Bold, letterSpacing = 0.sp)
+                    }
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        val availPx = constraints.maxWidth.toFloat()
+                        val fittedExpandedSp = remember(title, baseExpandedSp, availPx, density.fontScale, density.density) {
+                            if (availPx <= 0f || title.isEmpty()) baseExpandedSp
+                            else {
+                                val measuredPx = measurer.measure(
+                                    text = title,
+                                    style = titleMeasureStyle.copy(fontSize = baseExpandedSp.sp),
+                                    maxLines = 1,
+                                    softWrap = false
+                                ).size.width.toFloat()
+                                if (measuredPx <= availPx) baseExpandedSp
+                                else (baseExpandedSp * (availPx / measuredPx) * 0.96f).coerceIn(13f, baseExpandedSp)
+                            }
+                        }
+                        val fittedCollapsedSp = minOf(17f, fittedExpandedSp)
+                        Text(
+                            text = title,
+                            fontSize = lerpSp(fittedExpandedSp, fittedCollapsedSp, collapse),
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.sp,
+                            color = titleColor,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                     if (!subtitle.isNullOrBlank()) {
                         // 折叠时副标题高度收拢并渐隐
                         Box(
@@ -334,11 +363,15 @@ fun SystemTopBar(
                         }
                     }
                 }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    content = actions
-                )
+                CompositionLocalProvider(
+                    androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 40.dp
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        content = actions
+                    )
+                }
             }
         }
     }

@@ -11,7 +11,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -85,6 +84,7 @@ import com.buct.course.manager.UserManager
 import com.buct.course.ui.screen.GlassFilterChip
 import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassPageScaffold
+import com.buct.course.ui.system.GlassSubpage
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.GlassWindowHost
@@ -298,29 +298,6 @@ private fun JwNoticeScreen(
                 }
             }
         }
-    }
-
-    if (selectedAnnouncement != null) {
-        val target = selectedAnnouncement!!
-        BackHandler { selectedAnnouncement = null }
-        JwAnnouncementDetailView(
-            item = target,
-            detail = activeDetail,
-            loading = detailLoading,
-            error = detailError,
-            onBack = { selectedAnnouncement = null },
-            onRetry = {
-                scope.launch {
-                    detailLoading = true
-                    detailError = null
-                    val res = service.fetchAnnouncementDetail(target)
-                    detailLoading = false
-                    res.onSuccess { activeDetail = it }
-                        .onFailure { detailError = it.message ?: "读取教务公告正文失败" }
-                }
-            }
-        )
-        return
     }
 
     val statusText = remember(slice.provenance.capturedAt, slice.provenance.refreshState, syncing) {
@@ -663,6 +640,28 @@ private fun JwNoticeScreen(
                     }
                 }
             }
+        }
+    }
+
+    selectedAnnouncement?.let { target ->
+        GlassSubpage(onDismiss = { selectedAnnouncement = null }) { close ->
+            JwAnnouncementDetailView(
+                item = target,
+                detail = activeDetail,
+                loading = detailLoading,
+                error = detailError,
+                onBack = close,
+                onRetry = {
+                    scope.launch {
+                        detailLoading = true
+                        detailError = null
+                        val res = service.fetchAnnouncementDetail(target)
+                        detailLoading = false
+                        res.onSuccess { activeDetail = it }
+                            .onFailure { detailError = it.message ?: "读取教务公告正文失败" }
+                    }
+                }
+            )
         }
     }
 

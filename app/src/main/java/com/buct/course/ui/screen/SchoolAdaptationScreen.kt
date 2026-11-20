@@ -63,20 +63,22 @@ fun SchoolAdaptationFlow(
     var showForm by rememberSaveable { mutableStateOf(false) }
     var refreshKey by rememberSaveable { mutableStateOf(0) }
 
+    SchoolAdaptationHistoryScreen(
+        onNavigateBack = onNavigateBack,
+        onNewRequest = { showForm = true },
+        refreshKey = refreshKey
+    )
+
     if (showForm) {
-        SchoolAdaptationScreen(
-            onNavigateBack = { showForm = false },
-            onSubmitted = {
-                refreshKey++
-                showForm = false
-            }
-        )
-    } else {
-        SchoolAdaptationHistoryScreen(
-            onNavigateBack = onNavigateBack,
-            onNewRequest = { showForm = true },
-            refreshKey = refreshKey
-        )
+        com.buct.course.ui.system.GlassSubpage(onDismiss = { showForm = false }) { close ->
+            SchoolAdaptationScreen(
+                onNavigateBack = close,
+                onSubmitted = {
+                    refreshKey++
+                    close()
+                }
+            )
+        }
     }
 }
 

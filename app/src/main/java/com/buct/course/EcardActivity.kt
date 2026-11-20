@@ -6,6 +6,11 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -197,7 +202,14 @@ class EcardActivity : ComponentActivity() {
                             .fillMaxSize()
                             .imePadding()
                     ) {
-                        if (showLoginScreen) {
+                        AnimatedContent(
+                            targetState = showLoginScreen,
+                            transitionSpec = {
+                                fadeIn(tween(220)) togetherWith fadeOut(tween(160))
+                            },
+                            label = "ecardPane"
+                        ) { loginVisible ->
+                        if (loginVisible) {
                             val prefillId = remember {
                                 cardService.getSavedAccountId()
                                     .ifBlank { userManager.studentId.orEmpty() }
@@ -287,6 +299,7 @@ class EcardActivity : ComponentActivity() {
                                 onRelogin = { forceLoginScreen = true },
                                 onOpenWecom = { launchWecomOrWechat(this@EcardActivity) }
                             )
+                        }
                         }
                     }
 

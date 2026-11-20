@@ -16,7 +16,7 @@ fun GlassSubpage(onDismiss: () -> Unit, content: @Composable (close: () -> Unit)
         DisposableEffect(host) {
             val owner = host.show({ currentDismiss() }, DialogPresentation.Page, saveableKey = saveableKey) {
                 CompositionLocalProvider(LocalAppOverlayBottomInset provides 0.dp, LocalFloatingNotice provides null) {
-                    GlassWindowHost { currentContent { host.dismiss(handle) } }
+                    GlassWindowHost(drawBackgroundIfNested = true) { currentContent { host.dismiss(handle) } }
                 }
             }
             handle = owner

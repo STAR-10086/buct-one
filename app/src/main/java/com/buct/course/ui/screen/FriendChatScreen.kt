@@ -118,16 +118,6 @@ fun FriendChatScreen(
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 
-    // 课表预览
-    previewJson?.let { json ->
-        FriendSchedulePreview(
-            title = previewTitle.orEmpty(),
-            json = json,
-            onBack = { previewJson = null }
-        )
-        return
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -271,6 +261,16 @@ fun FriendChatScreen(
                     else MaterialTheme.colorScheme.primary
                 )
             }
+        }
+    }
+
+    previewJson?.let { json ->
+        com.buct.course.ui.system.GlassSubpage(onDismiss = { previewJson = null }) { close ->
+            FriendSchedulePreview(
+                title = previewTitle.orEmpty(),
+                json = json,
+                onBack = close
+            )
         }
     }
 }

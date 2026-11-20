@@ -1,5 +1,12 @@
 package com.buct.course.ui.route
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,7 +72,17 @@ fun CourseSectionRoute(onBack: (() -> Unit)? = null) {
                 .fillMaxWidth()
                 .consumeWindowInsets(WindowInsets.statusBars)
         ) {
-            if (tab == 0) CourseListRoute() else GrabProRoute()
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    val dir = if (targetState > initialState) 1 else -1
+                    (fadeIn(tween(200)) + slideInHorizontally(tween(220)) { dir * it / 16 }) togetherWith
+                        (fadeOut(tween(150)) + slideOutHorizontally(tween(180)) { -dir * it / 16 })
+                },
+                label = "courseSectionTab"
+            ) { currentTab ->
+                if (currentTab == 0) CourseListRoute() else GrabProRoute()
+            }
         }
     }
 }
