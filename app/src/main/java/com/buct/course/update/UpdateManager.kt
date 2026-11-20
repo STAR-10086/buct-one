@@ -31,7 +31,7 @@ class UpdateManager(private val context: Context) {
         private const val TAG = "UpdateManager"
         
         private val VERSION_URLS: List<String> = listOf(
-            "https://update.buctone.cc.cd/update.json"
+            "https://update.buct.one/update.json"
         )
 
         private val DEFAULT_DOWNLOAD_SOURCES: List<DownloadSource> = emptyList()

@@ -323,6 +323,8 @@ class UpdateState(
             if (info != null) {
                 setUpdateInfo(info)
                 setShowDialog(true)
+            } else {
+                setUpdateInfo(null)
             }
         }, onFinished)
     }

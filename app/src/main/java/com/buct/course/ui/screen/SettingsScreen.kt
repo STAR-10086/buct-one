@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.ViewWeek
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -85,6 +86,7 @@ fun SettingsScreen(
     onClearCache: () -> Unit,
     onCredits: () -> Unit,
     onCheckUpdate: () -> Unit = {},
+    isCheckingUpdate: Boolean = false,
     startupPageName: String = "课程",
     onStartupPageSelect: () -> Unit = {},
     onLogout: () -> Unit,
@@ -294,6 +296,36 @@ fun SettingsScreen(
                     title = "启动首屏",
                     subtitle = "$startupPageName · 下次启动时显示",
                     onClick = onStartupPageSelect
+                )
+                InsetGroupedRow(
+                    icon = Icons.Outlined.SystemUpdate,
+                    iconTint = Color(0xFF0A84FF),
+                    title = "检查更新",
+                    subtitle = if (isCheckingUpdate) {
+                        "正在连接更新服务器…"
+                    } else {
+                        "当前 v$currentVersion · 点击手动检查最新版本"
+                    },
+                    enabled = !isCheckingUpdate,
+                    onClick = {
+                        if (!isCheckingUpdate) onCheckUpdate()
+                    },
+                    trailing = {
+                        if (isCheckingUpdate) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                 )
                 SettingsRow(
                     icon = Icons.Outlined.FavoriteBorder,

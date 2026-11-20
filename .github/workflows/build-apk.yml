@@ -415,8 +415,8 @@ jobs:
           if os.path.exists("release-dist/release-notes.md"):
               notes = open("release-dist/release-notes.md", encoding="utf-8").read().strip()
 
-          dl_domain = "https://dl.buctone.cc.cd"
-          update_domain = "https://update.buctone.cc.cd"
+          dl_domain = "https://dl.buct.one"
+          update_domain = "https://update.buct.one"
           gh_rel_url = f"https://github.com/{repo}/releases/tag/{tag}"
           now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 

@@ -386,6 +386,7 @@ fun SettingsRoute(
         onClearCache = { showClearCacheDialog = true },
         onCredits = { showCreditsDialog = true },
         onCheckUpdate = { checkUpdates() },
+        isCheckingUpdate = isCheckingUpdate,
         startupPageName = startupPage.label,
         onStartupPageSelect = { showStartupPageDialog = true },
         onLogout = { showLogoutDialog = true },
