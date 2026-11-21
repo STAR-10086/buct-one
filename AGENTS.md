@@ -4,6 +4,7 @@
 
 - **本机不跑 gradle 构建**。所有构建走 GitHub Actions，本地只改代码。
 - 需要看构建结果：`gh run list --limit 5` / `gh run view <id> --log-failed`。
+- 本机执行 `git push` 与 `gh` 命令需挂载代理：`$env:HTTPS_PROXY="http://127.0.0.1:7897"; $env:HTTP_PROXY="http://127.0.0.1:7897"`。
 - `compileSdk android-37.0`、`build-tools 37.0.0`、JDK 21。
 
 ## 硬约束（改动前先自查）
@@ -33,6 +34,11 @@ CI 里 `Package dependency rules` 这一步会 grep 检查，违反即失败。
 3. `parserVersion` 只增不减；改解析逻辑必须 +1
 4. `capturedAt` 单调不减（时钟回拨保护）
 
+## 界面与预测性返回手势
+
+- 全局启用 Android 14+ 预测性返回手势（`android:enableOnBackInvokedCallback="true"`），并受「我的 → 外观 → 预测性返回手势」（`AppearanceSettingsManager.predictiveBackEnabled`）控制。
+- **工作台一级功能模块必须使用独立 `ComponentActivity` + `GlassWindowHost` 承载**（如校园卡、实践教学、第二课堂、体测、校园邮箱、i北化、教务消息、空闲教室 `EmptyClassroomActivity`、选课抢课 `CourseSelectionActivity`），以确保获得系统级跨 Activity 预测性返回动画；`GlassSubpage` 仅用于同一页面内部的二级详情/设置子页。
+
 ## 安全
 
 - 学号/密码绝不落盘，内存 `char[]` 用完清零
@@ -40,9 +46,11 @@ CI 里 `Package dependency rules` 这一步会 grep 检查，违反即失败。
 - 所有网络请求必须走 `BuctTlsTrustManager`；**禁止** `trustAllCerts`、`hostnameVerifier { true }`
 - 日志脱敏：域名可留，学号/姓名/成绩数字必须替换
 - `res/xml/backup_rules.xml` 与 `data_extraction_rules.xml` 必须 exclude 三个 vault 文件
+- 匿名统计仅使用自托管 Umami（`https://stats.buct.one`），基于本地随机 `UUIDv4` + `BuctTlsTrustManager`，绝不采集学号/姓名/Cookie/硬件指纹，且必须受「我的 → 数据与安全 → 匿名使用统计」实时开关控制；禁止引入任何第三方商业统计/崩溃上报 SDK。
 
 ## 提交
 
-- 中文 commit message，一行说清做了什么
+- 使用 `<type>: <一行中文说明>` 格式的 commit message（常用前缀：`feat:`、`fix:`、`docs:`、`ci:`、`refactor:`、`chore:`），一行说清做了什么
 - 改动涉及解析器的，commit 里写明 `parserVersion: n → n+1`
 - 不提交 `local.properties`、`*.jks`、`release-notes/` 之外的发版材料
+- 发版推送 `v*` 标签前，必须先同步更新 `app/version.properties`（`VERSION_NAME` 与 `VERSION_CODE`）、`CHANGELOG.md`、`README.md` 与 `docs/规划.md` 并推送到 `main`（CI 会校验 `v${VERSION_NAME} == $TAG` 并从 `CHANGELOG.md` 提取对应版本的 Release Notes）。
