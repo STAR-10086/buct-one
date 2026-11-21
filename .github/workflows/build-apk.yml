@@ -440,6 +440,7 @@ jobs:
           now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
           apks = {}
+          is_prerelease = "-" in tag
           for arch in ("arm64-v8a", "armeabi-v7a", "universal"):
               obj_name = f"buct-one-{tag}-{arch}.apk"
               local_path = f"release-dist/{obj_name}"
@@ -448,7 +449,7 @@ jobs:
               sha = hashlib.sha256(data).hexdigest().lower()
               assert 0 < size_bytes <= 104857600, f"Invalid size for {local_path}: {size_bytes}"
               assert re.fullmatch(r"[a-f0-9]{64}", sha), f"Invalid sha256 for {local_path}"
-              key = f"apk/{tag}/{obj_name}"
+              key = f"apk/{tag}/{obj_name}" if is_prerelease else f"apk/latest/{arch}/buct-one-latest.apk"
               apks[arch] = {
                   "apkKey": key,
                   "downloadUrl": f"{update_domain}/{key}",
@@ -579,30 +580,19 @@ jobs:
               --cache-control "${cache}"
           }
 
-          # 1. 先上传不可变版本化 APK 与 .sha256（debug 包不推 R2；确保指针切换时文件均已就绪）
-          for ARCH in arm64-v8a armeabi-v7a universal; do
-            upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk"        "apk/${TAG}/buct-one-${TAG}-${ARCH}.apk"        "application/vnd.android.package-archive" "${IMMUTABLE_CACHE}"
-            upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk.sha256" "apk/${TAG}/buct-one-${TAG}-${ARCH}.apk.sha256" "text/plain; charset=utf-8"               "${IMMUTABLE_CACHE}"
-          done
-          # 向后兼容的 universal 短文件名别名
-          upload_obj "release-dist/buct-one-${TAG}-universal.apk"        "apk/${TAG}/buct-one-${TAG}.apk"              "application/vnd.android.package-archive" "${IMMUTABLE_CACHE}"
-          upload_obj "release-dist/buct-one-${TAG}-universal.apk.sha256" "apk/${TAG}/buct-one-${TAG}.apk.sha256"       "text/plain; charset=utf-8"               "${IMMUTABLE_CACHE}"
-
           if [[ "$TAG" == *-* ]]; then
-            # 预发行版仅更新 beta 通道清单，不动 stable 短链、changelog 与 latest 指针
-            upload_obj "r2-dist/latest.json" "meta/beta.json"        "application/json; charset=utf-8" "${POINTER_CACHE}"
+            # 预发行版仅上传版本化测试包与 beta 通道清单，不动 stable 短链与 update.json
+            for ARCH in arm64-v8a armeabi-v7a universal; do
+              upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk"        "apk/${TAG}/buct-one-${TAG}-${ARCH}.apk"        "application/vnd.android.package-archive" "${IMMUTABLE_CACHE}"
+              upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk.sha256" "apk/${TAG}/buct-one-${TAG}-${ARCH}.apk.sha256" "text/plain; charset=utf-8"               "${IMMUTABLE_CACHE}"
+            done
             upload_obj "r2-dist/update.json" "meta/update-beta.json" "application/json; charset=utf-8" "${POINTER_CACHE}"
           else
-            # 2a. stable 固定短链副本
+            # 正式版仅上传 latest 固定短链副本与 App 自动更新清单 update.json（节省 R2 Class A 写入次数与存储）
             for ARCH in arm64-v8a armeabi-v7a universal; do
               upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk" "apk/latest/${ARCH}/buct-one-latest.apk" "application/vnd.android.package-archive" "${POINTER_CACHE}"
             done
-            # 2b. 全量更新日志全文
-            upload_obj "CHANGELOG.md" "meta/changelog.md" "text/markdown; charset=utf-8" "${CHANGELOG_CACHE}"
-            # 2c. 版本归档与清单指针（最后 PUT）
-            upload_obj "r2-dist/latest.json" "meta/${TAG}.json" "application/json; charset=utf-8" "${IMMUTABLE_CACHE}"
-            upload_obj "r2-dist/latest.json" "meta/latest.json" "application/json; charset=utf-8" "${POINTER_CACHE}"
-            upload_obj "r2-dist/update.json" "update.json"      "application/json; charset=utf-8" "${POINTER_CACHE}"
+            upload_obj "r2-dist/update.json" "update.json" "application/json; charset=utf-8" "${POINTER_CACHE}"
           fi
           echo "Cloudflare R2 release upload complete for ${TAG}!"
 
@@ -637,7 +627,7 @@ jobs:
               cd /tmp/buct-one-web
               git config user.name "github-actions[bot]"
               git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git add src/data/release-snapshot.json src/data/changelog-fallback.md
+              git add src/data/release-snapshot.json src/data/changelog-fallback.md src/data/changelog-cache.md
               if ! git diff --cached --quiet; then
                 git commit -m "chore: 自动同步 ${TAG} 发版快照与更新日志"
               else
