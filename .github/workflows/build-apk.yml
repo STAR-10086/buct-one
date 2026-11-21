@@ -177,7 +177,7 @@ jobs:
           if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then
             ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace --build-cache
           else
-            ./gradlew assembleRelease --no-daemon --stacktrace --build-cache
+            ./gradlew assembleRelease -PonlyArm64=true --no-daemon --stacktrace --build-cache
           fi
 
       - name: Verify APK signatures
@@ -185,13 +185,17 @@ jobs:
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
         run: |
           set -euo pipefail
-          APKS=(
-            app/build/outputs/apk/release/app-armeabi-v7a-release.apk
-            app/build/outputs/apk/release/app-arm64-v8a-release.apk
-            app/build/outputs/apk/release/app-universal-release.apk
-          )
           if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then
-            APKS+=(app/build/outputs/apk/debug/app-universal-debug.apk)
+            APKS=(
+              app/build/outputs/apk/release/app-armeabi-v7a-release.apk
+              app/build/outputs/apk/release/app-arm64-v8a-release.apk
+              app/build/outputs/apk/release/app-universal-release.apk
+              app/build/outputs/apk/debug/app-universal-debug.apk
+            )
+          else
+            APKS=(
+              app/build/outputs/apk/release/app-arm64-v8a-release.apk
+            )
           fi
           for APK in "${APKS[@]}"; do
             echo "=== Verifying $APK ==="
@@ -203,13 +207,17 @@ jobs:
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
         run: |
           set -euo pipefail
-          APKS=(
-            app/build/outputs/apk/release/app-armeabi-v7a-release.apk
-            app/build/outputs/apk/release/app-arm64-v8a-release.apk
-            app/build/outputs/apk/release/app-universal-release.apk
-          )
           if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then
-            APKS+=(app/build/outputs/apk/debug/app-universal-debug.apk)
+            APKS=(
+              app/build/outputs/apk/release/app-armeabi-v7a-release.apk
+              app/build/outputs/apk/release/app-arm64-v8a-release.apk
+              app/build/outputs/apk/release/app-universal-release.apk
+              app/build/outputs/apk/debug/app-universal-debug.apk
+            )
+          else
+            APKS=(
+              app/build/outputs/apk/release/app-arm64-v8a-release.apk
+            )
           fi
           for APK in "${APKS[@]}"; do
             BYTES=$(stat -c%s "$APK")
@@ -247,9 +255,11 @@ jobs:
           set -uo pipefail
           gh run download --repo "$GITHUB_REPOSITORY" --branch main --name apks --dir /tmp/baseline \
             || { echo "无基准产物，跳过 delta"; exit 0; }
-          BASE=$(find /tmp/baseline -name "*universal*release*.apk" | head -1)
+          BASE=$(find /tmp/baseline -name "*arm64-v8a*release*.apk" | head -1)
+          [ -n "$BASE" ] || BASE=$(find /tmp/baseline -name "*universal*release*.apk" | head -1)
           [ -n "$BASE" ] || BASE=$(find /tmp/baseline -name "*.apk" | head -1)
-          APK="app/build/outputs/apk/release/app-universal-release.apk"
+          APK="app/build/outputs/apk/release/app-arm64-v8a-release.apk"
+          [ -f "$APK" ] || APK="app/build/outputs/apk/release/app-universal-release.apk"
           [ -f "$APK" ] || APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           B=$(stat -c%s "$BASE"); N=$(stat -c%s "$APK")
           {
@@ -268,13 +278,15 @@ jobs:
           set -euo pipefail
           rm -rf ci-apks
           mkdir -p ci-apks
-          cp \
-            app/build/outputs/apk/release/app-armeabi-v7a-release.apk \
-            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
-            app/build/outputs/apk/release/app-universal-release.apk \
-            ci-apks/
           if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then
-            cp app/build/outputs/apk/debug/app-universal-debug.apk ci-apks/
+            cp \
+              app/build/outputs/apk/release/app-armeabi-v7a-release.apk \
+              app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+              app/build/outputs/apk/release/app-universal-release.apk \
+              app/build/outputs/apk/debug/app-universal-debug.apk \
+              ci-apks/
+          else
+            cp app/build/outputs/apk/release/app-arm64-v8a-release.apk ci-apks/
           fi
 
       - uses: actions/upload-artifact@v4
@@ -282,6 +294,54 @@ jobs:
           name: apks
           path: ci-apks/*.apk
           if-no-files-found: error
+
+      - name: Prepare dev-latest APK (arm64-v8a)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.publish_release != true
+        run: |
+          set -euo pipefail
+          rm -rf dev-dist
+          mkdir -p dev-dist
+          SRC="app/build/outputs/apk/release/app-arm64-v8a-release.apk"
+          DST="dev-dist/buct-one-dev-arm64-v8a.apk"
+          cp "$SRC" "$DST"
+
+          BYTES=$(stat -c%s "$DST")
+          MB=$(awk "BEGIN{printf \"%.2f\", $BYTES/1048576}")
+          SHA=$(sha256sum "$DST" | awk '{print $1}')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=%s)
+          DIRECT_URL="https://github.com/${{ github.repository }}/releases/download/dev-latest/buct-one-dev-arm64-v8a.apk"
+
+          {
+            echo "滚动自测包（每次推送 \`main\` 自动更新，仅包含 \`arm64-v8a\`，免解压直接下载安装）。"
+            echo ""
+            echo "- **直链下载**：${DIRECT_URL}"
+            echo "- **最新提交**：\`${SHORT_SHA}\` — ${COMMIT_MSG}"
+            echo "- **文件大小**：${MB} MB (\`${BYTES}\` B)"
+            echo "- **SHA-256**：\`${SHA}\`"
+          } > dev-dist/notes.md
+
+          {
+            echo "### 滚动自测包（arm64-v8a）"
+            echo "- 直链下载（免解压）：${DIRECT_URL}"
+            echo "- 提交：\`${SHORT_SHA}\` — ${COMMIT_MSG}"
+            echo "- 大小：${MB} MB | SHA-256：\`${SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          git tag -f dev-latest HEAD
+          git push -f origin refs/tags/dev-latest
+
+      - name: Publish rolling dev-latest Pre-release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.publish_release != true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-latest
+          name: "BUCT One Dev Latest (arm64-v8a)"
+          prerelease: true
+          make_latest: false
+          body_path: dev-dist/notes.md
+          files: dev-dist/buct-one-dev-arm64-v8a.apk
+          fail_on_unmatched_files: true
 
       - name: Prepare release APK files
         if: inputs.publish_release == true && inputs.release_tag != ''
@@ -399,7 +459,7 @@ jobs:
           } > "$OUT"
 
       - name: Generate R2 manifests (update.json & latest.json)
-        if: inputs.publish_release == true && inputs.release_tag != ''
+        if: inputs.publish_release == true && inputs.release_tag != '' && !contains(inputs.release_tag, '-')
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
           REPO_FULL_NAME: ${{ github.repository }}
@@ -526,7 +586,7 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: Upload release to Cloudflare R2
-        if: inputs.publish_release == true && inputs.release_tag != ''
+        if: inputs.publish_release == true && inputs.release_tag != '' && !contains(inputs.release_tag, '-')
         env:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -545,7 +605,7 @@ jobs:
           fi
 
           if [ -z "${R2_ENDPOINT:-}" ] || [ -z "${R2_ACCESS_KEY_ID:-}" ] || [ -z "${R2_SECRET_ACCESS_KEY:-}" ]; then
-            if [ "${REPO_FULL_NAME}" = "STAR-10086/buct-one" ] && [[ "${TAG}" != *-* ]]; then
+            if [ "${REPO_FULL_NAME}" = "STAR-10086/buct-one" ]; then
               echo "::error::正式版发布缺少 R2_ENDPOINT (或 R2_ACCOUNT_ID) / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY secrets"
               exit 1
             fi
@@ -563,8 +623,6 @@ jobs:
           export AWS_REQUEST_CHECKSUM_CALCULATION="when_required"
           export AWS_RESPONSE_CHECKSUM_VALIDATION="when_required"
 
-          IMMUTABLE_CACHE="public, max-age=31536000, immutable"
-          CHANGELOG_CACHE="public, max-age=300"
           POINTER_CACHE="public, max-age=60, stale-while-revalidate=300"
 
           upload_obj() {
@@ -580,20 +638,11 @@ jobs:
               --cache-control "${cache}"
           }
 
-          if [[ "$TAG" == *-* ]]; then
-            # 预发行版仅上传版本化测试包与 beta 通道清单，不动 stable 短链与 update.json
-            for ARCH in arm64-v8a armeabi-v7a universal; do
-              upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk"        "apk/${TAG}/buct-one-${TAG}-${ARCH}.apk"        "application/vnd.android.package-archive" "${IMMUTABLE_CACHE}"
-              upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk.sha256" "apk/${TAG}/buct-one-${TAG}-${ARCH}.apk.sha256" "text/plain; charset=utf-8"               "${IMMUTABLE_CACHE}"
-            done
-            upload_obj "r2-dist/update.json" "meta/update-beta.json" "application/json; charset=utf-8" "${POINTER_CACHE}"
-          else
-            # 正式版仅上传 latest 固定短链副本与 App 自动更新清单 update.json（节省 R2 Class A 写入次数与存储）
-            for ARCH in arm64-v8a armeabi-v7a universal; do
-              upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk" "apk/latest/${ARCH}/buct-one-latest.apk" "application/vnd.android.package-archive" "${POINTER_CACHE}"
-            done
-            upload_obj "r2-dist/update.json" "update.json" "application/json; charset=utf-8" "${POINTER_CACHE}"
-          fi
+          # 正式版仅上传 latest 固定短链副本与 App 自动更新清单 update.json（节省 R2 Class A 写入次数与存储）
+          for ARCH in arm64-v8a armeabi-v7a universal; do
+            upload_obj "release-dist/buct-one-${TAG}-${ARCH}.apk" "apk/latest/${ARCH}/buct-one-latest.apk" "application/vnd.android.package-archive" "${POINTER_CACHE}"
+          done
+          upload_obj "r2-dist/update.json" "update.json" "application/json; charset=utf-8" "${POINTER_CACHE}"
           echo "Cloudflare R2 release upload complete for ${TAG}!"
 
       - name: Sync release snapshot & trigger website rebuild (buct-one-web)

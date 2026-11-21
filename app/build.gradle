@@ -141,12 +141,18 @@ android {
     }
     testBuildType providers.gradleProperty('uiTestBuildType').getOrElse('debug')
 
+    def onlyArm64 = providers.gradleProperty('onlyArm64').map { it.toBoolean() }.getOrElse(false)
     splits {
         abi {
             enable true
             reset()
-            include 'armeabi-v7a', 'arm64-v8a'
-            universalApk true
+            if (onlyArm64) {
+                include 'arm64-v8a'
+                universalApk false
+            } else {
+                include 'armeabi-v7a', 'arm64-v8a'
+                universalApk true
+            }
         }
     }
 
