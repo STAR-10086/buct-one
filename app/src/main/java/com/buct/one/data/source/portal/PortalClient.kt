@@ -3,6 +3,10 @@ package com.buct.one.data.source.portal
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
+import com.buct.course.login.BuctWebVpn
+import com.buct.course.login.BuctWebVpnAuthRequiredException
+import com.buct.course.login.BuctWebVpnInterceptor
+import com.buct.course.login.BuctWebVpnNetworkInterceptor
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.PortalCalendarSnapshot
 import com.buct.one.data.model.PortalLibrarySnapshot
@@ -15,6 +19,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.jsoup.Jsoup
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -43,6 +48,8 @@ class PortalClient {
             .followSslRedirects(false)
             .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
             .dns(BuctDns)
+            .addInterceptor(BuctWebVpnInterceptor())
+            .addNetworkInterceptor(BuctWebVpnNetworkInterceptor())
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(25, TimeUnit.SECONDS)
             .build()
@@ -116,81 +123,102 @@ class PortalClient {
      */
     fun loginWithSidCredentials(username: String, passwordChars: CharArray): Result<Unit> {
         return try {
-            var currentUrl: HttpUrl = "$PORTAL_BASE/".toHttpUrl()
             var loginUrl: HttpUrl? = null
             var entryHtml = ""
+            var parsed: PortalParser.SidPortalPageInfo? = null
+            var entrySecond = ""
 
-            var hops = 0
-            while (hops < 14) {
-                hops++
-                val safeUrl = upgradePortalHttpToHttps(currentUrl)
-                val req = Request.Builder()
-                    .url(safeUrl)
-                    .header("User-Agent", UA)
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .get()
-                    .build()
+            for (attempt in 0..1) {
+                if (attempt == 1) cookieJar.clear()
+                var currentUrl: HttpUrl = "$PORTAL_BASE/".toHttpUrl()
+                loginUrl = null
+                entryHtml = ""
 
-                var redirectNext: HttpUrl? = null
-                var statusCode = 0
-                var body = ""
-                httpClient.newCall(req).execute().use { resp ->
-                    statusCode = resp.code
-                    if (statusCode in 300..399) {
-                        val loc = resp.header("Location").orEmpty()
-                        if (loc.isNotBlank()) {
-                            redirectNext = safeUrl.resolve(loc)
+                var hops = 0
+                while (hops < 14) {
+                    hops++
+                    val safeUrl = upgradePortalHttpToHttps(currentUrl)
+                    val req = Request.Builder()
+                        .url(safeUrl)
+                        .header("User-Agent", BuctWebVpn.userAgentFor(safeUrl, UA))
+                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                        .get()
+                        .build()
+
+                    var redirectNext: HttpUrl? = null
+                    var statusCode = 0
+                    var body = ""
+                    httpClient.newCall(req).execute().use { resp ->
+                        statusCode = resp.code
+                        if (statusCode in 300..399) {
+                            val loc = resp.header("Location").orEmpty()
+                            if (loc.isNotBlank()) {
+                                redirectNext = safeUrl.resolve(loc)
+                            }
+                        } else {
+                            body = resp.body?.string().orEmpty()
                         }
-                    } else {
-                        body = resp.body?.string().orEmpty()
                     }
+
+                    if (redirectNext != null) {
+                        val host = redirectNext!!.host.lowercase()
+                        if (!isAllowedAuthHost(host)) break
+                        currentUrl = redirectNext!!
+                        continue
+                    }
+
+                    if (statusCode in 200..299) {
+                        val host = safeUrl.host.lowercase()
+                        if (host == "i.buct.edu.cn" && PortalParser.isPortalAuthenticatedHtml(body)) {
+                            authenticated = true
+                            return Result.success(Unit)
+                        }
+                        if (host == "sidportal.buct.edu.cn") {
+                            loginUrl = safeUrl
+                            entryHtml = body
+                            break
+                        }
+                    }
+                    break
                 }
 
-                if (redirectNext != null) {
-                    val host = redirectNext!!.host.lowercase()
-                    if (!isAllowedAuthHost(host)) break
-                    currentUrl = redirectNext!!
+                if (loginUrl == null || entryHtml.isBlank()) {
+                    return Result.failure(IOException("无法获取统一身份认证登录页面"))
+                }
+
+                val currentParsed = PortalParser.parseSidPortalPage(entryHtml)
+                parsed = currentParsed
+                entrySecond = Jsoup.parse(entryHtml).selectFirst("#sso-second")?.text()?.trim().orEmpty()
+                if (currentParsed.errorCode.isNotEmpty()) {
+                    return Result.failure(IOException("统一身份认证页面异常（${currentParsed.errorCode}）"))
+                }
+                if (attempt == 0 && (currentParsed.execution.isEmpty() || currentParsed.croypto.isEmpty())) {
                     continue
-                }
-
-                if (statusCode in 200..299) {
-                    val host = safeUrl.host.lowercase()
-                    if (host == "i.buct.edu.cn" && PortalParser.isPortalAuthenticatedHtml(body)) {
-                        authenticated = true
-                        return Result.success(Unit)
-                    }
-                    if (host == "sidportal.buct.edu.cn") {
-                        loginUrl = safeUrl
-                        entryHtml = body
-                        break
-                    }
                 }
                 break
             }
 
-            if (loginUrl == null || entryHtml.isBlank()) {
-                return Result.failure(IOException("无法获取统一身份认证登录页面"))
+            val resolvedParams = parsed ?: return Result.failure(IOException("无法获取统一身份认证登录页面"))
+            if (entrySecond.equals("true", ignoreCase = true) ||
+                (entryHtml.contains("sso-second") && entrySecond.isNotEmpty())
+            ) {
+                return Result.failure(IOException("统一身份认证需要短信二次验证，请重新登录统一身份认证"))
             }
-
-            val parsed = PortalParser.parseSidPortalPage(entryHtml)
-            if (parsed.errorCode.isNotEmpty()) {
-                return Result.failure(IOException("统一身份认证页面异常（${parsed.errorCode}）"))
-            }
-            if (parsed.execution.isEmpty() || parsed.croypto.isEmpty()) {
+            if (resolvedParams.execution.isEmpty() || resolvedParams.croypto.isEmpty()) {
                 return Result.failure(IOException("统一认证页面缺少 execution 或 croypto 参数"))
             }
 
             val pwdStr = String(passwordChars)
-            val encryptedPassword = BuctAesCrypto.encrypt(parsed.croypto, pwdStr)
-            val encryptedCaptchaPayload = BuctAesCrypto.encrypt(parsed.croypto, "{}")
+            val encryptedPassword = BuctAesCrypto.encrypt(resolvedParams.croypto, pwdStr)
+            val encryptedCaptchaPayload = BuctAesCrypto.encrypt(resolvedParams.croypto, "{}")
 
             val form = FormBody.Builder()
                 .add("type", "UsernamePassword")
                 .add("_eventId", "submit")
                 .add("username", username.trim())
                 .add("password", encryptedPassword)
-                .add("croypto", parsed.croypto)
-                .add("execution", parsed.execution)
+                .add("croypto", resolvedParams.croypto)
+                .add("execution", resolvedParams.execution)
                 .add("captcha_code", "")
                 .add("captcha_payload", encryptedCaptchaPayload)
                 .add("geolocation", "")
@@ -198,7 +226,7 @@ class PortalClient {
 
             val postReq = Request.Builder()
                 .url(loginUrl!!)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Origin", SID_PORTAL_BASE)
                 .header("Referer", loginUrl.toString())
@@ -207,7 +235,19 @@ class PortalClient {
 
             val nextUrl = httpClient.newCall(postReq).execute().use { resp ->
                 if (resp.code !in 300..399) {
-                    return Result.failure(IOException("统一身份认证登录失败，请检查学号或密码"))
+                    val postBody = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
+                    val postSecond = if (postBody.isNotBlank()) {
+                        Jsoup.parse(postBody).selectFirst("#sso-second")?.text()?.trim().orEmpty()
+                    } else ""
+                    val need2fa = postSecond.equals("true", ignoreCase = true) ||
+                        (postBody.contains("sso-second") && postSecond.isNotEmpty()) ||
+                        postBody.contains("smsNoPhoneloginForm")
+                    return Result.failure(
+                        IOException(
+                            if (need2fa) "统一身份认证需要短信二次验证，请重新登录统一身份认证"
+                            else "统一身份认证登录失败，请检查学号或密码"
+                        )
+                    )
                 }
                 val loc = resp.header("Location").orEmpty()
                 resp.request.url.resolve(loc)?.toString() ?: loc
@@ -233,7 +273,7 @@ class PortalClient {
             val safeUrl = upgradePortalHttpToHttps(currentUrl)
             val req = Request.Builder()
                 .url(safeUrl)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.userAgentFor(safeUrl, UA))
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .get()
                 .build()
@@ -413,7 +453,7 @@ class PortalClient {
             val safeUrl = upgradePortalHttpToHttps(currentUrl)
             val req = Request.Builder()
                 .url(safeUrl)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.userAgentFor(safeUrl, UA))
                 .header("Accept", "application/json, text/javascript, */*; q=0.01")
                 .header("Referer", REFERER_MAIN)
                 .get()
@@ -489,7 +529,7 @@ class PortalClient {
                 fetchNewsColumn(columnId = col.columnId, beginIndex = 0, pageSize = pageSize)
             }
             val err = res.exceptionOrNull()
-            if (err is MnewsAuthExpiredException) throw err
+            if (err is MnewsAuthExpiredException || err is BuctWebVpnAuthRequiredException) throw err
             if (err != null && firstError == null) firstError = err
             res.getOrNull()?.let { page ->
                 columns[col.columnId] = page

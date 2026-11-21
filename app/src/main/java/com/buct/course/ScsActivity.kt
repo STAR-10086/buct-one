@@ -1,10 +1,13 @@
 package com.buct.course
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -144,6 +147,25 @@ private fun ScsScreen(
     var showLoginDialog by rememberSaveable { mutableStateOf(false) }
     var feedbackMsg by remember { mutableStateOf<String?>(null) }
 
+    val webVpnAuthLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            feedbackMsg = null
+            scope.launch {
+                service.refresh(userInitiated = true)
+            }
+        }
+    }
+    fun launchWebVpnAuth() {
+        webVpnAuthLauncher.launch(
+            Intent(context, LoginActivity::class.java).apply {
+                putExtra(LoginActivity.EXTRA_WEBVPN_AUTH_MODE, true)
+                putExtra(LoginActivity.EXTRA_RETURN_TO_CALLER, true)
+            }
+        )
+    }
+
     LaunchedEffect(Unit) {
         if ((slice.provenance.refreshState == RefreshState.NEVER ||
                 slice.provenance.refreshState == RefreshState.FAILED_FALLBACK ||
@@ -204,7 +226,9 @@ private fun ScsScreen(
                                 val err = res.exceptionOrNull()?.message ?: "第二课堂刷新失败"
                                 feedbackMsg = err
                                 GlassToaster.show(err)
-                                if (err.contains("登录") || err.contains("过期") || err.contains("会话")) {
+                                val needWebVpn = err.contains("WebVPN", ignoreCase = true) ||
+                                    err.contains("二次验证")
+                                if (!needWebVpn && (err.contains("登录") || err.contains("过期") || err.contains("会话"))) {
                                     showLoginDialog = true
                                 }
                             } else {
@@ -228,19 +252,30 @@ private fun ScsScreen(
         ) {
             val bannerError = feedbackMsg ?: slice.lastError
             if (!bannerError.isNullOrBlank()) {
-                Box(
+                val needWebVpnAuth = bannerError.contains("WebVPN", ignoreCase = true) ||
+                    bannerError.contains("二次验证")
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFFFF453A).copy(alpha = 0.12f))
                         .border(0.5.dp, Color(0xFFFF453A).copy(alpha = 0.35f), RoundedCornerShape(16.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = bannerError,
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFFFF453A)
                     )
+                    if (needWebVpnAuth) {
+                        SystemPrimaryButton(
+                            text = "去完成 WebVPN 认证",
+                            enabled = !syncing,
+                            onClick = ::launchWebVpnAuth,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
 
@@ -424,6 +459,9 @@ private fun ScsScreen(
                         val err = res.exceptionOrNull()?.message ?: "登录失败"
                         feedbackMsg = err
                         GlassToaster.show(err)
+                        if (err.contains("WebVPN", ignoreCase = true) || err.contains("二次验证")) {
+                            showLoginDialog = false
+                        }
                     }
                 }
             }

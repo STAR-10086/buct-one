@@ -5,6 +5,7 @@ import android.webkit.MimeTypeMap
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
+import com.buct.course.login.BuctWebVpn
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.TheolCourseInfo
 import com.buct.one.data.model.TheolDownloadedFile
@@ -268,14 +269,14 @@ class TheolClient {
             val entryResp = followAuthRedirects(
                 Request.Builder()
                     .url(loginEntry)
-                    .header("User-Agent", UA)
+                    .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                     .header("Accept", "text/html,application/xhtml+xml")
                     .get()
                     .build(),
                 allowedHosts = setOf("course.buct.edu.cn", "sidportal.buct.edu.cn", "portal.buct.edu.cn")
             )
 
-            val (entryUrl, entryHtml) = entryResp.use { resp ->
+            var (entryUrl, entryHtml) = entryResp.use { resp ->
                 if (!resp.isSuccessful) {
                     return Result.failure(IOException("统一认证页面响应异常（HTTP ${resp.code}）"))
                 }
@@ -296,9 +297,48 @@ class TheolClient {
                 return Result.failure(IOException("统一认证入口发生非预期跳转"))
             }
 
-            val page = TheolParser.parseSidPortalPage(entryHtml)
+            var page = TheolParser.parseSidPortalPage(entryHtml)
+            if (page.errorCode.isEmpty() && (page.execution.isEmpty() || page.croypto.isEmpty())) {
+                cookieJar.clear()
+                val retryResp = followAuthRedirects(
+                    Request.Builder()
+                        .url(loginEntry)
+                        .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
+                        .header("Accept", "text/html,application/xhtml+xml")
+                        .get()
+                        .build(),
+                    allowedHosts = setOf("course.buct.edu.cn", "sidportal.buct.edu.cn", "portal.buct.edu.cn")
+                )
+                val retryPair = retryResp.use { resp ->
+                    if (!resp.isSuccessful) {
+                        return Result.failure(IOException("统一认证页面响应异常（HTTP ${resp.code}）"))
+                    }
+                    val finalUrl = resp.request.url
+                    if (finalUrl.host.equals("course.buct.edu.cn", ignoreCase = true) &&
+                        finalUrl.encodedPath.startsWith("/meol/") &&
+                        !finalUrl.encodedPath.contains("login", ignoreCase = true)
+                    ) {
+                        lastSessionVerifiedAt = System.currentTimeMillis()
+                        activeCourseLid = ""
+                        activeCourseActivatedAt = 0L
+                        return Result.success(Unit)
+                    }
+                    finalUrl to decodeResponseBody(resp)
+                }
+                entryUrl = retryPair.first
+                entryHtml = retryPair.second
+                if (!entryUrl.host.equals("sidportal.buct.edu.cn", ignoreCase = true)) {
+                    return Result.failure(IOException("统一认证入口发生非预期跳转"))
+                }
+                page = TheolParser.parseSidPortalPage(entryHtml)
+            }
             if (page.errorCode.isNotEmpty()) {
                 return Result.failure(IOException(mapSidError(page.errorCode)))
+            }
+            if (page.second.equals("true", ignoreCase = true) ||
+                (entryHtml.contains("sso-second") && page.second.isNotEmpty())
+            ) {
+                return Result.failure(IOException("统一身份认证需要短信二次验证，请重新登录统一身份认证"))
             }
             if (page.execution.isEmpty() || page.croypto.isEmpty()) {
                 return Result.failure(IOException("认证页面缺少 execution 或 croypto 参数"))
@@ -322,7 +362,7 @@ class TheolClient {
 
             val postReq = Request.Builder()
                 .url(loginEntry)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Origin", SID_PORTAL_BASE)
                 .header("Referer", loginEntry)
@@ -341,7 +381,10 @@ class TheolClient {
                 val finalUrl = resp.request.url
                 val body = decodeResponseBody(resp)
                 val parsed = TheolParser.parseSidPortalPage(body)
-                if (parsed.second.equals("true", ignoreCase = true)) {
+                if (parsed.second.equals("true", ignoreCase = true) ||
+                    (body.contains("sso-second") && parsed.second.isNotEmpty()) ||
+                    body.contains("smsNoPhoneloginForm")
+                ) {
                     return Result.failure(IOException("账号触发了短信二次验证，请先在「我的 → 重新登录」完成教务登录，北化在线会自动复用凭证"))
                 }
                 if (parsed.errorCode.isNotEmpty()) {
@@ -1114,7 +1157,7 @@ class TheolClient {
             }
             currentReq = Request.Builder()
                 .url(safeUrl)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.userAgentFor(safeUrl, UA))
                 .header("Accept", "text/html,application/xhtml+xml")
                 .get()
                 .build()

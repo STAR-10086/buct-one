@@ -232,7 +232,7 @@ fun HomeworkRoute() {
         RefreshState.FAILED_FALLBACK ->
             "同步失败 · 保留快照"
     }
-    val subtitle = if (theolBgSyncing) "$baseSubtitle · 后台同步中…" else baseSubtitle
+    val subtitle = if (theolBgSyncing) "后台同步中…" else baseSubtitle
 
     Column(modifier = Modifier.fillMaxSize()) {
         SystemTopBar(

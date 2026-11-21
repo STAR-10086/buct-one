@@ -31,6 +31,7 @@ object BuctDns : Dns {
     )
 
     private val buctFallbackIps = mapOf(
+        "w.buct.edu.cn" to listOf("121.195.132.7"),
         "scs.buct.edu.cn" to listOf("121.195.148.33"),
         "eapi.buct.edu.cn" to listOf("121.195.148.33"),
         "jwglxt.buct.edu.cn" to listOf("121.195.154.238"),

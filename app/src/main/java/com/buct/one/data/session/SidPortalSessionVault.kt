@@ -14,56 +14,95 @@ object SidPortalSessionVault {
     private fun vaultFile(context: Context): File =
         File(File(context.applicationContext.filesDir, "vault"), "sso_vault.enc")
 
+    private fun hasAuthenticatedSidToken(sidCookies: String): Boolean =
+        sidCookies.contains("SOURCEID_TGC=", ignoreCase = true)
+
     @Synchronized
     fun saveSidPortalCookies(context: Context, sidCookies: String) {
-        if (sidCookies.isBlank()) return
-        val (_, existingMeol) = readCookies(context)
-        writeCookies(context, sidCookies.trim(), existingMeol)
+        val trimmed = sidCookies.trim()
+        if (trimmed.isBlank() || !hasAuthenticatedSidToken(trimmed)) return
+        val (_, existingMeol, existingVpn) = readVaultJson(context)
+        writeCookies(context, trimmed, existingMeol, existingVpn)
     }
 
     @Synchronized
     fun saveAll(context: Context, sidCookies: String, meolCookies: String) {
-        val (prevSid, prevMeol) = readCookies(context)
-        val nextSid = sidCookies.trim().ifBlank { prevSid }
+        val (prevSid, prevMeol, prevVpn) = readVaultJson(context)
+        val trimmedSid = sidCookies.trim()
+        val nextSid = if (trimmedSid.isNotBlank() && hasAuthenticatedSidToken(trimmedSid)) {
+            trimmedSid
+        } else {
+            prevSid
+        }
         val nextMeol = meolCookies.trim().ifBlank { prevMeol }
-        if (nextSid.isBlank() && nextMeol.isBlank()) return
-        writeCookies(context, nextSid, nextMeol)
+        if (nextSid.isBlank() && nextMeol.isBlank() && prevVpn.isBlank()) return
+        writeCookies(context, nextSid, nextMeol, prevVpn)
+    }
+
+    @Synchronized
+    fun readVpnTicket(context: Context): String = readVaultJson(context).third
+
+    @Synchronized
+    fun saveVpnTicket(context: Context, ticket: String) {
+        val trimmed = ticket.trim()
+        if (trimmed.isBlank() || trimmed.equals("deleteMe", ignoreCase = true)) return
+        val (prevSid, prevMeol, prevVpn) = readVaultJson(context)
+        if (trimmed == prevVpn) return
+        writeCookies(context, prevSid, prevMeol, trimmed)
     }
 
     @Synchronized
     fun readCookies(context: Context): Pair<String, String> {
+        val (sid, meol, _) = readVaultJson(context)
+        return sid to meol
+    }
+
+    private fun readVaultJson(context: Context): Triple<String, String, String> {
         val file = vaultFile(context)
-        if (!file.exists()) return "" to ""
+        if (!file.exists()) return Triple("", "", "")
         return runCatching {
-            val decrypted = cipher.decrypt(file.readText(Charsets.UTF_8)) ?: return "" to ""
+            val decrypted = cipher.decrypt(file.readText(Charsets.UTF_8)) ?: return Triple("", "", "")
             if (decrypted.startsWith("{")) {
                 val obj = JSONObject(decrypted)
-                obj.optString("sid", "") to obj.optString("meol", "")
+                Triple(
+                    obj.optString("sid", ""),
+                    obj.optString("meol", ""),
+                    obj.optString("vpn_ticket", "")
+                )
             } else {
                 val lines = decrypted.split('\n')
-                lines.getOrNull(0).orEmpty() to lines.getOrNull(1).orEmpty()
+                Triple(lines.getOrNull(0).orEmpty(), lines.getOrNull(1).orEmpty(), "")
             }
-        }.getOrDefault("" to "")
+        }.getOrDefault(Triple("", "", ""))
     }
 
     @Synchronized
     fun hasAnyCookie(context: Context): Boolean {
-        val (sid, meol) = readCookies(context)
+        val (sid, meol, _) = readVaultJson(context)
         return sid.isNotBlank() || meol.isNotBlank()
     }
 
     @Synchronized
     fun clear(context: Context) {
         runCatching { vaultFile(context).delete() }
+        com.buct.course.login.BuctWebVpn.clearSession()
     }
 
-    private fun writeCookies(context: Context, sidCookies: String, meolCookies: String) {
+    private fun writeCookies(
+        context: Context,
+        sidCookies: String,
+        meolCookies: String,
+        vpnTicket: String
+    ) {
         runCatching {
             val file = vaultFile(context)
             file.parentFile?.let { if (!it.exists()) it.mkdirs() }
             val json = JSONObject()
                 .put("sid", sidCookies)
                 .put("meol", meolCookies)
+                .apply {
+                    if (vpnTicket.isNotBlank()) put("vpn_ticket", vpnTicket)
+                }
                 .toString()
             file.writeText(cipher.encrypt(json), Charsets.UTF_8)
         }

@@ -1,10 +1,14 @@
 package com.buct.course
 
 import android.app.Application
+import com.buct.course.login.BuctWebVpn
 import com.buct.course.manager.AppearanceSettingsManager
 import com.buct.course.manager.AppThemeCoordinator
 import com.buct.course.manager.FontScaleManager
+import com.buct.course.manager.SyncSettings
+import com.buct.course.manager.UserManager
 import com.buct.course.ui.system.GlassRuntimeGuard
+import com.buct.one.data.session.SidPortalSessionVault
 
 class CourseApplication : Application() {
     companion object {
@@ -16,6 +20,35 @@ class CourseApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         appContext = applicationContext
+        BuctWebVpn.configure(
+            readSidCookies = { SidPortalSessionVault.readCookies(appContext).first },
+            saveSidCookies = { SidPortalSessionVault.saveSidPortalCookies(appContext, it) },
+            readSavedCredentials = {
+                if (!SyncSettings.enabled(appContext)) {
+                    null
+                } else {
+                    val user = UserManager.getInstance()
+                    synchronized(user) {
+                        if (user.currentSchool == null) {
+                            user.init(appContext)
+                        }
+                    }
+                    if (user.isDemoMode || user.currentSchool?.id != "buct") {
+                        null
+                    } else {
+                        val username = user.username.ifBlank { user.studentId.orEmpty() }.trim()
+                        val password = user.accountPassword
+                        if (username.isNotEmpty() && !password.isNullOrEmpty()) {
+                            username to password.toCharArray()
+                        } else {
+                            null
+                        }
+                    }
+                }
+            },
+            readVpnTicket = { SidPortalSessionVault.readVpnTicket(appContext) },
+            saveVpnTicket = { SidPortalSessionVault.saveVpnTicket(appContext, it) }
+        )
         GlassRuntimeGuard.initialize(this)
         AppearanceSettingsManager.initialize(this)
         FontScaleManager.initialize(this)

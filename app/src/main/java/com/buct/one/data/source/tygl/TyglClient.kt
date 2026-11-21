@@ -3,6 +3,7 @@ package com.buct.one.data.source.tygl
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
+import com.buct.course.login.BuctWebVpn
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.TyglFitnessRecord
 import com.buct.one.data.model.TyglProfile
@@ -116,81 +117,100 @@ class TyglClient {
      */
     fun loginWithSidCredentials(username: String, passwordChars: CharArray): Result<Unit> {
         return try {
-            var currentUrl: HttpUrl = "$TYGL_BASE/".toHttpUrl()
             var loginUrl: HttpUrl? = null
             var entryHtml = ""
+            var parsed: TyglParser.SidPortalFormParams? = null
 
-            var hops = 0
-            while (hops < 14) {
-                hops++
-                val safeUrl = upgradeTyglHttpToHttps(currentUrl)
-                val req = Request.Builder()
-                    .url(safeUrl)
-                    .header("User-Agent", UA)
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .get()
-                    .build()
+            for (attempt in 0..1) {
+                if (attempt == 1) cookieJar.clear()
+                var currentUrl: HttpUrl = "$TYGL_BASE/".toHttpUrl()
+                loginUrl = null
+                entryHtml = ""
 
-                var redirectNext: HttpUrl? = null
-                var statusCode = 0
-                var body = ""
-                httpClient.newCall(req).execute().use { resp ->
-                    statusCode = resp.code
-                    if (statusCode in 300..399) {
-                        val loc = resp.header("Location").orEmpty()
-                        if (loc.isNotBlank()) {
-                            redirectNext = safeUrl.resolve(loc)
+                var hops = 0
+                while (hops < 14) {
+                    hops++
+                    val safeUrl = upgradeTyglHttpToHttps(currentUrl)
+                    val req = Request.Builder()
+                        .url(safeUrl)
+                        .header("User-Agent", BuctWebVpn.userAgentFor(safeUrl, UA))
+                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                        .get()
+                        .build()
+
+                    var redirectNext: HttpUrl? = null
+                    var statusCode = 0
+                    var body = ""
+                    httpClient.newCall(req).execute().use { resp ->
+                        statusCode = resp.code
+                        if (statusCode in 300..399) {
+                            val loc = resp.header("Location").orEmpty()
+                            if (loc.isNotBlank()) {
+                                redirectNext = safeUrl.resolve(loc)
+                            }
+                        } else {
+                            body = resp.body?.string().orEmpty()
                         }
-                    } else {
-                        body = resp.body?.string().orEmpty()
                     }
+
+                    if (redirectNext != null) {
+                        val host = redirectNext!!.host.lowercase()
+                        if (!isAllowedAuthHost(host)) break
+                        currentUrl = redirectNext!!
+                        continue
+                    }
+
+                    if (statusCode in 200..299) {
+                        val host = safeUrl.host.lowercase()
+                        if (host == "tygl.buct.edu.cn" && TyglParser.isAuthenticatedPage(body)) {
+                            authenticated = true
+                            return Result.success(Unit)
+                        }
+                        if (host == "sidportal.buct.edu.cn") {
+                            loginUrl = safeUrl
+                            entryHtml = body
+                            break
+                        }
+                    }
+                    break
                 }
 
-                if (redirectNext != null) {
-                    val host = redirectNext!!.host.lowercase()
-                    if (!isAllowedAuthHost(host)) break
-                    currentUrl = redirectNext!!
+                if (loginUrl == null || entryHtml.isBlank()) {
+                    return Result.failure(IOException("无法获取统一身份认证登录页面"))
+                }
+
+                val currentParsed = TyglParser.parseSidPortalPage(entryHtml)
+                parsed = currentParsed
+                if (currentParsed.errorCode.isNotEmpty()) {
+                    return Result.failure(IOException("统一身份认证页面异常（${currentParsed.errorCode}）"))
+                }
+                if (attempt == 0 && (currentParsed.execution.isEmpty() || currentParsed.croypto.isEmpty())) {
                     continue
-                }
-
-                if (statusCode in 200..299) {
-                    val host = safeUrl.host.lowercase()
-                    if (host == "tygl.buct.edu.cn" && TyglParser.isAuthenticatedPage(body)) {
-                        authenticated = true
-                        return Result.success(Unit)
-                    }
-                    if (host == "sidportal.buct.edu.cn") {
-                        loginUrl = safeUrl
-                        entryHtml = body
-                        break
-                    }
                 }
                 break
             }
 
-            if (loginUrl == null || entryHtml.isBlank()) {
-                return Result.failure(IOException("无法获取统一身份认证登录页面"))
+            val resolvedParams = parsed ?: return Result.failure(IOException("无法获取统一身份认证登录页面"))
+            if (resolvedParams.second.equals("true", ignoreCase = true) ||
+                (entryHtml.contains("sso-second") && resolvedParams.second.isNotEmpty())
+            ) {
+                return Result.failure(IOException("统一身份认证需要短信二次验证，请重新登录统一身份认证"))
             }
-
-            val parsed = TyglParser.parseSidPortalPage(entryHtml)
-            if (parsed.errorCode.isNotEmpty()) {
-                return Result.failure(IOException("统一身份认证页面异常（${parsed.errorCode}）"))
-            }
-            if (parsed.execution.isEmpty() || parsed.croypto.isEmpty()) {
+            if (resolvedParams.execution.isEmpty() || resolvedParams.croypto.isEmpty()) {
                 return Result.failure(IOException("认证页面缺少 execution 或 croypto 参数"))
             }
 
             val pwdStr = String(passwordChars)
-            val encPwd = BuctAesCrypto.encrypt(parsed.croypto, pwdStr)
-            val encCaptcha = BuctAesCrypto.encrypt(parsed.croypto, "{}")
+            val encPwd = BuctAesCrypto.encrypt(resolvedParams.croypto, pwdStr)
+            val encCaptcha = BuctAesCrypto.encrypt(resolvedParams.croypto, "{}")
 
             val form = FormBody.Builder()
                 .add("type", "UsernamePassword")
                 .add("_eventId", "submit")
                 .add("username", username.trim())
                 .add("password", encPwd)
-                .add("croypto", parsed.croypto)
-                .add("execution", parsed.execution)
+                .add("croypto", resolvedParams.croypto)
+                .add("execution", resolvedParams.execution)
                 .add("captcha_code", "")
                 .add("captcha_payload", encCaptcha)
                 .add("geolocation", "")
@@ -198,7 +218,7 @@ class TyglClient {
 
             val postReq = Request.Builder()
                 .url(loginUrl!!)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Origin", SID_PORTAL_BASE)
                 .header("Referer", loginUrl.toString())
@@ -207,7 +227,17 @@ class TyglClient {
 
             val nextUrl = httpClient.newCall(postReq).execute().use { resp ->
                 if (resp.code !in 300..399) {
-                    return Result.failure(IOException("统一身份认证登录失败，请检查学号或密码"))
+                    val postBody = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
+                    val postParsed = if (postBody.isNotBlank()) TyglParser.parseSidPortalPage(postBody) else null
+                    val need2fa = postParsed?.second?.equals("true", ignoreCase = true) == true ||
+                        (postBody.contains("sso-second") && !postParsed?.second.isNullOrEmpty()) ||
+                        postBody.contains("smsNoPhoneloginForm")
+                    return Result.failure(
+                        IOException(
+                            if (need2fa) "统一身份认证需要短信二次验证，请重新登录统一身份认证"
+                            else "统一身份认证登录失败，请检查学号或密码"
+                        )
+                    )
                 }
                 val loc = resp.header("Location").orEmpty()
                 resp.request.url.resolve(loc)?.toString() ?: loc
@@ -233,7 +263,7 @@ class TyglClient {
             val safeUrl = upgradeTyglHttpToHttps(currentUrl)
             val req = Request.Builder()
                 .url(safeUrl)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.userAgentFor(safeUrl, UA))
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .get()
                 .build()
@@ -307,7 +337,7 @@ class TyglClient {
             val safeUrl = upgradeTyglHttpToHttps(currentUrl)
             val req = Request.Builder()
                 .url(safeUrl)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.userAgentFor(safeUrl, UA))
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Referer", "$TYGL_BASE/main.php")
                 .get()

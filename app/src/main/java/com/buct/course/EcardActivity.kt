@@ -5,7 +5,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -146,6 +148,26 @@ class EcardActivity : ComponentActivity() {
                 var currentPage by remember { mutableIntStateOf(0) }
                 var showLogoutConfirm by remember { mutableStateOf(false) }
 
+                val webVpnAuthLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartActivityForResult()
+                ) { res ->
+                    if (res.resultCode == RESULT_OK) {
+                        val (start, end) = selectedRange.resolveDates()
+                        currentPage = 0
+                        scope.launch {
+                            cardService.refresh(startDate = start, endDate = end, pageSize = PAGE_SIZE)
+                        }
+                    }
+                }
+                fun launchWebVpnAuth() {
+                    webVpnAuthLauncher.launch(
+                        Intent(this@EcardActivity, LoginActivity::class.java).apply {
+                            putExtra(LoginActivity.EXTRA_WEBVPN_AUTH_MODE, true)
+                            putExtra(LoginActivity.EXTRA_RETURN_TO_CALLER, true)
+                        }
+                    )
+                }
+
                 LaunchedEffect(Unit) {
                     if (canAutoSync && !forceLoginScreen) {
                         val (start, end) = selectedRange.resolveDates()
@@ -228,6 +250,7 @@ class EcardActivity : ComponentActivity() {
                                     forceLoginScreen = false
                                     allowCachedPreview = true
                                 },
+                                onWebVpnAuth = ::launchWebVpnAuth,
                                 onSubmit = { idserial, passwordChars, rememberPassword, onDone ->
                                     scope.launch {
                                         val res = cardService.loginAndSync(
@@ -297,6 +320,7 @@ class EcardActivity : ComponentActivity() {
                                     }
                                 },
                                 onRelogin = { forceLoginScreen = true },
+                                onWebVpnAuth = ::launchWebVpnAuth,
                                 onOpenWecom = { launchWecomOrWechat(this@EcardActivity) }
                             )
                         }
@@ -392,6 +416,7 @@ private fun EcardLoginPane(
     topPadding: Dp,
     bottomPadding: Dp,
     onViewCached: () -> Unit,
+    onWebVpnAuth: () -> Unit,
     onSubmit: (idserial: String, password: CharArray, rememberPassword: Boolean, onDone: (error: String?) -> Unit) -> Unit
 ) {
     var idInput by remember(initialId) { mutableStateOf(initialId) }
@@ -601,6 +626,18 @@ private fun EcardLoginPane(
                 )
             }
 
+            val needWebVpnAuth = listOfNotNull(sessionExpiredMessage, localError).any { msg ->
+                msg.contains("WebVPN", ignoreCase = true) || msg.contains("二次验证")
+            }
+            if (needWebVpnAuth) {
+                SystemSecondaryButton(
+                    text = "去完成 WebVPN 认证",
+                    enabled = !syncing,
+                    onClick = onWebVpnAuth,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             SystemPrimaryButton(
                 text = if (syncing) "正在安全登录并同步…" else "登录并同步校园卡",
                 enabled = !syncing,
@@ -632,6 +669,7 @@ private fun EcardHomePane(
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRelogin: () -> Unit,
+    onWebVpnAuth: () -> Unit,
     onOpenWecom: () -> Unit
 ) {
     val snapshot = slice.data
@@ -644,7 +682,36 @@ private fun EcardHomePane(
                 .padding(top = topPadding, bottom = bottomPadding, start = 24.dp, end = 24.dp),
             contentAlignment = Alignment.Center
         ) {
-            GlassLoadingState(text = "正在同步校园卡数据…")
+            val errText = slice.lastError
+            if (!syncing && !errText.isNullOrBlank()) {
+                val needWebVpnAuth = errText.contains("WebVPN", ignoreCase = true) ||
+                    errText.contains("二次验证")
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = errText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    if (needWebVpnAuth) {
+                        SystemPrimaryButton(
+                            text = "去完成 WebVPN 认证",
+                            onClick = onWebVpnAuth,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    SystemSecondaryButton(
+                        text = "重试同步",
+                        onClick = onRefresh,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            } else {
+                GlassLoadingState(text = "正在同步校园卡数据…")
+            }
         }
         return
     }
@@ -787,34 +854,61 @@ private fun EcardHomePane(
             item {
                 val warnColor = if (!hasSession) Color(0xFFFF9500) else Color(0xFFFF453A)
                 val warnText = slice.lastError ?: "校园卡会话已过期，当前展示历史缓存"
-                Row(
+                val needWebVpnAuth = warnText.contains("WebVPN", ignoreCase = true) ||
+                    warnText.contains("二次验证")
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
                         .background(warnColor.copy(alpha = 0.12f))
                         .border(0.5.dp, warnColor.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.WarningAmber,
-                        contentDescription = null,
-                        tint = warnColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = warnText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (!hasSession) {
-                        TextButton(
-                            onClick = onRelogin,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.WarningAmber,
+                            contentDescription = null,
+                            tint = warnColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = warnText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (!hasSession && !needWebVpnAuth) {
+                            TextButton(
+                                onClick = onRelogin,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("重新登录")
+                            }
+                        }
+                    }
+                    if (needWebVpnAuth) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("重新登录")
+                            SystemPrimaryButton(
+                                text = "去完成 WebVPN 认证",
+                                enabled = !syncing,
+                                onClick = onWebVpnAuth,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (!hasSession) {
+                                SystemSecondaryButton(
+                                    text = "重登",
+                                    enabled = !syncing,
+                                    onClick = onRelogin
+                                )
+                            }
                         }
                     }
                 }

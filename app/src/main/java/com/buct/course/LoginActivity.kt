@@ -53,7 +53,11 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
         private const val TAG = "LoginActivity"
         const val EXTRA_RETURN_TO_CALLER = "return_to_caller"
+        const val EXTRA_WEBVPN_AUTH_MODE = "webvpn_auth_mode"
     }
+
+    private val webVpnAuthMode: Boolean
+        get() = intent.getBooleanExtra(EXTRA_WEBVPN_AUTH_MODE, false)
 
     private var isLoading by mutableStateOf(false)
     private var errorMessage by mutableStateOf<String?>(null)
@@ -121,6 +125,10 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
+            if (webVpnAuthMode && com.buct.course.login.BuctWebVpn.hasCachedTicket()) {
+                finishWebVpnAuthSuccess()
+                return@registerForActivityResult
+            }
             val cookie = result.data?.getStringExtra(CookieWebViewActivity.EXTRA_COOKIE_RESULT)
             if (!cookie.isNullOrBlank()) {
                 cookieFromWebView = cookie
@@ -136,12 +144,19 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
         
         // Initialize UserManager with context for SharedPreferences
         UserManager.getInstance().init(this)
-        selectedLoginSchool = UserManager.getInstance().currentSchool
+        selectedLoginSchool = if (webVpnAuthMode) {
+            UserManager.getInstance().supportedSchools.firstOrNull { it.id == "buct" }
+                ?: UserManager.getInstance().currentSchool
+        } else {
+            UserManager.getInstance().currentSchool
+        }
         
         lifecycleScope.launch {
-            // 🔧 关键修复：如果是为了“重新登录”而跳转过来的，不要执行自动登录检查
+            // 🔧 关键修复：如果是为了“重新登录”或“WebVPN 认证”而跳转过来的，不要执行自动登录检查
             val forceRelogin = intent.getBooleanExtra("force_relogin", false)
-            if (forceRelogin) {
+            if (webVpnAuthMode) {
+                errorMessage = "请完成统一身份认证（含短信二次验证）以激活 WebVPN"
+            } else if (forceRelogin) {
                 errorMessage = "请重新登录以继续使用"
             } else {
                 // 检查是否有保存的有效登录状态
@@ -153,10 +168,14 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
             CourseSelectorTheme {
                 // Use mutableStateOf for reactive schools list
                 var schools by remember { mutableStateOf(UserManager.getInstance().supportedSchools) }
+                var autoWebVpnStarted by remember { mutableStateOf(false) }
                 
                 // 🔧 强化版学校选择记忆逻辑
                 LaunchedEffect(schools) {
                     val userManager = UserManager.getInstance()
+                    if (webVpnAuthMode) {
+                        schools.firstOrNull { it.id == "buct" }?.let { selectedLoginSchool = it }
+                    }
                     // 1. 如果当前没有选定学校，先尝试加载存过的
                     if (selectedLoginSchool == null) {
                         userManager.loadLoginState()
@@ -167,22 +186,34 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                     if (schools.isNotEmpty() && selectedLoginSchool == null) {
                         selectedLoginSchool = schools[0]
                     }
+
+                    if (webVpnAuthMode && !autoWebVpnStarted) {
+                        autoWebVpnStarted = true
+                        val savedUser = userManager.username.ifBlank { userManager.studentId.orEmpty() }.trim()
+                        val savedPwd = userManager.accountPassword.orEmpty()
+                        if (savedUser.isNotEmpty() && savedPwd.isNotEmpty()) {
+                            handlePasswordLogin(savedUser, savedPwd)
+                        }
+                    }
                 }
                 
                 LoginScreen(
-                    onBack = if (intent.getBooleanExtra(EXTRA_RETURN_TO_CALLER, false)) {
+                    onBack = if (webVpnAuthMode || intent.getBooleanExtra(EXTRA_RETURN_TO_CALLER, false)) {
                         { onBackPressedDispatcher.onBackPressed() }
                     } else null,
                     onClearError = { errorMessage = null },
                     schools = schools,
                     onSchoolSelected = { school ->
+                        val changed = selectedLoginSchool?.id != school.id
                         selectedLoginSchool = school
-                        academicValidationGeneration++
-                        validationCall?.cancel()
-                        validationJob?.cancel()
-                        clearValidationSessions()
-                        discardPendingPasswordLogin()
-                        isLoading = false
+                        if (changed && (!webVpnAuthMode || school.id != "buct")) {
+                            academicValidationGeneration++
+                            validationCall?.cancel()
+                            validationJob?.cancel()
+                            clearValidationSessions()
+                            discardPendingPasswordLogin()
+                            isLoading = false
+                        }
                     },
                     onLoginClick = { cookie ->
                         handleLogin(cookie)
@@ -311,6 +342,14 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private fun openWebView() {
+        if (webVpnAuthMode) {
+            val intent = Intent(this, CookieWebViewActivity::class.java).apply {
+                putExtra(CookieWebViewActivity.EXTRA_INITIAL_URL, "${com.buct.course.login.BuctWebVpn.VPN_BASE}/login")
+                putExtra(CookieWebViewActivity.EXTRA_WEBVPN_MODE, true)
+            }
+            webViewLauncher.launch(intent)
+            return
+        }
         val currentSchool = selectedLoginSchool
         if (currentSchool != null && AcademicGatewayFactory.supports(currentSchool)) {
             val hosts = java.util.ArrayList<String>().apply {
@@ -1040,10 +1079,8 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
         pendingPasswordValue = password
         pendingPasswordSchool = school
         activePasswordLoginGateway?.clearSensitiveState()
-        val gateway = PasswordLoginGatewayFactory.create(school)
-        activePasswordLoginGateway = gateway
 
-        gateway.login(school, username, password, object : PasswordLoginCallback {
+        val callback = object : PasswordLoginCallback {
             override fun onSuccess(cookie: String) {
                 runOnUiThread {
                     if (selectedLoginSchool?.id != school.id) {
@@ -1052,8 +1089,12 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                         discardPendingPasswordLogin()
                         return@runOnUiThread
                     }
-                    gateway.clearSensitiveState()
+                    activePasswordLoginGateway?.clearSensitiveState()
                     isLoading = false
+                    if (webVpnAuthMode) {
+                        finishWebVpnAuthSuccess()
+                        return@runOnUiThread
+                    }
                     Log.d(TAG, "密码登录成功")
                     pendingPasswordLogin = true
                     // 复用现有验证流程
@@ -1118,7 +1159,30 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                     openWebView()
                 }
             }
-        })
+        }
+
+        if (webVpnAuthMode) {
+            val sso = BuctSsoLoginManager()
+            activePasswordLoginGateway = sso
+            sso.loginWebVpn(username, password, callback)
+        } else {
+            val gateway = PasswordLoginGatewayFactory.create(school)
+            activePasswordLoginGateway = gateway
+            gateway.login(school, username, password, callback)
+        }
+    }
+
+    private fun finishWebVpnAuthSuccess() {
+        discardPendingPasswordLogin()
+        isLoading = false
+        secondarySmsRequired = false
+        secondarySmsSubmitting = false
+        secondarySmsSentUntil = 0L
+        captchaImageBytes = null
+        errorMessage = null
+        Toast.makeText(this, "WebVPN 认证成功", Toast.LENGTH_SHORT).show()
+        setResult(RESULT_OK)
+        finish()
     }
 
     private fun handleCaptchaSubmit(code: String) {
@@ -1143,6 +1207,10 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                     if (school == null || selectedLoginSchool?.id != school.id) {
                         errorMessage = "学校已切换，请重新登录"
                         discardPendingPasswordLogin()
+                        return@runOnUiThread
+                    }
+                    if (webVpnAuthMode) {
+                        finishWebVpnAuthSuccess()
                         return@runOnUiThread
                     }
                     pendingPasswordLogin = true
@@ -1344,6 +1412,10 @@ class LoginActivity : androidx.fragment.app.FragmentActivity() {
                     secondarySmsSubmitting = false
                     secondarySmsSentUntil = 0L
                     isLoading = false
+                    if (webVpnAuthMode) {
+                        finishWebVpnAuthSuccess()
+                        return@runOnUiThread
+                    }
                     pendingPasswordLogin = true
                     performLoginValidation(school, cookie)
                 }

@@ -117,6 +117,13 @@ class AcademicHttpTransport(
                 }
             } catch (e: IOException) {
                 currentCoroutineContext().ensureActive()
+                if (e is com.buct.course.login.BuctWebVpnAuthRequiredException) {
+                    throw AcademicException(
+                        AcademicStatus.NETWORK_RETRYABLE,
+                        e.message ?: "校外访问需通过 WebVPN，请先登录统一身份认证",
+                        e
+                    )
+                }
                 if (!write && readRetries++ < 1) {
                     delay(250)
                     continue
@@ -158,10 +165,16 @@ class AcademicHttpTransport(
     companion object {
         private const val MAX_BODY_BYTES = 5 * 1024 * 1024
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-        private fun defaultClient(cookieJar: okhttp3.CookieJar) = OkHttpClient.Builder().cookieJar(cookieJar)
-            .dns(com.buct.course.login.BuctDns)
-            .retryOnConnectionFailure(false)
-            .followRedirects(false).followSslRedirects(false).connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS).build()
+        private fun defaultClient(cookieJar: okhttp3.CookieJar): OkHttpClient {
+            val trustManager = com.buct.course.login.BuctTlsTrustManager()
+            return OkHttpClient.Builder().cookieJar(cookieJar)
+                .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
+                .dns(com.buct.course.login.BuctDns)
+                .addInterceptor(com.buct.course.login.BuctWebVpnInterceptor())
+                .addNetworkInterceptor(com.buct.course.login.BuctWebVpnNetworkInterceptor())
+                .retryOnConnectionFailure(false)
+                .followRedirects(false).followSslRedirects(false).connectTimeout(20, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS).build()
+        }
     }
 }

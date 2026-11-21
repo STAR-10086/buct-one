@@ -151,6 +151,38 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
             callback.onError("当前学校未配置统一身份认证登录")
             return
         }
+        startLoginAttempt(
+            username = username,
+            password = password,
+            serviceUrl = BuctSsoEndpoints.teachingService,
+            webVpnMode = false,
+            callback = callback
+        )
+    }
+
+    /** 专为 WebVPN（w.buct.edu.cn）发起统一身份认证登录（支持图形验证码与短信二次验证）。 */
+    fun loginWebVpn(
+        username: String,
+        password: String,
+        callback: PasswordLoginCallback
+    ) {
+        clearSensitiveState()
+        startLoginAttempt(
+            username = username,
+            password = password,
+            serviceUrl = "${BuctWebVpn.VPN_BASE}/login?cas_login=true".toHttpUrl(),
+            webVpnMode = true,
+            callback = callback
+        )
+    }
+
+    private fun startLoginAttempt(
+        username: String,
+        password: String,
+        serviceUrl: HttpUrl,
+        webVpnMode: Boolean,
+        callback: PasswordLoginCallback
+    ) {
         if (username.isBlank() || password.isEmpty()) {
             callback.onInvalidCredentials()
             return
@@ -158,7 +190,6 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
 
         val cookieJar = MatchingMemoryCookieJar()
         val trustManager = BuctTlsTrustManager()
-        // 教务会话阶段 client（登录成功后 service→ticket 跳转链需要自动跟随）
         val client = OkHttpClient.Builder()
             .cookieJar(cookieJar)
             .followRedirects(true)
@@ -169,7 +200,6 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
-        // 认证阶段 client：不自动跟随重定向，POST 遇 3xx 手动处理（表单提交语义）
         val casClient = OkHttpClient.Builder()
             .cookieJar(cookieJar)
             .followRedirects(false)
@@ -186,7 +216,9 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
             callback = callback,
             cookieJar = cookieJar,
             client = client,
-            casClient = casClient
+            casClient = casClient,
+            serviceUrl = serviceUrl,
+            webVpnMode = webVpnMode
         )
         synchronized(stateLock) {
             activeAttempt = attempt
@@ -383,12 +415,7 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
         ) { response ->
             response.use {
                 if (it.isRedirect) {
-                    val loc = it.header("Location") ?: run {
-                        fail(attempt, "统一认证未返回跳转地址")
-                        return@use
-                    }
-                    val service = if (loc.startsWith("http")) loc else url.resolve(loc).toString()
-                    startServiceLogin(attempt, service, redirectCount = 0)
+                    handleAuthRedirect(attempt, url, it.header("Location"))
                 } else if (!it.isSuccessful) {
                     fail(attempt, "二次验证登录失败 (${it.code})")
                 } else {
@@ -569,12 +596,7 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
                         sidPortalSucceed(attempt)
                         return@use
                     }
-                    val loc = it.header("Location") ?: run {
-                        fail(attempt, "统一认证未返回跳转地址")
-                        return@use
-                    }
-                    val service = if (loc.startsWith("http")) loc else url.resolve(loc).toString()
-                    startServiceLogin(attempt, service, redirectCount = 0)
+                    handleAuthRedirect(attempt, url, it.header("Location"))
                 } else if (!it.isSuccessful) {
                     fail(attempt, "统一认证返回错误 (${it.code})")
                 } else {
@@ -697,6 +719,68 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
                 onResult(null)
             } else {
                 onResult(bytes)
+            }
+        }
+    }
+
+    private fun handleAuthRedirect(attempt: LoginAttempt, baseUrl: HttpUrl, location: String?) {
+        val loc = location ?: run {
+            fail(attempt, "统一认证未返回跳转地址")
+            return
+        }
+        if (attempt.webVpnMode) {
+            val resolved = baseUrl.resolve(loc) ?: run {
+                fail(attempt, "WebVPN 跳转地址无效")
+                return
+            }
+            completeWebVpnLogin(attempt, resolved)
+            return
+        }
+        val service = if (loc.startsWith("http")) loc else baseUrl.resolve(loc).toString()
+        startServiceLogin(attempt, service, redirectCount = 0)
+    }
+
+    private fun completeWebVpnLogin(
+        attempt: LoginAttempt,
+        initialUrl: HttpUrl,
+        redirectCount: Int = 0
+    ) {
+        if (attempt.completed.get()) return
+        if (initialUrl.host.equals(BuctWebVpn.VPN_HOST, ignoreCase = true)) {
+            val casTicket = initialUrl.queryParameter("ticket")?.trim().orEmpty()
+            if (casTicket.isEmpty()) {
+                fail(attempt, "WebVPN 未返回有效认证票据")
+                return
+            }
+            val vpnTicket = BuctWebVpn.activateWithCasTicket(casTicket)
+            if (vpnTicket.isNullOrBlank()) {
+                val reason = BuctWebVpn.lastFailureReason
+                fail(
+                    attempt,
+                    if (reason.isNotBlank()) "激活 WebVPN 票据失败（$reason）" else "激活 WebVPN 票据失败"
+                )
+            } else {
+                succeed(attempt, vpnTicket)
+            }
+            return
+        }
+        if (redirectCount >= 4 || !initialUrl.host.equals(BuctSsoEndpoints.authPortal.host, ignoreCase = true)) {
+            fail(attempt, "WebVPN 认证回调跳转到非预期地址")
+            return
+        }
+        executeNoRedirect(
+            attempt,
+            Request.Builder().url(initialUrl).header("User-Agent", USER_AGENT).get().build(),
+            onFailure = { fail(attempt, "换取 WebVPN 票据连接失败") }
+        ) { resp ->
+            resp.use {
+                val loc = it.header("Location")
+                val next = if (it.isRedirect && !loc.isNullOrBlank()) initialUrl.resolve(loc) else null
+                if (next == null) {
+                    fail(attempt, "WebVPN 未返回有效认证票据")
+                } else {
+                    completeWebVpnLogin(attempt, next, redirectCount + 1)
+                }
             }
         }
     }
@@ -966,7 +1050,9 @@ class BuctSsoLoginManager internal constructor() : PasswordLoginGateway, Seconda
         /** 登录 service：默认教务；通行密钥注册同样使用普通教务 service，成功后停在 sidportal */
         val serviceUrl: HttpUrl = BuctSsoEndpoints.teachingService,
         /** true=通行密钥注册模式：密码登录成功后停在 sidportal，不跟随教务 ticket */
-        val stopAtSidPortal: Boolean = false
+        val stopAtSidPortal: Boolean = false,
+        /** true=WebVPN（w.buct.edu.cn）认证模式：拦截回调 ticket 并直接激活 Wengine 票据 */
+        val webVpnMode: Boolean = false
     ) {
         val completed = AtomicBoolean(false)
         val submissionInFlight = AtomicBoolean(false)

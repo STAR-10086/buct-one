@@ -3,6 +3,9 @@ package com.buct.one.data.source.card
 import android.util.Base64
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
+import com.buct.course.login.BuctWebVpn
+import com.buct.course.login.BuctWebVpnInterceptor
+import com.buct.course.login.BuctWebVpnNetworkInterceptor
 import com.buct.one.data.model.CardAccountInfo
 import com.buct.one.data.model.CardTransaction
 import okhttp3.MediaType.Companion.toMediaType
@@ -43,6 +46,7 @@ internal class EcardClient {
         private const val AES_KEY_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         private const val ORG_ID = "2"
         private const val ORGAN_CODE = "11111"
+        private const val WEBVPN_MANAGED_COOKIE = "__webvpn_managed__"
     }
 
     private val trustManager = BuctTlsTrustManager()
@@ -51,6 +55,8 @@ internal class EcardClient {
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
         .dns(BuctDns)
+        .addInterceptor(BuctWebVpnInterceptor())
+        .addNetworkInterceptor(BuctWebVpnNetworkInterceptor())
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -95,7 +101,7 @@ internal class EcardClient {
             .header("User-Agent", USER_AGENT)
             .apply {
                 val existing = webportalCookie
-                if (preserveExistingCookie && existing.isNotBlank()) {
+                if (preserveExistingCookie && existing.isNotBlank() && existing != WEBVPN_MANAGED_COOKIE) {
                     header("Cookie", "webportal=$existing")
                 }
             }
@@ -116,6 +122,8 @@ internal class EcardClient {
                 if (!preserveExistingCookie || webportalCookie.isBlank()) {
                     if (parsedCookie.isNotBlank()) {
                         webportalCookie = parsedCookie
+                    } else if (resp.header(BuctWebVpn.HEADER_VIA_WEBVPN) == "1") {
+                        webportalCookie = WEBVPN_MANAGED_COOKIE
                     }
                 }
             }
@@ -271,13 +279,19 @@ internal class EcardClient {
             .header("Origin", BASE_URL)
             .header("Referer", "$BASE_URL/index")
             .header("X-Requested-With", "XMLHttpRequest")
-            .header("Cookie", "webportal=$cookie")
+            .apply {
+                if (cookie != WEBVPN_MANAGED_COOKIE) {
+                    header("Cookie", "webportal=$cookie")
+                }
+            }
             .build()
 
         httpClient.newCall(req).execute().use { resp ->
             val rotated = extractWebportalCookie(resp.headers("Set-Cookie"))
             if (rotated.isNotBlank()) {
                 webportalCookie = rotated
+            } else if (cookie == WEBVPN_MANAGED_COOKIE && resp.header(BuctWebVpn.HEADER_VIA_WEBVPN) != "1") {
+                throw EcardSessionExpiredException("网络环境已切换，正在重新建立校园卡会话")
             }
             if (resp.code == 401 || resp.code == 403 || resp.code in 300..399) {
                 if (throwAuthOnFail) {

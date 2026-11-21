@@ -3,6 +3,7 @@ package com.buct.one.data.source.mail
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
+import com.buct.course.login.BuctWebVpn
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.MailAccountInfo
 import com.buct.one.data.model.MailAttachment
@@ -21,6 +22,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import org.jsoup.Jsoup
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -130,93 +132,127 @@ class MailClient {
         return try {
             val encodedService = URLEncoder.encode(MAIL_CAS_SERVICE, "UTF-8")
             val loginEntry = "$SID_PORTAL_BASE/login?service=$encodedService"
-            var currentUrl = loginEntry.toHttpUrl()
             var loginUrl: HttpUrl? = null
             var entryHtml = ""
+            var parsed: MailParser.SidLoginPage? = null
+            var entrySecond = ""
 
-            var hops = 0
-            while (hops < 14) {
-                hops++
-                extractSidIfReady(currentUrl)?.let { return Result.success(Unit) }
+            for (attempt in 0..1) {
+                if (attempt == 1) cookieJar.clear()
+                var currentUrl = loginEntry.toHttpUrl()
+                loginUrl = null
+                entryHtml = ""
 
-                val req = Request.Builder()
-                    .url(currentUrl)
-                    .header("User-Agent", UA)
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .get()
-                    .build()
+                var hops = 0
+                while (hops < 14) {
+                    hops++
+                    extractSidIfReady(currentUrl)?.let { return Result.success(Unit) }
 
-                var redirectNext: HttpUrl? = null
-                var statusCode = 0
-                var body = ""
-                httpClient.newCall(req).execute().use { resp ->
-                    statusCode = resp.code
-                    if (statusCode in 300..399) {
-                        val loc = resp.header("Location").orEmpty()
-                        if (loc.isNotBlank()) {
-                            redirectNext = currentUrl.resolve(loc)
+                    val req = Request.Builder()
+                        .url(currentUrl)
+                        .header("User-Agent", BuctWebVpn.userAgentFor(currentUrl, UA))
+                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                        .get()
+                        .build()
+
+                    var redirectNext: HttpUrl? = null
+                    var statusCode = 0
+                    var body = ""
+                    httpClient.newCall(req).execute().use { resp ->
+                        statusCode = resp.code
+                        if (statusCode in 300..399) {
+                            val loc = resp.header("Location").orEmpty()
+                            if (loc.isNotBlank()) {
+                                redirectNext = currentUrl.resolve(loc)
+                            }
+                        } else {
+                            body = resp.body?.string().orEmpty()
                         }
-                    } else {
-                        body = resp.body?.string().orEmpty()
                     }
-                }
 
-                if (redirectNext != null) {
-                    val next = redirectNext!!
-                    extractSidIfReady(next)?.let { return Result.success(Unit) }
-                    if (!isAllowedAuthUrl(next)) break
-                    currentUrl = next
-                    continue
-                }
+                    if (redirectNext != null) {
+                        val next = redirectNext!!
+                        extractSidIfReady(next)?.let { return Result.success(Unit) }
+                        if (!isAllowedAuthUrl(next)) break
+                        currentUrl = next
+                        continue
+                    }
 
-                if (statusCode in 200..299 && currentUrl.host.equals("sidportal.buct.edu.cn", ignoreCase = true)) {
-                    loginUrl = currentUrl
-                    entryHtml = body
+                    if (statusCode in 200..299 && currentUrl.host.equals("sidportal.buct.edu.cn", ignoreCase = true)) {
+                        loginUrl = currentUrl
+                        entryHtml = body
+                        break
+                    }
                     break
+                }
+
+                if (loginUrl == null || entryHtml.isBlank()) {
+                    return Result.failure(IOException("无法获取统一身份认证登录页面"))
+                }
+
+                val currentParsed = MailParser.parseSidPortalPage(entryHtml)
+                parsed = currentParsed
+                entrySecond = Jsoup.parse(entryHtml).selectFirst("#sso-second")?.text()?.trim().orEmpty()
+                if (currentParsed.errorCode.isNotEmpty()) {
+                    return Result.failure(IOException("统一身份认证页面异常（${currentParsed.errorCode}）"))
+                }
+                if (attempt == 0 && (currentParsed.execution.isEmpty() || currentParsed.croypto.isEmpty())) {
+                    continue
                 }
                 break
             }
 
-            if (loginUrl == null || entryHtml.isBlank()) {
-                return Result.failure(IOException("无法获取统一身份认证登录页面"))
+            val resolvedParams = parsed ?: return Result.failure(IOException("无法获取统一身份认证登录页面"))
+            val resolvedLoginUrl = loginUrl ?: return Result.failure(IOException("无法获取统一身份认证登录页面"))
+            if (entrySecond.equals("true", ignoreCase = true) ||
+                (entryHtml.contains("sso-second") && entrySecond.isNotEmpty())
+            ) {
+                return Result.failure(IOException("统一身份认证需要短信二次验证，请重新登录统一身份认证"))
             }
-
-            val parsed = MailParser.parseSidPortalPage(entryHtml)
-            if (parsed.errorCode.isNotEmpty()) {
-                return Result.failure(IOException("统一身份认证页面异常（${parsed.errorCode}）"))
-            }
-            if (parsed.execution.isEmpty() || parsed.croypto.isEmpty()) {
+            if (resolvedParams.execution.isEmpty() || resolvedParams.croypto.isEmpty()) {
                 return Result.failure(IOException("认证页面缺少 execution 或 croypto 参数"))
             }
 
             val pwdStr = String(passwordChars)
-            val encPwd = BuctAesCrypto.encrypt(parsed.croypto, pwdStr)
-            val encCaptcha = BuctAesCrypto.encrypt(parsed.croypto, "{}")
+            val encPwd = BuctAesCrypto.encrypt(resolvedParams.croypto, pwdStr)
+            val encCaptcha = BuctAesCrypto.encrypt(resolvedParams.croypto, "{}")
 
             val form = FormBody.Builder()
                 .add("type", "UsernamePassword")
                 .add("_eventId", "submit")
                 .add("username", username.trim())
                 .add("password", encPwd)
-                .add("croypto", parsed.croypto)
-                .add("execution", parsed.execution)
+                .add("croypto", resolvedParams.croypto)
+                .add("execution", resolvedParams.execution)
                 .add("captcha_code", "")
                 .add("captcha_payload", encCaptcha)
                 .add("geolocation", "")
                 .build()
 
             val postReq = Request.Builder()
-                .url(loginUrl)
-                .header("User-Agent", UA)
+                .url(resolvedLoginUrl)
+                .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Origin", SID_PORTAL_BASE)
-                .header("Referer", loginUrl.toString())
+                .header("Referer", resolvedLoginUrl.toString())
                 .post(form)
                 .build()
 
             val nextUrl = httpClient.newCall(postReq).execute().use { resp ->
                 if (resp.code !in 300..399) {
-                    return Result.failure(IOException("统一身份认证登录失败，请检查学号或密码"))
+                    val postBody = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
+                    val postSecond = if (postBody.isNotBlank()) {
+                        Jsoup.parse(postBody).selectFirst("#sso-second")?.text()?.trim().orEmpty()
+                    } else ""
+                    val need2fa = postSecond.equals("true", ignoreCase = true) ||
+                        (postBody.contains("sso-second") && postSecond.isNotEmpty()) ||
+                        postBody.contains("smsNoPhoneloginForm")
+                    return Result.failure(
+                        IOException(
+                            if (need2fa) "统一身份认证需要短信二次验证，请重新登录统一身份认证"
+                            else "统一身份认证登录失败，请检查学号或密码"
+                        )
+                    )
                 }
                 val loc = resp.header("Location").orEmpty()
                 resp.request.url.resolve(loc)?.toString() ?: loc
@@ -243,7 +279,7 @@ class MailClient {
             hops++
             val req = Request.Builder()
                 .url(currentUrl)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.userAgentFor(currentUrl, UA))
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .get()
                 .build()

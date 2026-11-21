@@ -3,6 +3,10 @@ package com.buct.one.data.source.scs
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
+import com.buct.course.login.BuctWebVpn
+import com.buct.course.login.BuctWebVpnAuthRequiredException
+import com.buct.course.login.BuctWebVpnInterceptor
+import com.buct.course.login.BuctWebVpnNetworkInterceptor
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.ScsSnapshot
 import com.buct.one.data.model.ScsTermScore
@@ -15,6 +19,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import org.jsoup.Jsoup
 import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -49,6 +54,8 @@ class ScsClient {
             .followSslRedirects(false)
             .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
             .dns(BuctDns)
+            .addInterceptor(BuctWebVpnInterceptor())
+            .addNetworkInterceptor(BuctWebVpnNetworkInterceptor())
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .build()
@@ -112,7 +119,7 @@ class ScsClient {
     fun hasActiveToken(): Boolean = appToken.isNotBlank()
 
     fun authenticateWithSso(): Boolean {
-        val casUrl = runCatching {
+        val casUrl = try {
             val req = Request.Builder()
                 .url("$SCS_API_BASE/cas/opLogin")
                 .header("User-Agent", UA)
@@ -122,7 +129,11 @@ class ScsClient {
                 if (!resp.isSuccessful) ""
                 else ScsParser.parseStringDataResponse(resp.body?.string().orEmpty())
             }
-        }.getOrDefault("")
+        } catch (e: BuctWebVpnAuthRequiredException) {
+            throw e
+        } catch (_: Throwable) {
+            ""
+        }
             .ifBlank {
                 "$SID_PORTAL_BASE/login?service=${URLEncoder.encode(SCS_COMMON_LOGIN_SERVICE, "UTF-8")}"
             }
@@ -140,12 +151,12 @@ class ScsClient {
 
             val entryReq = Request.Builder()
                 .url(loginEntry)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .get()
                 .build()
 
-            val entryHtml = httpClient.newCall(entryReq).execute().use { resp ->
+            var entryHtml = httpClient.newCall(entryReq).execute().use { resp ->
                 if (resp.code in 300..399) {
                     val loc = resp.header("Location").orEmpty()
                     val resolved = if (loc.isNotBlank()) resp.request.url.resolve(loc)?.toString() ?: loc else ""
@@ -159,12 +170,40 @@ class ScsClient {
                 resp.body?.string().orEmpty()
             }
 
-            val parsed = ScsParser.parseSidPortalPage(entryHtml)
+            var parsed = ScsParser.parseSidPortalPage(entryHtml)
+            if (parsed.errorCode.isEmpty() && (parsed.execution.isEmpty() || parsed.croypto.isEmpty())) {
+                cookieJar.clear()
+                entryHtml = httpClient.newCall(entryReq).execute().use { retryResp ->
+                    if (retryResp.code in 300..399) {
+                        val loc = retryResp.header("Location").orEmpty()
+                        val resolved = if (loc.isNotBlank()) retryResp.request.url.resolve(loc)?.toString() ?: loc else ""
+                        if (resolved.isNotBlank() && followCasAndLogin(resolved)) {
+                            return Result.success(Unit)
+                        }
+                    }
+                    if (!retryResp.isSuccessful) {
+                        return Result.failure(IOException("统一身份认证响应异常（HTTP ${retryResp.code}）"))
+                    }
+                    retryResp.body?.string().orEmpty()
+                }
+                parsed = ScsParser.parseSidPortalPage(entryHtml)
+            }
             if (parsed.errorCode.isNotEmpty()) {
                 return Result.failure(IOException("统一身份认证页面异常（${parsed.errorCode}）"))
             }
+            if (parsed.second.equals("true", ignoreCase = true) ||
+                (entryHtml.contains("sso-second") && parsed.second.isNotEmpty())
+            ) {
+                return Result.failure(IOException("统一身份认证需要短信二次验证，请重新登录统一身份认证"))
+            }
             if (parsed.execution.isEmpty() || parsed.croypto.isEmpty()) {
-                return Result.failure(IOException("认证页面缺少 execution 或 croypto 参数"))
+                val pageTitle = runCatching { Jsoup.parse(entryHtml).title().trim() }
+                    .getOrDefault("")
+                    .take(40)
+                    .ifBlank { "无" }
+                return Result.failure(
+                    IOException("认证页面缺少 execution 或 croypto 参数（title=$pageTitle, len=${entryHtml.length}）")
+                )
             }
 
             val pwdStr = String(passwordChars)
@@ -185,7 +224,7 @@ class ScsClient {
 
             val postReq = Request.Builder()
                 .url(loginEntry)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Origin", SID_PORTAL_BASE)
                 .header("Referer", loginEntry)
@@ -194,7 +233,17 @@ class ScsClient {
 
             val nextUrl = httpClient.newCall(postReq).execute().use { resp ->
                 if (resp.code !in 300..399) {
-                    return Result.failure(IOException("统一身份认证登录失败，请检查学号或密码"))
+                    val postBody = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
+                    val postParsed = if (postBody.isNotBlank()) ScsParser.parseSidPortalPage(postBody) else null
+                    val need2fa = postParsed?.second?.equals("true", ignoreCase = true) == true ||
+                        (postBody.contains("sso-second") && !postParsed?.second.isNullOrEmpty()) ||
+                        postBody.contains("smsNoPhoneloginForm")
+                    return Result.failure(
+                        IOException(
+                            if (need2fa) "统一身份认证需要短信二次验证，请重新登录统一身份认证"
+                            else "统一身份认证登录失败，请检查学号或密码"
+                        )
+                    )
                 }
                 val loc = resp.header("Location").orEmpty()
                 resp.request.url.resolve(loc)?.toString() ?: loc
@@ -212,9 +261,10 @@ class ScsClient {
     }
 
     private fun mapCampusError(e: Exception): Exception = when (e) {
+        is BuctWebVpnAuthRequiredException -> e
         is SocketTimeoutException, is ConnectException, is UnknownHostException,
         is NoRouteToHostException, is SocketException ->
-            IOException("无法连接第二课堂（scs.buct.edu.cn），该系统仅支持校园网或北化 VPN 访问，请切换校园网/开启 VPN 后重试", e)
+            IOException("无法连接第二课堂（scs.buct.edu.cn），直连及 WebVPN 均不可达，请检查网络或先登录统一身份认证后重试", e)
         else -> e
     }
 
@@ -235,7 +285,7 @@ class ScsClient {
             hops++
             val req = Request.Builder()
                 .url(currentUrl)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.userAgentFor(currentUrl, UA))
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .get()
                 .build()
@@ -259,6 +309,8 @@ class ScsClient {
 
         if (extractedTicket.isBlank()) return false
 
+        BuctWebVpn.updateSidCookies(exportSidPortalCookieHeader())
+
         val loginUrl = "$SCS_API_BASE/sys/casLogin?ticket=${URLEncoder.encode(extractedTicket, "UTF-8")}"
         val loginReq = Request.Builder()
             .url(loginUrl)
@@ -269,12 +321,16 @@ class ScsClient {
             .get()
             .build()
 
-        val token = runCatching {
+        val token = try {
             httpClient.newCall(loginReq).execute().use { resp ->
                 if (!resp.isSuccessful) ""
                 else ScsParser.parseStringDataResponse(resp.body?.string().orEmpty())
             }
-        }.getOrDefault("")
+        } catch (e: BuctWebVpnAuthRequiredException) {
+            throw e
+        } catch (_: Throwable) {
+            ""
+        }
 
         if (token.isBlank()) return false
         appToken = token

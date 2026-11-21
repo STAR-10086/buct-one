@@ -4,6 +4,7 @@ import android.util.Base64
 import com.buct.course.login.BuctAesCrypto
 import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
+import com.buct.course.login.BuctWebVpn
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.SjcxDownloadedFile
 import com.buct.one.data.model.SjcxExperimentReportItem
@@ -166,12 +167,12 @@ class SjcxClient {
 
             val req = Request.Builder()
                 .url(loginEntry)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .get()
                 .build()
 
-            val entryHtml = httpClient.newCall(req).execute().use { resp ->
+            var entryHtml = httpClient.newCall(req).execute().use { resp ->
                 if (resp.code in 300..399) {
                     val loc = resp.header("Location").orEmpty()
                     if (loc.isNotBlank() && followCasToSjcxToken(
@@ -187,9 +188,46 @@ class SjcxClient {
                 resp.body?.string().orEmpty()
             }
 
-            val doc = Jsoup.parse(entryHtml)
-            val execution = doc.selectFirst("#login-page-flowkey")?.text()?.trim().orEmpty()
-            val croypto = doc.selectFirst("#login-croypto")?.text()?.trim().orEmpty()
+            var doc = Jsoup.parse(entryHtml)
+            var execution = doc.selectFirst("#login-page-flowkey")?.text()?.trim().orEmpty()
+            var croypto = doc.selectFirst("#login-croypto")?.text()?.trim().orEmpty()
+            var errorCode = doc.selectFirst("#login-error-msg")?.text()?.trim().orEmpty()
+                .ifEmpty { doc.selectFirst("#login-error-code")?.text()?.trim().orEmpty() }
+            var second = doc.selectFirst("#sso-second")?.text()?.trim().orEmpty()
+
+            if (errorCode.isEmpty() && (execution.isEmpty() || croypto.isEmpty())) {
+                cookieJar.clear()
+                entryHtml = httpClient.newCall(req).execute().use { retryResp ->
+                    if (retryResp.code in 300..399) {
+                        val loc = retryResp.header("Location").orEmpty()
+                        if (loc.isNotBlank() && followCasToSjcxToken(
+                                retryResp.request.url.resolve(loc)?.toString() ?: loc
+                            )
+                        ) {
+                            return Result.success(Unit)
+                        }
+                    }
+                    if (!retryResp.isSuccessful) {
+                        return Result.failure(IOException("统一身份认证响应异常（HTTP ${retryResp.code}）"))
+                    }
+                    retryResp.body?.string().orEmpty()
+                }
+                doc = Jsoup.parse(entryHtml)
+                execution = doc.selectFirst("#login-page-flowkey")?.text()?.trim().orEmpty()
+                croypto = doc.selectFirst("#login-croypto")?.text()?.trim().orEmpty()
+                errorCode = doc.selectFirst("#login-error-msg")?.text()?.trim().orEmpty()
+                    .ifEmpty { doc.selectFirst("#login-error-code")?.text()?.trim().orEmpty() }
+                second = doc.selectFirst("#sso-second")?.text()?.trim().orEmpty()
+            }
+
+            if (errorCode.isNotEmpty()) {
+                return Result.failure(IOException("统一身份认证页面异常（$errorCode）"))
+            }
+            if (second.equals("true", ignoreCase = true) ||
+                (entryHtml.contains("sso-second") && second.isNotEmpty())
+            ) {
+                return Result.failure(IOException("统一身份认证需要短信二次验证，请重新登录统一身份认证"))
+            }
             if (execution.isEmpty() || croypto.isEmpty()) {
                 return Result.failure(IOException("统一认证页面缺少 execution 或 croypto 参数"))
             }
@@ -212,7 +250,7 @@ class SjcxClient {
 
             val postReq = Request.Builder()
                 .url(loginEntry)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.SID_PORTAL_UA)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Origin", SID_PORTAL_BASE)
                 .header("Referer", loginEntry)
@@ -221,7 +259,19 @@ class SjcxClient {
 
             val firstRedirect = httpClient.newCall(postReq).execute().use { resp ->
                 if (resp.code !in 300..399) {
-                    return Result.failure(IOException("统一身份认证登录失败，请检查学号或密码"))
+                    val postBody = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
+                    val postSecond = if (postBody.isNotBlank()) {
+                        Jsoup.parse(postBody).selectFirst("#sso-second")?.text()?.trim().orEmpty()
+                    } else ""
+                    val need2fa = postSecond.equals("true", ignoreCase = true) ||
+                        (postBody.contains("sso-second") && postSecond.isNotEmpty()) ||
+                        postBody.contains("smsNoPhoneloginForm")
+                    return Result.failure(
+                        IOException(
+                            if (need2fa) "统一身份认证需要短信二次验证，请重新登录统一身份认证"
+                            else "统一身份认证登录失败，请检查学号或密码"
+                        )
+                    )
                 }
                 val loc = resp.header("Location").orEmpty()
                 resp.request.url.resolve(loc)?.toString() ?: loc
@@ -245,7 +295,7 @@ class SjcxClient {
         for (hop in 0 until 10) {
             val req = Request.Builder()
                 .url(currentUrl)
-                .header("User-Agent", UA)
+                .header("User-Agent", BuctWebVpn.userAgentFor(currentUrl, UA))
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .get()
                 .build()
