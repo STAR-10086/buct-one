@@ -618,6 +618,8 @@ private fun OverallGradesContent(
                                 selectedBucketName = if (selectedBucket == bucket) "" else bucket.name
                             }
                         )
+                        GpaTrendCard(grades = grades)
+                        TargetGpaSimulatorCard(grades = grades, officialGpa = stats.gpa)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
