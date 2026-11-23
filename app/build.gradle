@@ -225,6 +225,9 @@ dependencies {
     // Async (Coroutines for Compose)
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+
+    // WorkManager（本地智能提醒低频后台巡检，约 +0.4MB）
+    implementation 'androidx.work:work-runtime-ktx:2.9.1'
     
     // Modern UI & Animations
     implementation 'com.airbnb.android:lottie-compose:6.3.0'

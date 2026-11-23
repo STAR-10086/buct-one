@@ -552,6 +552,7 @@ class TheolSyncService private constructor(
 
     private fun notifyTodoWidget() {
         runCatching { WidgetProviders.refreshTodo(appContext) }
+        runCatching { com.buct.course.reminder.SmartReminderScheduler.reschedule(appContext) }
     }
 
     fun hideHomework(hwtid: String) {

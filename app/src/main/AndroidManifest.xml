@@ -186,6 +186,17 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
+        <receiver android:name=".reminder.SmartReminderReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+                <action android:name="com.buct.course.action.SMART_REMINDER" />
+                <action android:name="com.buct.course.action.SMART_REMINDER_TEST_ALARM" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".receiver.GrabAlarmReceiver"
             android:exported="false">

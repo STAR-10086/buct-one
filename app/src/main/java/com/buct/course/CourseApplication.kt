@@ -63,6 +63,9 @@ class CourseApplication : Application() {
             com.buct.course.schedule.ScheduleReminderScheduler.get(this).start(this)
             // 自建考试的提醒：每次冷启动重排一遍，代价很小，能兜住漏掉的闹钟
             runCatching { com.buct.course.schedule.ExamReminderScheduler.reschedule(this) }
+            runCatching { com.buct.course.reminder.ReminderChannels.ensureCreated(this) }
+            runCatching { com.buct.course.reminder.SmartReminderScheduler.reschedule(this) }
+            runCatching { com.buct.course.reminder.SmartReminderScheduler.syncWorkSchedule(this) }
         }
     }
 

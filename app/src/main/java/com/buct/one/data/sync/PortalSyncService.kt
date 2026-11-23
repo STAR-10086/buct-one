@@ -191,6 +191,7 @@ class PortalSyncService private constructor(
                         parserVersion = PortalParser.PARSER_VERSION
                     )
                     _libraryState.value = committed
+                    runCatching { com.buct.course.reminder.SmartReminderScheduler.reschedule(appContext) }
                     Result.success(committed)
                 } catch (e: Exception) {
                     val failed = store.commitLibraryFailure(
@@ -288,6 +289,7 @@ class PortalSyncService private constructor(
                 val libRes = runCatching { client.fetchBorrowedBooks() }
                 libRes.onSuccess { snap ->
                     _libraryState.value = store.commitLibrarySuccess(snap, PortalParser.PARSER_VERSION)
+                    runCatching { com.buct.course.reminder.SmartReminderScheduler.reschedule(appContext) }
                 }.onFailure { err ->
                     _libraryState.value = store.commitLibraryFailure(
                         err.message ?: "图书借阅同步失败",

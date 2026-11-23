@@ -139,7 +139,6 @@ fun SettingsRoute(
     var showWidgetSettings by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showPermissionDialog by remember { mutableStateOf(false) }
-    var permissionRefreshTick by remember { mutableIntStateOf(0) }
     var widgetCount by remember {
         mutableIntStateOf(com.buct.course.ui.screen.listWidgetInstances(context).size)
     }
@@ -165,7 +164,7 @@ fun SettingsRoute(
         }
     }
 
-    val notificationGranted = remember(permissionRefreshTick, showPermissionDialog) {
+    val notificationGranted = remember(showPermissionDialog) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             androidx.core.content.ContextCompat.checkSelfPermission(
                 context,
@@ -175,7 +174,7 @@ fun SettingsRoute(
             androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
         }
     }
-    val exactAlarmGranted = remember(permissionRefreshTick, showPermissionDialog) {
+    val exactAlarmGranted = remember(showPermissionDialog) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             val am = context.getSystemService(android.content.Context.ALARM_SERVICE) as? android.app.AlarmManager
             am?.canScheduleExactAlarms() == true
@@ -187,12 +186,6 @@ fun SettingsRoute(
         val notif = if (notificationGranted) "通知已开启" else "通知未授权"
         val alarm = if (exactAlarmGranted) "精确闹钟已允许" else "精确闹钟未允许"
         "$notif · $alarm"
-    }
-    val requestNotificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        permissionRefreshTick++
-        GlassToaster.show(if (granted) "通知权限已开启" else "未授予通知权限，可在系统设置中开启")
     }
 
     // 从小组件管理页回来时重新数一遍（用户可能在桌面增删过实例）
@@ -475,145 +468,8 @@ fun SettingsRoute(
     }
 
     if (showPermissionDialog) {
-        SystemDialog(
-            onDismissRequest = { showPermissionDialog = false },
-            title = {
-                Text(
-                    text = "通知与系统权限",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            },
-            confirmButton = {
-                SystemPrimaryButton(
-                    text = "完成",
-                    onClick = { showPermissionDialog = false },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(
-                            text = "通知权限",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (notificationGranted) "已授予 · 可发送课前/考试/DDL提醒" else "未开启 · 将无法弹出课前和DDL提醒",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    TextButton(
-                        onClick = {
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU && !notificationGranted) {
-                                requestNotificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                }
-                                runCatching { context.startActivity(intent) }
-                                    .onFailure {
-                                        context.startActivity(
-                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                                data = android.net.Uri.parse("package:${context.packageName}")
-                                            }
-                                        )
-                                    }
-                            }
-                        }
-                    ) {
-                        Text(if (notificationGranted) "系统设置" else "去授权")
-                    }
-                }
-
-                SystemDivider()
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(
-                            text = "精确闹钟权限",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (exactAlarmGranted) "已允许 · 准时触发提醒与小组件刷新" else "未允许 · 课前提醒可能延迟",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    TextButton(
-                        onClick = {
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                                val intent = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                                    data = android.net.Uri.parse("package:${context.packageName}")
-                                }
-                                runCatching { context.startActivity(intent) }
-                                    .onFailure {
-                                        context.startActivity(
-                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                                data = android.net.Uri.parse("package:${context.packageName}")
-                                            }
-                                        )
-                                    }
-                            } else {
-                                GlassToaster.show("当前系统版本无需单独授予精确闹钟权限")
-                            }
-                        }
-                    ) {
-                        Text(if (exactAlarmGranted) "管理" else "去开启")
-                    }
-                }
-
-                SystemDivider()
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(
-                            text = "应用完整权限设置",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "若跳转企业微信/电池优化受限，可在此调整权限与自启动",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    TextButton(
-                        onClick = {
-                            context.startActivity(
-                                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = android.net.Uri.parse("package:${context.packageName}")
-                                }
-                            )
-                        }
-                    ) {
-                        Text("打开")
-                    }
-                }
-            }
+        com.buct.course.ui.system.GlassSubpage(onDismiss = { showPermissionDialog = false }) { close ->
+            com.buct.course.ui.screen.ReminderSettingsScreen(onBack = close)
         }
     }
 

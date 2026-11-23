@@ -355,7 +355,7 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.Outlined.NotificationsActive,
                     iconTint = Color(0xFF34C759),
-                    title = "通知与系统权限",
+                    title = "提醒与通知权限",
                     subtitle = permissionSummary,
                     onClick = onPermissionClick
                 )
