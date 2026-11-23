@@ -23,7 +23,7 @@ import java.util.TimeZone
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object TheolParser {
-    const val PARSER_VERSION = 5
+    const val PARSER_VERSION = 6
     const val BASE_URL = "https://course.buct.edu.cn"
     private const val COURSE_HOME_PATH = "/meol/jpk/course/layout/newpage/index.jsp"
     private val COURSE_ONCLICK_ID_REGEX = Regex("""(?:courseId|lid)\s*=\s*(\d+)""")
@@ -531,11 +531,13 @@ object TheolParser {
     /** 解析在线测验列表页（入口统一指向 list.jsp，避免 test_start.jsp 404 白屏） */
     fun parseTestList(html: String, lid: String, fallbackCourseName: String, baseUrl: String = BASE_URL): List<TheolTestItem> {
         val doc: Document = Jsoup.parse(html, baseUrl)
-        val titleText = doc.title().trim()
-        val courseName = if (titleText.contains("测试")) {
-            titleText.replace("测试", "").trim().ifEmpty { fallbackCourseName }
-        } else {
-            fallbackCourseName
+        val courseName = fallbackCourseName.trim().ifEmpty {
+            val titleText = doc.title().trim()
+            val stripped = titleText
+                .replace("在线测试", "")
+                .replace("测试", "")
+                .trim()
+            if (stripped.isEmpty() || stripped == "在线") "" else stripped
         }
 
         val table = doc.selectFirst("table.valuelist")
