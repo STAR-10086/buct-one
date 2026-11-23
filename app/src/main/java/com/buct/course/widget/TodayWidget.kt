@@ -111,17 +111,49 @@ class TodayWidget : AppWidgetProvider() {
 
             val todayData = TodayCourseSource.load(context, appWidgetId)
             val selected = resolveSelectedCourse(context, appWidgetId, todayData)
-            val twoLines = size.heightDp < 54
-            val fontScale = WidgetTextSizes.scale(context)
-            // 小部件被桌面缩放后高度差异很大，字号跟着高度走才不会溢出
-            val heightFactor = (size.heightDp / 64f).coerceIn(0.82f, 1.12f)
-
             val placeholder = when {
                 selected != null -> null
                 !todayData.hasScheduleData -> "暂无课表"
                 todayData.courses.isEmpty() -> "今天没有课"
                 else -> "今天的课已上完"
             }
+            bindCompactCard(views, context, size, selected, placeholder)
+            views.setOnClickPendingIntent(
+                R.id.today_card,
+                openAppPendingIntent(context, appWidgetId)
+            )
+
+            // 当天只有一节课（或没有课）时不显示翻页箭头，避免点了没反应
+            val browsable = todayData.courses.size > 1 && selected != null
+            views.setViewVisibility(R.id.today_prev_course, if (browsable) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.today_next_course, if (browsable) View.VISIBLE else View.GONE)
+            if (browsable) {
+                val isDark = WidgetAppearance.isDarkMode(context)
+                views.setImageViewResource(
+                    R.id.today_prev_course,
+                    if (isDark) R.drawable.ic_widget_chevron_left_light else R.drawable.ic_widget_chevron_left_dark
+                )
+                views.setImageViewResource(
+                    R.id.today_next_course,
+                    if (isDark) R.drawable.ic_widget_chevron_right_light else R.drawable.ic_widget_chevron_right_dark
+                )
+                views.setOnClickPendingIntent(R.id.today_prev_course, pagingPendingIntent(context, appWidgetId, ACTION_TODAY_PREV, 1))
+                views.setOnClickPendingIntent(R.id.today_next_course, pagingPendingIntent(context, appWidgetId, ACTION_TODAY_NEXT, 2))
+            }
+            return views
+        }
+
+        private fun bindCompactCard(
+            views: RemoteViews,
+            context: Context,
+            size: WidgetSize,
+            selected: TodayCourse?,
+            placeholder: String?
+        ) {
+            val twoLines = size.heightDp < 54
+            val fontScale = WidgetTextSizes.scale(context)
+            // 小部件被桌面缩放后高度差异很大，字号跟着高度走才不会溢出
+            val heightFactor = (size.heightDp / 64f).coerceIn(0.82f, 1.12f)
 
             val nameText = selected?.name ?: placeholder.orEmpty()
             val timeText = when {
@@ -149,29 +181,6 @@ class TodayWidget : AppWidgetProvider() {
                 views.setTextColor(R.id.today_time, 0xE6FFFFFF.toInt())
                 views.setTextColor(R.id.today_loc, 0xD9FFFFFF.toInt())
             }
-            views.setOnClickPendingIntent(
-                R.id.today_card,
-                openAppPendingIntent(context, appWidgetId)
-            )
-
-            // 当天只有一节课（或没有课）时不显示翻页箭头，避免点了没反应
-            val browsable = todayData.courses.size > 1 && selected != null
-            views.setViewVisibility(R.id.today_prev_course, if (browsable) View.VISIBLE else View.GONE)
-            views.setViewVisibility(R.id.today_next_course, if (browsable) View.VISIBLE else View.GONE)
-            if (browsable) {
-                val isDark = WidgetAppearance.isDarkMode(context)
-                views.setImageViewResource(
-                    R.id.today_prev_course,
-                    if (isDark) R.drawable.ic_widget_chevron_left_light else R.drawable.ic_widget_chevron_left_dark
-                )
-                views.setImageViewResource(
-                    R.id.today_next_course,
-                    if (isDark) R.drawable.ic_widget_chevron_right_light else R.drawable.ic_widget_chevron_right_dark
-                )
-                views.setOnClickPendingIntent(R.id.today_prev_course, pagingPendingIntent(context, appWidgetId, ACTION_TODAY_PREV, 1))
-                views.setOnClickPendingIntent(R.id.today_next_course, pagingPendingIntent(context, appWidgetId, ACTION_TODAY_NEXT, 2))
-            }
-            return views
         }
 
         private fun buildFull(context: Context, appWidgetId: Int): RemoteViews {
@@ -216,16 +225,18 @@ class TodayWidget : AppWidgetProvider() {
             return views
         }
 
-        /** 2×1 翻页：按轮播顺序前进/后退一格，把结果记下来再整卡重建。 */
-        private fun pageSelection(context: Context, appWidgetId: Int, forward: Boolean) {
+        /** 2×1 翻页：按轮播顺序前进/后退一格，把结果记下来并返回目标课程供局部刷新。 */
+        private fun pageSelection(context: Context, appWidgetId: Int, forward: Boolean): TodayCourse? {
             val data = TodayCourseSource.load(context, appWidgetId)
-            if (data.courses.isEmpty() || data.nextIndex < 0) return
+            if (data.courses.isEmpty() || data.nextIndex < 0) return null
             val order = TodayCourseSource.carouselOrder(data.courses, data.nextIndex)
-            if (order.size <= 1) return
-            val current = resolveSelectedCourse(context, appWidgetId, data) ?: return
+            if (order.size <= 1) return null
+            val current = resolveSelectedCourse(context, appWidgetId, data) ?: return null
             val index = order.indexOfFirst { it.key == current.key }.coerceAtLeast(0)
             val target = if (forward) (index + 1) % order.size else (index - 1 + order.size) % order.size
-            storeSelection(context, appWidgetId, order[target].key)
+            val next = order[target]
+            storeSelection(context, appWidgetId, next.key)
+            return next
         }
 
         private fun mergeTimeAndLocation(time: String, location: String): String = when {
@@ -274,7 +285,7 @@ class TodayWidget : AppWidgetProvider() {
                 .setData(Uri.parse("buctwidget://today/$appWidgetId/$action"))
             return PendingIntent.getBroadcast(
                 context,
-                appWidgetId * 10 + slot,
+                appWidgetId.coerceAtLeast(0) * 10 + slot,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -432,8 +443,19 @@ class TodayWidget : AppWidgetProvider() {
                     WidgetProviders.todayIds(context, appWidgetManager)
                 }
                 for (appWidgetId in ids) {
-                    pageSelection(context, appWidgetId, intent.action == ACTION_TODAY_NEXT)
-                    updateAppWidget(context, appWidgetManager, appWidgetId)
+                    val selected = pageSelection(context, appWidgetId, intent.action == ACTION_TODAY_NEXT)
+                    if (selected != null) {
+                        val size = WidgetSizePolicy.resolve(
+                            context,
+                            appWidgetManager.getAppWidgetOptions(appWidgetId),
+                            appWidgetId
+                        )
+                        val partial = RemoteViews(context.packageName, R.layout.widget_today_compact)
+                        bindCompactCard(partial, context, size, selected, placeholder = null)
+                        appWidgetManager.partiallyUpdateAppWidget(intArrayOf(appWidgetId), partial)
+                    } else {
+                        updateAppWidget(context, appWidgetManager, appWidgetId)
+                    }
                 }
             }
             WidgetProviders.ACTION_REFRESH -> {

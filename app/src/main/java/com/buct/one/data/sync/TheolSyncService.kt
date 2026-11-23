@@ -1,6 +1,7 @@
 package com.buct.one.data.sync
 
 import android.content.Context
+import com.buct.course.widget.WidgetProviders
 import com.buct.one.data.model.BlacklistedCourse
 import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.LocalTodoItem
@@ -214,6 +215,7 @@ class TheolSyncService private constructor(
             incompleteReason = reason
         )
         _theolState.value = committed
+        notifyTodoWidget()
         return committed
     }
 
@@ -338,6 +340,7 @@ class TheolSyncService private constructor(
                 incompleteReason = reason
             )
             _theolState.value = committed
+            notifyTodoWidget()
             persistEncryptedSession()
         }
     }
@@ -544,6 +547,11 @@ class TheolSyncService private constructor(
         val updated = transform(_filterPrefs.value)
         store.writeFilterPrefs(updated)
         _filterPrefs.value = updated
+        notifyTodoWidget()
+    }
+
+    private fun notifyTodoWidget() {
+        runCatching { WidgetProviders.refreshTodo(appContext) }
     }
 
     fun hideHomework(hwtid: String) {

@@ -86,7 +86,16 @@ object WidgetProviders {
 
     /** 通知全部小组件刷新（含旧组件名）。 */
     fun refreshAll(context: Context) {
-        all(context).forEach { component ->
+        refreshComponents(context, all(context))
+    }
+
+    /** 仅通知「待办事项」小组件刷新（北化在线同步或过滤规则变更时调用）。 */
+    fun refreshTodo(context: Context) {
+        refreshComponents(context, todo(context))
+    }
+
+    private fun refreshComponents(context: Context, components: List<ComponentName>) {
+        components.forEach { component ->
             runCatching {
                 context.sendBroadcast(
                     Intent().setComponent(component).setAction(ACTION_REFRESH)

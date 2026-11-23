@@ -55,9 +55,9 @@ class TodoWidget : AppWidgetProvider() {
 
             val hideTitle = WidgetConfigStore.hideTitle(context, appWidgetId)
             val headerVisible = isHeaderVisible(size, hideTitle)
-            val todoData = TodoWidgetSource.load(context)
             views.setViewVisibility(R.id.widget_header, if (headerVisible) View.VISIBLE else View.GONE)
             if (headerVisible) {
+                val todoData = TodoWidgetSource.load(context)
                 views.setTextViewText(
                     R.id.widget_title,
                     WidgetConfigStore.resolveTitle(context, appWidgetId, WidgetKind.TODO)

@@ -209,15 +209,6 @@ fun HomeworkRoute() {
         allHomeworks.filter { filterPrefs.isHomeworkVisible(it) }
     }
     val pendingHomeworks = remember(homeworks) { homeworks.filter { it.canSubmit } }
-
-    // 北化在线数据变了就顺手刷新桌面小组件：待办小组件汇总的正是待交作业与未完成测验，
-    // 不能只靠半小时一次的周期刷新。
-    val widgetSyncStamp = theolSlice.provenance.capturedAt
-    LaunchedEffect(widgetSyncStamp) {
-        if (widgetSyncStamp > 0L) {
-            runCatching { com.buct.course.widget.WidgetProviders.refreshAll(context) }
-        }
-    }
     val allTests = theolSlice.data?.tests.orEmpty()
     val tests = remember(allTests, filterPrefs) {
         allTests.filter { filterPrefs.isTestVisible(it) }

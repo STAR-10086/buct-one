@@ -57,7 +57,6 @@ class TodayRemoteViewsFactory(
         nowMinutes = data?.nowMinutes ?: 0
         emptyText = when {
             data == null || !data.hasScheduleData -> "暂无课表，打开 App 同步"
-            data.courses.isNotEmpty() && data.nextIndex < 0 -> "今天的课已全部上完"
             else -> "今天没有课"
         }
     }

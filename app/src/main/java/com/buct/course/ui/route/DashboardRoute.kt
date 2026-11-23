@@ -581,15 +581,6 @@ fun DashboardRoute(
     val filterPrefs by theolService.filterPrefs.collectAsState()
     val syncing by theolService.syncing.collectAsState()
 
-    // 北化在线数据变了就顺手刷新桌面小组件：待办事项汇总的就是刚同步到的作业与测验，
-    // 否则在工作台刷新完回到桌面，小组件还要等半小时周期刷新才更新。
-    val widgetSyncStamp = theolSlice.provenance.capturedAt
-    androidx.compose.runtime.LaunchedEffect(widgetSyncStamp) {
-        if (widgetSyncStamp > 0L) {
-            runCatching { com.buct.course.widget.WidgetProviders.refreshAll(context) }
-        }
-    }
-
     val cardService = remember(context) { CardSyncService.getInstance(context) }
     val cardSlice by cardService.cardState.collectAsState()
     val cardHasSession by cardService.hasSession.collectAsState()
