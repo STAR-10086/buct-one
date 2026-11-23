@@ -97,7 +97,6 @@ import androidx.fragment.app.FragmentActivity
 import com.buct.course.manager.AppearanceSettingsManager
 import com.buct.course.manager.SmartSelector
 import com.buct.course.manager.UserManager
-import com.buct.course.ui.screen.OnboardingScreen
 import com.buct.course.ui.system.CapsuleNavigationBar
 import com.buct.course.ui.system.DialogHost
 import com.buct.course.ui.system.GlassToastHost
@@ -144,11 +143,6 @@ class MainActivity : FragmentActivity() {
         super.attachBaseContext(com.buct.course.manager.AppThemeCoordinator.wrapContext(newBase))
     }
 
-    companion object {
-        private const val PREFS_NAME = "app_prefs"
-        private const val KEY_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         com.buct.course.ui.theme.StartupLogoAnimation.install(this)
         super.onCreate(savedInstanceState)
@@ -170,23 +164,9 @@ class MainActivity : FragmentActivity() {
             return
         }
 
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val hasSeenOnboarding = prefs.getBoolean(KEY_HAS_SEEN_ONBOARDING, false)
-
         setContent {
             CourseSelectorTheme {
-                var showOnboarding by remember { mutableStateOf(!hasSeenOnboarding && !userManager.isDemoMode) }
-
-                if (showOnboarding) {
-                    OnboardingScreen(
-                        onFinish = {
-                            prefs.edit().putBoolean(KEY_HAS_SEEN_ONBOARDING, true).apply()
-                            showOnboarding = false
-                        }
-                    )
-                } else {
-                    MainScreen(fragmentActivity = this@MainActivity)
-                }
+                MainScreen(fragmentActivity = this@MainActivity)
             }
         }
     }
