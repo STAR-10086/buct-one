@@ -172,6 +172,7 @@ jobs:
       - name: Build APK(s)
         env:
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          ELECTRICITY_SIGN_SECRET: ${{ secrets.ELECTRICITY_SIGN_SECRET }}
         run: |
           chmod +x ./gradlew
           if [ "${PUBLISH_RELEASE:-false}" = "true" ]; then

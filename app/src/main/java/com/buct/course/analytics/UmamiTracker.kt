@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import com.buct.course.BuildConfig
 import com.buct.course.EcardActivity
+import com.buct.course.ElectricityActivity
 import com.buct.course.JwNoticeActivity
 import com.buct.course.MailActivity
 import com.buct.course.MainActivity
@@ -90,6 +91,7 @@ object UmamiTracker {
                     is ScsActivity -> trackPageVisit(activity, "/module/scs", "第二课堂与素质学分")
                     is TyglActivity -> trackPageVisit(activity, "/module/tygl", "体育管理")
                     is EcardActivity -> trackPageVisit(activity, "/module/ecard", "校园一卡通")
+                    is ElectricityActivity -> trackPageVisit(activity, "/module/electricity", "宿舍电费")
                     is TheolSubmitWebViewActivity -> trackPageVisit(activity, "/module/theol_submit", "作业在线提交")
                     is WidgetConfigActivity -> trackPageVisit(activity, "/module/widget_config", "桌面小组件配置")
                 }

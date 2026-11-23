@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Assignment
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.Check
@@ -110,6 +111,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.buct.course.EcardActivity
+import com.buct.course.ElectricityActivity
 import com.buct.course.MailActivity
 import com.buct.course.PortalActivity
 import com.buct.course.ScsActivity
@@ -147,9 +149,15 @@ import com.buct.one.data.model.SjcxSnapshot
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.model.TheolTestItem
+import com.buct.one.data.model.ElectricitySnapshot
 import com.buct.one.data.model.TyglSnapshot
+import com.buct.one.data.model.electricityTargetBaseRoomName
+import com.buct.one.data.model.electricityTargetShortLabel
+import com.buct.one.data.model.formatElectricityPrimaryValue
 import com.buct.one.data.model.formatFenToYuan
+import com.buct.one.data.model.isLowElectricityBalance
 import com.buct.one.data.sync.CardSyncService
+import com.buct.one.data.sync.ElectricitySyncService
 import com.buct.one.data.sync.MailSyncService
 import com.buct.one.data.sync.PortalSyncService
 import com.buct.one.data.sync.ScsSyncService
@@ -291,6 +299,15 @@ private enum class DashboardModuleId(
         defaultSize = CardSize.MEDIUM,
         defaultCol = 2,
         defaultRow = 10
+    ),
+    ELECTRICITY(
+        id = "electricity",
+        title = "宿舍电费 · 实时余量",
+        shortTitle = "宿舍电费",
+        icon = Icons.Outlined.Bolt,
+        defaultSize = CardSize.MEDIUM,
+        defaultCol = 0,
+        defaultRow = 12
     );
 
     val supportedSizes: List<CardSize>
@@ -576,6 +593,10 @@ fun DashboardRoute(
     val portalLibrarySlice by portalService.libraryState.collectAsState()
     val portalNewsSyncing by portalService.newsSyncing.collectAsState()
     val portalLibrarySyncing by portalService.librarySyncing.collectAsState()
+    val electricityService = remember(context) { ElectricitySyncService.getInstance(context) }
+    val electricitySlice by electricityService.electricityState.collectAsState()
+    val electricitySyncing by electricityService.syncing.collectAsState()
+    val electricityConsentAccepted by electricityService.consentAccepted.collectAsState()
 
     var showEmptyClassroomDialog by remember { mutableStateOf(false) }
     var emptyClassroomInitialCampus by remember { mutableIntStateOf(2) }
@@ -703,7 +724,7 @@ fun DashboardRoute(
     }
     val bottomInset = LocalAppOverlayBottomInset.current
     val scrollState = rememberScrollState()
-    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing || mailSyncing || portalNewsSyncing || portalLibrarySyncing
+    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing || mailSyncing || portalNewsSyncing || portalLibrarySyncing || electricitySyncing
 
     val latestDraftState by rememberUpdatedState(draftConfigs)
 
@@ -790,6 +811,9 @@ fun DashboardRoute(
                             }
                             if (cardService.canAutoSync()) {
                                 scope.launch { cardService.refresh() }
+                            }
+                            if (electricityService.canAutoSync()) {
+                                scope.launch { electricityService.refresh() }
                             }
                         }
                     )
@@ -1106,6 +1130,8 @@ fun DashboardRoute(
                                     mailSlice = mailSlice,
                                     portalNewsSlice = portalNewsSlice,
                                     portalLibrarySlice = portalLibrarySlice,
+                                    electricitySlice = electricitySlice,
+                                    electricityConsentAccepted = electricityConsentAccepted,
                                     classroomSlot = classroomSlot,
                                     classroomDayLabel = classroomDayLabel,
                                     onNavigateTab = ::navigateToPageOrWarn,
@@ -1624,6 +1650,8 @@ private fun RenderModuleCard(
     mailSlice: DomainSlice<MailSnapshot>,
     portalNewsSlice: DomainSlice<PortalNewsSnapshot>,
     portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
+    electricitySlice: DomainSlice<ElectricitySnapshot>,
+    electricityConsentAccepted: Boolean,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1648,6 +1676,8 @@ private fun RenderModuleCard(
             mailSlice = mailSlice,
             portalNewsSlice = portalNewsSlice,
             portalLibrarySlice = portalLibrarySlice,
+            electricitySlice = electricitySlice,
+            electricityConsentAccepted = electricityConsentAccepted,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1672,6 +1702,8 @@ private fun RenderModuleCard(
             mailSlice = mailSlice,
             portalNewsSlice = portalNewsSlice,
             portalLibrarySlice = portalLibrarySlice,
+            electricitySlice = electricitySlice,
+            electricityConsentAccepted = electricityConsentAccepted,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1694,6 +1726,8 @@ private fun RenderModuleCard(
                 mailSlice = mailSlice,
                 portalNewsSlice = portalNewsSlice,
                 portalLibrarySlice = portalLibrarySlice,
+                electricitySlice = electricitySlice,
+                electricityConsentAccepted = electricityConsentAccepted,
                 classroomSlot = classroomSlot,
                 classroomDayLabel = classroomDayLabel,
                 onNavigateTab = onNavigateTab,
@@ -1734,6 +1768,8 @@ private fun buildCompactSummary(
     mailSlice: DomainSlice<MailSnapshot>,
     portalNewsSlice: DomainSlice<PortalNewsSnapshot>,
     portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
+    electricitySlice: DomainSlice<ElectricitySnapshot>,
+    electricityConsentAccepted: Boolean,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1908,6 +1944,38 @@ private fun buildCompactSummary(
             PortalActivity.launchLibrary(context)
         }
     }
+
+    DashboardModuleId.ELECTRICITY -> {
+        val snap = electricitySlice.data
+        val targets = snap?.targets.orEmpty()
+        val firstReading = snap?.readings?.firstOrNull()
+        val valText = when {
+            !electricityConsentAccepted -> "需授权"
+            targets.isEmpty() -> "未绑定"
+            firstReading != null -> formatElectricityPrimaryValue(firstReading)
+            else -> "待查询"
+        }
+        val miniText = when {
+            !electricityConsentAccepted -> "需授权"
+            targets.isEmpty() -> "未绑定"
+            firstReading?.balanceValue != null -> {
+                val v = firstReading.balanceValue
+                val num = if (v % 1.0 == 0.0) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
+                "$num${firstReading.unit}"
+            }
+            firstReading != null -> firstReading.balanceText
+            else -> "电费"
+        }
+        val sub = when {
+            !electricityConsentAccepted -> "需共享学号防滥用"
+            targets.isEmpty() -> "点击绑定宿舍房间"
+            targets.size > 1 -> "${electricityTargetShortLabel(targets.first())} · 双表"
+            else -> electricityTargetShortLabel(targets.first())
+        }
+        ModuleCompactSummary("宿舍电费", valText, sub, miniText) {
+            ElectricityActivity.launch(context)
+        }
+    }
 }
 
 private data class LibraryUrgentInfo(
@@ -2016,6 +2084,8 @@ private fun RenderMediumModuleCard(
     mailSlice: DomainSlice<MailSnapshot>,
     portalNewsSlice: DomainSlice<PortalNewsSnapshot>,
     portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
+    electricitySlice: DomainSlice<ElectricitySnapshot>,
+    electricityConsentAccepted: Boolean,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -2537,6 +2607,139 @@ private fun RenderMediumModuleCard(
                 }
             }
         }
+
+        DashboardModuleId.ELECTRICITY -> {
+            val snap = electricitySlice.data
+            val targets = snap?.targets.orEmpty()
+            val readings = snap?.readings.orEmpty()
+            val primary = readings.firstOrNull()
+            val threshold = snap?.lowBalanceThreshold ?: 20.0
+            MediumGlassCardFrame(
+                title = "宿舍电费",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { ElectricityActivity.launch(context) }
+            ) {
+                when {
+                    !electricityConsentAccepted -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "需要授权",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "查询需共享学号防滥用",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        MediumBottomActionPill(text = "阅读并同意 ›")
+                    }
+
+                    targets.isEmpty() -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "尚未绑定",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "支持全校三校区宿舍",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                        MediumBottomActionPill(text = "选择宿舍 ›")
+                    }
+
+                    primary == null -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "待查询",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = electricityTargetShortLabel(targets.first()),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        MediumBottomActionPill(
+                            text = if (!electricitySlice.lastError.isNullOrBlank()) "查询失败 · 重试 ›" else "查询电费 ›"
+                        )
+                    }
+
+                    else -> {
+                        val isPrimaryLow = isLowElectricityBalance(primary, threshold)
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                text = formatElectricityPrimaryValue(primary),
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = if (isPrimaryLow) Color(0xFFD97706) else MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = electricityTargetShortLabel(targets.first()),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (readings.size > 1) {
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                SystemDivider(alpha = 0.28f)
+                                readings.take(2).forEach { r ->
+                                    val meterLow = isLowElectricityBalance(r, threshold)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = r.target.meterType.ifBlank { electricityTargetBaseRoomName(r.target.roomName) },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f).padding(end = 4.dp)
+                                        )
+                                        Text(
+                                            text = formatElectricityPrimaryValue(r),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = if (meterLow) Color(0xFFD97706) else MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            MediumBottomActionPill(
+                                text = when {
+                                    !electricitySlice.lastError.isNullOrBlank() -> "上次快照 · 点此重试 ›"
+                                    isPrimaryLow -> "余量偏低 · 详情 ›"
+                                    primary.fromCache -> "网关缓存 · 详情 ›"
+                                    else -> "实时余量 · 详情 ›"
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2632,6 +2835,8 @@ private fun RenderLargeModuleCard(
     mailSlice: DomainSlice<MailSnapshot>,
     portalNewsSlice: DomainSlice<PortalNewsSnapshot>,
     portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
+    electricitySlice: DomainSlice<ElectricitySnapshot>,
+    electricityConsentAccepted: Boolean,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -3503,6 +3708,145 @@ private fun RenderLargeModuleCard(
                     enabled = !isEditing
                 ) {
                     PortalActivity.launchLibrary(context)
+                }
+            }
+        }
+
+        DashboardModuleId.ELECTRICITY -> {
+            val snap = electricitySlice.data
+            val targets = snap?.targets.orEmpty()
+            val readings = snap?.readings.orEmpty()
+            val threshold = snap?.lowBalanceThreshold ?: 20.0
+            val anyLow = readings.any { isLowElectricityBalance(it, threshold) }
+            val badgeText = when {
+                !electricityConsentAccepted -> "需授权"
+                targets.isEmpty() -> "未绑定"
+                !electricitySlice.lastError.isNullOrBlank() -> "查询异常"
+                anyLow -> "余量偏低"
+                readings.isNotEmpty() -> if (readings.first().fromCache) "缓存" else "最新"
+                else -> "待查询"
+            }
+            val badgeColor = when {
+                !electricitySlice.lastError.isNullOrBlank() -> Color(0xFFFF453A)
+                anyLow -> Color(0xFFD97706)
+                !electricityConsentAccepted || targets.isEmpty() -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.primary
+            }
+            DashboardGlassCard(
+                title = "宿舍电费 · 实时余量",
+                badge = badgeText,
+                badgeColor = badgeColor,
+                heightDp = slotHeightDp,
+                onClick = if (isEditing) null else ({ ElectricityActivity.launch(context) })
+            ) {
+                when {
+                    !electricityConsentAccepted -> {
+                        Text(
+                            text = "使用宿舍电费查询前需授权共享学号与签名至开发者网关，用于统计查询次数与防滥用拉黑。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        QuickActionTile(
+                            label = "阅读并授权查询",
+                            icon = Icons.Outlined.Bolt,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isEditing
+                        ) {
+                            ElectricityActivity.launch(context)
+                        }
+                    }
+
+                    targets.isEmpty() -> {
+                        Text(
+                            text = "已同意学号防滥用说明，尚未绑定宿舍。支持昌平、东区（照明+空调双表）、西区全校宿舍。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        QuickActionTile(
+                            label = "选择并绑定宿舍",
+                            icon = Icons.Outlined.Bolt,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isEditing
+                        ) {
+                            ElectricityActivity.launch(context)
+                        }
+                    }
+
+                    readings.isEmpty() -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = electricityTargetShortLabel(targets.first()),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = electricitySlice.lastError ?: "尚未拉取电费快照，点击打开页面查询最新余量",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (!electricitySlice.lastError.isNullOrBlank()) Color(0xFFFF453A) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        QuickActionTile(
+                            label = "打开宿舍电费",
+                            icon = Icons.Outlined.Bolt,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isEditing
+                        ) {
+                            ElectricityActivity.launch(context)
+                        }
+                    }
+
+                    else -> {
+                        val readingMap = readings.associateBy { "${it.target.schoolid}:${it.target.roomid}" }
+                        Text(
+                            text = "${targets.first().campusName} · ${electricityTargetShortLabel(targets.first())}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            targets.take(2).forEach { target ->
+                                val r = readingMap["${target.schoolid}:${target.roomid}"]
+                                val isLow = r != null && isLowElectricityBalance(r, threshold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = target.meterType.ifBlank { electricityTargetBaseRoomName(target.roomName) },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                    )
+                                    Text(
+                                        text = if (r != null) formatElectricityPrimaryValue(r) else "待查询",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (isLow) Color(0xFFD97706) else MaterialTheme.colorScheme.primary,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                        QuickActionTile(
+                            label = "打开宿舍电费",
+                            icon = Icons.Outlined.Bolt,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isEditing
+                        ) {
+                            ElectricityActivity.launch(context)
+                        }
+                    }
                 }
             }
         }
