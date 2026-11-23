@@ -145,6 +145,17 @@ fun GradesRoute() {
         nextSemester()
     }
 
+    fun shouldFetchComponentDetail(item: GradeItemUi): Boolean {
+        if (item.detail.isNotBlank() || item.year.isBlank() || item.examNature.contains("补考")) return false
+        val g = item.grade.trim()
+        if (g.isEmpty() || g == "--" || g.equals("null", ignoreCase = true)) return false
+        if (g == "合格" || g == "不合格" || g == "通过" || g == "不通过" ||
+            g == "缺考" || g == "缓考" || g == "免修" ||
+            g.equals("P", ignoreCase = true) || g.equals("U", ignoreCase = true)
+        ) return false
+        return true
+    }
+
     // 对已合并列表逐课补拉完整占比分项（平时(60%) 97 / 期末(40%) 80）
     fun enrichDetails(school: SchoolConfig, list: MutableList<GradeItemUi>, onDone: () -> Unit) {
         var idx = 0
@@ -152,6 +163,7 @@ fun GradesRoute() {
             if (idx >= list.size) { onDone(); return }
             val item = list[idx]
             idx++
+            if (!shouldFetchComponentDetail(item)) { next(); return }
             val jid = item.jxbId.ifEmpty { item.jobId }
             if (jid.isBlank()) { next(); return }
             val year = item.year.toIntOrNull() ?: 2024
@@ -207,6 +219,11 @@ fun GradesRoute() {
         }
         if (school != null && requestSemester.isNotEmpty() && !semesterIsLoading) {
             val requestAccountKey = requests.begin("semester")
+            val cachedSem = loadGradesLocal(context, requestSemester).orEmpty()
+            if (cachedSem.isNotEmpty() && semesterGrades.isEmpty()) {
+                semesterGrades = cachedSem
+                semesterLoaded = true
+            }
 
             semesterIsLoading = true
             if (requestSemester == "全部") {
@@ -343,13 +360,7 @@ fun GradesRoute() {
     // 第二阶段：总体接口部分课程只有课程代码(kch_id)而非教学班ID(jxb_id)，分项接口查不到；
     // 按学期拉 N305007 课程列表(cjcx_cxXsKcList)拿到真实 jxb_id，再逐课补分项
     fun fetchMissingJxbDetails(school: SchoolConfig) {
-        val missing = overallGrades.filter {
-            it.detail.isBlank() &&
-                it.grade.isNotBlank() &&
-                it.grade != "--" &&
-                it.grade != "null" &&
-                it.year.isNotBlank()
-        }
+        val missing = overallGrades.filter { shouldFetchComponentDetail(it) }
         if (missing.isEmpty()) { Log.d("GradesRoute", "OVERALL_DETAIL_ALL_DONE"); return }
         val semGroups = missing.groupBy {
             val year = it.year.toIntOrNull() ?: 2024
@@ -411,11 +422,7 @@ fun GradesRoute() {
     fun fetchOverallGradeDetails(school: SchoolConfig) {
         if (isDemoMode) return
         val targets = overallGrades.filter {
-            it.detail.isBlank() &&
-                it.grade.isNotBlank() &&
-                it.grade != "--" &&
-                it.grade != "null" &&
-                it.year.isNotBlank() &&
+            shouldFetchComponentDetail(it) &&
                 (it.jxbId.isNotBlank() || it.jobId.isNotBlank())
         }
         Log.d("GradesRoute", "OVERALL_DETAIL: targets=${targets.size} all=${overallGrades.size}")
@@ -483,7 +490,11 @@ fun GradesRoute() {
             val requestAccountKey = requests.begin("overall")
             // 双通道之一：先把本地缓存读出来做兜底。网络链路很长（逐学期+逐课），
             // 有缓存就直接上屏，加载圈只在完全没有数据时才出现；之后网络刷新静默更新
-            val cachedOverall = loadOverallLocal(context).orEmpty()
+            val cachedOverall = loadOverallLocal(context).orEmpty().map {
+                if (it.detail.isNotBlank() && !com.buct.course.ui.screen.isDetailConsistentWithGrade(it.detail, it.grade)) {
+                    it.copy(detail = "", jxbId = "", jobId = "")
+                } else it
+            }
             if (cachedOverall.isNotEmpty() && overallGrades.isEmpty()) {
                 overallGrades = cachedOverall
                 overallStats = GradesLogic.calculateStats(cachedOverall, "", 0.0, 0)
@@ -585,47 +596,75 @@ fun GradesRoute() {
                                      overallStats = GradesLogic.calculateStats(list, gpa, credits, count)
                                      saveOverallLocal(context, list)
                                  }
-                                 fun needsDetail(item: GradeItemUi) =
-                                     item.detail.isBlank() &&
-                                         item.grade.isNotBlank() &&
-                                         item.grade != "--" &&
-                                         item.grade != "null" &&
-                                         item.year.isNotBlank()
+                                 fun needsDetail(item: GradeItemUi) = shouldFetchComponentDetail(item)
 
-                                 // 已出分但连 jxbId 都没有的，才需要走全学期发现通道（最重的一段）；
-                                 // 其余缺口逐课补分项即可；完全没缺口就直接收工——这是加载慢的主因
+                                 // 已出分但连 jxbId 都没有的，或缺少考试性质（重修/补考）标记，或重修/补考尚缺分项的，走全学期发现通道
                                  val missingJxb = carried.any { needsDetail(it) && it.jxbId.isBlank() && it.jobId.isBlank() }
+                                 val missingExamNature = carried.any {
+                                     it.examNature.isBlank() &&
+                                         it.grade.isNotBlank() &&
+                                         it.grade != "--" &&
+                                         it.grade != "null"
+                                 }
+                                 val hasCorruptedOrMissingRetakeJxb = carried.any {
+                                     (it.examNature.contains("重修") || it.examNature.contains("补考")) && it.detail.isBlank()
+                                 }
                                  val workList = carried.toMutableList()
-                                 if (missingJxb) {
+                                 if (missingJxb || missingExamNature || hasCorruptedOrMissingRetakeJxb) {
                                      // 融合：后台用 N305007「全部」通道覆盖同课程的明细，未出分的课程保持原样
                                      fetchAllSemestersGrades(school) { allMerged ->
                                          if (allMerged.isEmpty()) { fetchOverallGradeDetails(school); return@fetchAllSemestersGrades }
-                                         val mergedByCode = allMerged.filter { it.courseCode.isNotBlank() }.associateBy { it.courseCode }
-                                         val mergedByName = allMerged.associateBy { GradesLogic.normalizeCourseKey(it.courseName) }
+                                         val mergedByCode = LinkedHashMap<String, GradeItemUi>()
+                                         val mergedByName = LinkedHashMap<String, GradeItemUi>()
+                                         allMerged.forEach { item ->
+                                             if (item.courseCode.isNotBlank()) {
+                                                 val prev = mergedByCode[item.courseCode]
+                                                 mergedByCode[item.courseCode] = if (prev == null) item else com.buct.course.ui.screen.pickBetterGradeAttempt(prev, item)
+                                             }
+                                             val nameKey = GradesLogic.normalizeCourseKey(item.courseName)
+                                             val prevName = mergedByName[nameKey]
+                                             mergedByName[nameKey] = if (prevName == null) item else com.buct.course.ui.screen.pickBetterGradeAttempt(prevName, item)
+                                         }
                                          val merged = workList.map { g ->
                                              val m = (if (g.courseCode.isNotBlank()) mergedByCode[g.courseCode] else null)
                                                  ?: mergedByName[GradesLogic.normalizeCourseKey(g.courseName)]
-                                             if (m != null) m.copy(
-                                                 detail = m.detail.ifBlank { g.detail },
-                                                 grade = m.grade,
-                                                 jxbId = m.jxbId.ifBlank { g.jxbId },
-                                                 jobId = m.jobId.ifBlank { g.jobId },
-                                                 year = m.year.ifBlank { g.year },
-                                                 term = m.term.ifBlank { g.term },
-                                                 gpa = m.gpa.ifBlank { g.gpa }
-                                             ) else g
+                                             if (m != null) {
+                                                 val best = com.buct.course.ui.screen.pickBetterGradeAttempt(g, m)
+                                                 val mWinsOrTies = best === m || m.grade.trim() == best.grade.trim()
+                                                 val gDetailValid = g.detail.isNotBlank() &&
+                                                     g.grade.trim() == best.grade.trim() &&
+                                                     com.buct.course.ui.screen.isDetailConsistentWithGrade(g.detail, best.grade)
+                                                 best.copy(
+                                                     detail = m.detail.ifBlank { if (gDetailValid) g.detail else "" },
+                                                     jxbId = if (mWinsOrTies && m.jxbId.isNotBlank()) m.jxbId else g.jxbId.ifBlank { m.jxbId },
+                                                     jobId = if (mWinsOrTies && m.jobId.isNotBlank()) m.jobId else g.jobId.ifBlank { m.jobId },
+                                                     year = if (mWinsOrTies && m.year.isNotBlank()) m.year else best.year.ifBlank { m.year.ifBlank { g.year } },
+                                                     term = if (mWinsOrTies && m.term.isNotBlank()) m.term else best.term.ifBlank { m.term.ifBlank { g.term } },
+                                                     gpa = best.gpa.ifBlank { m.gpa.ifBlank { g.gpa } },
+                                                     examNature = m.examNature.ifBlank { best.examNature.ifBlank { g.examNature } },
+                                                     teachingClass = if (mWinsOrTies && m.teachingClass.isNotBlank()) m.teachingClass else best.teachingClass.ifBlank { g.teachingClass }
+                                                 )
+                                             } else g
                                          }.toMutableList()
                                          Log.d("GradesRoute", "ALLSEM_MERGED: ${allMerged.size} merged=${merged.size}")
                                          runOnUiThreadForAccount(requestAccountKey) { applyUpdate(merged) }
                                          enrichDetails(school, merged) {
-                                             runOnUiThreadForAccount(requestAccountKey) { applyUpdate(merged) }
-                                             if (merged.any { needsDetail(it) }) fetchOverallGradeDetails(school)
+                                             runOnUiThreadForAccount(requestAccountKey) {
+                                                 applyUpdate(merged)
+                                                 if (merged.any { needsDetail(it) && it.jxbId.isBlank() && it.jobId.isBlank() }) {
+                                                     fetchMissingJxbDetails(school)
+                                                 }
+                                             }
                                          }
                                      }
                                  } else {
                                      enrichDetails(school, workList) {
-                                         runOnUiThreadForAccount(requestAccountKey) { applyUpdate(workList) }
-                                         if (workList.any { needsDetail(it) }) fetchOverallGradeDetails(school)
+                                         runOnUiThreadForAccount(requestAccountKey) {
+                                             applyUpdate(workList)
+                                             if (workList.any { needsDetail(it) && it.jxbId.isBlank() && it.jobId.isBlank() }) {
+                                                 fetchMissingJxbDetails(school)
+                                             }
+                                         }
                                      }
                                  }
                              }
@@ -655,8 +694,13 @@ fun GradesRoute() {
             examIsLoading = false
             return
         }
-        if (school != null && requestSemester.isNotEmpty() && !examIsLoading) {
+        if (school != null && !examIsLoading && requestSemester.isNotEmpty()) {
             val requestAccountKey = requests.begin("exams")
+            val cachedExams = loadExamsLocal(context).orEmpty()
+            if (cachedExams.isNotEmpty() && examList.isEmpty()) {
+                examList = cachedExams
+                examsLoaded = true
+            }
 
             examIsLoading = true
 
@@ -670,10 +714,17 @@ fun GradesRoute() {
             }
 
             val collected = java.util.Collections.synchronizedList(mutableListOf<ExamItemUi>())
+            val anyExamCallSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
             val semesterRemaining = java.util.concurrent.atomic.AtomicInteger(targetSemesters.size.coerceAtLeast(1))
 
             fun finishAll() {
                 if (semesterRemaining.decrementAndGet() > 0) return
+                if (!anyExamCallSucceeded.get() && collected.isEmpty()) {
+                    runOnUiThreadForAccount(requestAccountKey) {
+                        examIsLoading = false
+                    }
+                    return
+                }
                 val merged = collected.distinctBy { it.courseName to it.examTime }.sortedBy { it.examTime }
                 runOnUiThreadForAccount(requestAccountKey) {
                     examIsLoading = false
@@ -740,6 +791,7 @@ fun GradesRoute() {
                             tryFinish()
                             return
                         }
+                        anyExamCallSucceeded.set(true)
                         // 教务对异常学期号会返回错误页面，解析必须兜住，否则整个应用闪退
                         runCatching { GradesLogic.parseExamTimeJson(json, xnm, termNum) }
                             .onSuccess { timeItems = it }
@@ -760,6 +812,7 @@ fun GradesRoute() {
                             tryFinish()
                             return
                         }
+                        anyExamCallSucceeded.set(true)
                         runCatching { GradesLogic.parseExamJson(json) }
                             .onSuccess { infoItems = it }
                         tryFinish()
@@ -929,21 +982,38 @@ private fun carryDetails(
     previous: List<com.buct.course.ui.screen.GradeItemUi>,
     incoming: List<com.buct.course.ui.screen.GradeItemUi>
 ): List<com.buct.course.ui.screen.GradeItemUi> {
-    val withDetail = previous.filter { it.detail.isNotBlank() }
+    val withDetail = previous.filter {
+        it.detail.isNotBlank() && com.buct.course.ui.screen.isDetailConsistentWithGrade(it.detail, it.grade)
+    }
     if (withDetail.isEmpty()) return incoming
     val byCode = withDetail.filter { it.courseCode.isNotBlank() }.groupBy { it.courseCode }
     val byName = withDetail.groupBy { GradesLogic.normalizeCourseKey(it.courseName) }
     val result = incoming.map { item ->
-        if (item.detail.isNotBlank()) return@map item
-        val candidates = (if (item.courseCode.isNotBlank()) byCode[item.courseCode] else null)
-            ?: byName[GradesLogic.normalizeCourseKey(item.courseName)]
-            ?: return@map item
-        val sameTerm = candidates.firstOrNull { it.year == item.year && it.term == item.term }
-        val picked = sameTerm ?: candidates.first()
+        if (item.detail.isNotBlank() && com.buct.course.ui.screen.isDetailConsistentWithGrade(item.detail, item.grade)) {
+            return@map item
+        }
+        val itemGrade = item.grade.trim()
+        val candidates = ((if (item.courseCode.isNotBlank()) byCode[item.courseCode] else null)
+            ?: byName[GradesLogic.normalizeCourseKey(item.courseName)])
+            ?.filter {
+                it.grade.trim() == itemGrade &&
+                    com.buct.course.ui.screen.isDetailConsistentWithGrade(it.detail, item.grade)
+            }
+            .orEmpty()
+        if (candidates.isEmpty()) return@map item.copy(detail = "")
+        val itemYear = com.buct.course.ui.screen.normalizeGradeYear(item.year)
+        val itemTerm = com.buct.course.ui.screen.normalizeGradeTerm(item.term)
+        val picked = candidates.firstOrNull {
+            com.buct.course.ui.screen.normalizeGradeYear(it.year) == itemYear &&
+                com.buct.course.ui.screen.normalizeGradeTerm(it.term) == itemTerm
+        } ?: candidates.first()
         item.copy(
             detail = picked.detail,
             jxbId = item.jxbId.ifBlank { picked.jxbId },
-            jobId = item.jobId.ifBlank { picked.jobId }
+            jobId = item.jobId.ifBlank { picked.jobId },
+            year = picked.year.ifBlank { item.year },
+            term = picked.term.ifBlank { item.term },
+            examNature = item.examNature.ifBlank { picked.examNature }
         )
     }
     Log.d("GradesRoute", "CARRY_DETAIL: prev=${previous.size} withDetail=${withDetail.size} incoming=${incoming.size} out=${result.count { it.detail.isNotBlank() }}")
@@ -1110,10 +1180,22 @@ private object GradesLogic {
                 val jobId = first.optString("job_id", first.optString("JOB_ID", "")).trim()
                     .ifEmpty { jxbId }
 
+                val maxcj = getOptString(first, "MAXCJ", "maxcj")
+                val cxcj = getOptString(first, "CXCJ", "cxcj")
+                val bkcj = getOptString(first, "BKCJ", "bkcj")
+                val resolvedExamNature = getOptString(first, "ksxz", "KSXZ", "").ifBlank {
+                    when {
+                        maxcj.isNotEmpty() && cxcj.isNotEmpty() && cxcj == maxcj -> "重修"
+                        maxcj.isNotEmpty() && bkcj.isNotEmpty() && bkcj == maxcj -> "补考"
+                        maxcj.isNotEmpty() -> "正常考试"
+                        else -> ""
+                    }
+                }
+
                 result.add(
                     GradeItemUi(
                         courseName = name,
-                        grade = getOptString(first, "cj", "CJ", "--"),
+                        grade = maxcj.ifEmpty { getOptString(first, "cj", "CJ", "--") },
                         credits = getOptString(first, "xf", "XF", "0"),
                         gpa = getOptString(first, "jd", "JD"),
                         courseType = getOptString(first, "kcxzmc", "KCXZMC", ""),
@@ -1124,7 +1206,8 @@ private object GradesLogic {
                         teachingClass = first.optString("jxbmc", first.optString("JXBMC", "")),
                         jxbId = jxbId,
                         jobId = jobId,
-                        detail = detailText
+                        detail = detailText,
+                        examNature = resolvedExamNature
                     )
                 )
             }
@@ -1400,8 +1483,14 @@ private object GradesLogic {
                 val json = response.body?.string() ?: ""
                 val items = parseGradesJson(json)
                 items.forEach { newItem ->
-                    if (accumulatedGrades.none { it.courseName == newItem.courseName }) {
+                    val existingIdx = accumulatedGrades.indexOfFirst { it.courseName == newItem.courseName }
+                    if (existingIdx < 0) {
                         accumulatedGrades.add(newItem)
+                    } else {
+                        val better = com.buct.course.ui.screen.pickBetterGradeAttempt(accumulatedGrades[existingIdx], newItem)
+                        if (better !== accumulatedGrades[existingIdx]) {
+                            accumulatedGrades[existingIdx] = better
+                        }
                     }
                 }
                 val nodeCourses = parseCurriculumCoursesJson(json)
@@ -1423,11 +1512,12 @@ private object GradesLogic {
         var fail = 0
         var notGraded = 0
 
-        // GPA 按北化官方规则：素质教育课程、两级制计分课程、体育课程不参与
-        val gpaGrades = grades.filterNot { com.buct.course.ui.screen.isGpaExcludedGrade(it) }
+        // GPA 按北化官方规则：素质教育课程、两级制计分课程、体育课程不参与，且同课程重修/补考只取最高绩点
+        val gpaGrades = com.buct.course.ui.screen.deduplicateBestAttempts(grades)
+            .filter { com.buct.course.ui.screen.isGradedForGpa(it) }
         gpaGrades.forEach { g ->
             val c = g.credits.toDoubleOrNull() ?: 0.0
-            val gps = g.gpa.toDoubleOrNull() ?: 0.0
+            val gps = com.buct.course.ui.screen.effectiveGpaPoint(g) ?: 0.0
             totalCredits += c
             weightedGPA += c * gps
         }
@@ -1586,13 +1676,14 @@ private fun gradeToJson(g: GradeItemUi): org.json.JSONObject = org.json.JSONObje
     put("courseName", g.courseName); put("grade", g.grade); put("credits", g.credits); put("gpa", g.gpa)
     put("courseType", g.courseType); put("year", g.year); put("term", g.term); put("college", g.college)
     put("courseCode", g.courseCode); put("teachingClass", g.teachingClass); put("jxbId", g.jxbId); put("detail", g.detail)
+    put("examNature", g.examNature)
 }
 
 private fun gradeFromJson(o: org.json.JSONObject) = GradeItemUi(
     courseName = o.optString("courseName"), grade = o.optString("grade"), credits = o.optString("credits"),
     gpa = o.optString("gpa"), courseType = o.optString("courseType"), year = o.optString("year"), term = o.optString("term"),
     college = o.optString("college"), courseCode = o.optString("courseCode"), teachingClass = o.optString("teachingClass"),
-    jxbId = o.optString("jxbId"), detail = o.optString("detail")
+    jxbId = o.optString("jxbId"), detail = o.optString("detail"), examNature = o.optString("examNature")
 )
 
 private fun saveGradesLocal(context: android.content.Context, semester: String, list: List<GradeItemUi>) {

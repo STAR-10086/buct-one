@@ -93,7 +93,7 @@ public class CourseApiClient {
                                         if (requestSession != null && !UserManager.getInstance().getSessionState().isCurrent(requestSession)) {
                                                 throw new IOException("Session replaced");
                                         }
-                                        Response response = chain.proceed(request);
+                                        Response response = proceedWithStreamRetry(chain, request);
 
                                         // 🌐 【高精度重定向检测】若原请求非登录相关，但响应 URL 变为登录相关，判定为 Cookie 过期重定向
                                         String originalUrl = request.url().toString().toLowerCase();
@@ -123,7 +123,8 @@ public class CourseApiClient {
 
                                                         // 🔧 修改判定逻辑：引入“高精度反证法”防止误报
                                                         // 1. 扩大检查范围：从 50KB 增加到 256KB，确保能搜到复杂成绩页中的姓名标签
-                                                        String bodyPreview = response.peekBody(1024 * 256).string();
+                                                        String bodyPreview = safePeekBody(response, 1024 * 256);
+                                                        if (bodyPreview != null) {
                                                         String currentUrl = response.request().url().toString();
 
                                                         // 2. 核心判定规则：必须包含真实的登录表单特征（密码框 ID 等）
@@ -154,6 +155,7 @@ public class CourseApiClient {
                                                                 }
                                                         }
                                                         }
+                                                        }
                                                 }
                                         }
                                         // JSON 响应过期检测：部分正方系统 Cookie 过期返回 JSON 错误
@@ -164,11 +166,11 @@ public class CourseApiClient {
                                                                 || _ct.toString().contains("text/json"))) {
                                                         String _jp = response.request().url().encodedPath().toLowerCase();
                                                         if (!_jp.contains("login_slogin")) {
-                                                                String _jb = response.peekBody(2048).string();
-                                                                if (_jb.contains("\"notLogin\"")
+                                                                String _jb = safePeekBody(response, 2048);
+                                                                if (_jb != null && (_jb.contains("\"notLogin\"")
                                                                         || _jb.contains("\"sessionExpired\"")
                                                                         || _jb.contains("\"\u672a\u767b\u5f55\"")
-                                                                        || (_jb.contains("\"code\"") && _jb.contains("\"401\""))) {
+                                                                        || (_jb.contains("\"code\"") && _jb.contains("\"401\"")))) {
                                                                         Log.e(TAG, "[Cookie\u8fc7\u671f] JSON\u68c0\u6d4b\u5230\u672a\u767b\u5f55: " + response.request().url());
                                                                         if (appContext != null) {
                                                                                 notifyCookieExpired(requestSession);
@@ -209,6 +211,48 @@ public class CourseApiClient {
 
         public void init(Context context) {
                 this.appContext = context.getApplicationContext();
+        }
+
+        private static boolean isTransientStreamError(IOException e) {
+                if (e == null) return false;
+                Throwable cur = e;
+                while (cur != null) {
+                        if (cur instanceof java.io.EOFException) return true;
+                        String msg = cur.getMessage();
+                        if (msg != null) {
+                                String lower = msg.toLowerCase();
+                                if (lower.contains("unexpected end of stream")
+                                                || lower.contains("connection reset")
+                                                || lower.contains("socket closed")
+                                                || lower.contains("broken pipe")
+                                                || lower.contains("stream was reset")) {
+                                        return true;
+                                }
+                        }
+                        cur = cur.getCause();
+                }
+                return false;
+        }
+
+        private Response proceedWithStreamRetry(okhttp3.Interceptor.Chain chain, Request request) throws IOException {
+                try {
+                        return chain.proceed(request);
+                } catch (IOException e) {
+                        if (!isTransientStreamError(e)) throw e;
+                        Log.w(TAG, "Transient stream error on " + request.url().encodedPath() + ", evicting pool & retrying once: " + e.getMessage());
+                        if (client != null) client.connectionPool().evictAll();
+                        Request retryReq = request.newBuilder().header("Connection", "close").build();
+                        return chain.proceed(retryReq);
+                }
+        }
+
+        private static String safePeekBody(Response response, long byteCount) {
+                try {
+                        return response.peekBody(byteCount).string();
+                } catch (IOException e) {
+                        Log.w(TAG, "peekBody skipped due to stream error: " + e.getMessage());
+                        return null;
+                }
         }
 
         public <T> T runWithAccount(String accountStorageKey, AccountScopedOperation<T> operation) {

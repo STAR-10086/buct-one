@@ -70,47 +70,48 @@ internal data class TargetGpaEstimate(
 )
 
 internal fun buildYearlyGpaTrend(grades: List<GradeItemUi>): List<GpaTrendPoint> {
-    val valid = grades.filterNot { isGpaExcludedGrade(it) }
-    val grouped = valid
-        .filter { it.year.isNotBlank() }
-        .groupBy { it.year.trim() }
-
-    return grouped.entries
-        .sortedBy { it.key }
-        .mapNotNull { (year, items) ->
-            computeGpaPoint(
-                label = year,
-                shortLabel = shortenAcademicYear(year),
-                items = items
-            )
+    val buckets = grades
+        .filter { isGradedForGpa(it) }
+        .mapNotNull { item ->
+            val yearKey = normalizeAcademicYearKey(item.year) ?: return@mapNotNull null
+            yearKey to item
         }
+        .groupBy({ it.first }, { it.second })
+        .entries
+        .sortedBy { it.key }
+        .map { (yearKey, items) ->
+            Triple(fullAcademicYear(yearKey), shortenAcademicYear(yearKey), items)
+        }
+    return buildCumulativeTrend(buckets)
 }
 
 internal fun buildTermGpaTrend(grades: List<GradeItemUi>): List<GpaTrendPoint> {
-    val valid = grades.filterNot { isGpaExcludedGrade(it) }
-    val grouped = valid
-        .filter { it.year.isNotBlank() }
-        .groupBy { it.year.trim() to it.term.trim() }
-
-    return grouped.entries
-        .sortedWith(compareBy({ it.key.first }, { termOrder(it.key.second) }, { it.key.second }))
-        .mapNotNull { (key, items) ->
-            val (year, term) = key
-            val shortTerm = when {
-                term.contains("1") || term.contains("一") -> "1"
-                term.contains("2") || term.contains("二") -> "2"
-                term.contains("3") || term.contains("三") || term.contains("小") -> "小"
-                term.isBlank() -> ""
-                else -> term.take(2)
-            }
-            val shortLabel = if (shortTerm.isBlank()) {
-                shortenAcademicYear(year)
-            } else {
-                "${shortenAcademicYear(year)}·$shortTerm"
-            }
-            val fullLabel = if (term.isBlank()) year else "$year 第${shortTerm}学期"
-            computeGpaPoint(label = fullLabel, shortLabel = shortLabel, items = items)
+    val buckets = grades
+        .filter { isGradedForGpa(it) }
+        .mapNotNull { item ->
+            val yearKey = normalizeAcademicYearKey(item.year) ?: return@mapNotNull null
+            val termInfo = normalizeTerm(item.term)
+            (yearKey to termInfo) to item
         }
+        .groupBy({ it.first }, { it.second })
+        .entries
+        .sortedWith(compareBy({ it.key.first }, { it.key.second.first }, { it.key.second.second }))
+        .map { (key, items) ->
+            val (yearKey, termInfo) = key
+            val (_, shortTerm) = termInfo
+            val shortLabel = if (shortTerm.isBlank()) {
+                shortenAcademicYear(yearKey)
+            } else {
+                "${shortenAcademicYear(yearKey)}·$shortTerm"
+            }
+            val fullLabel = if (shortTerm.isBlank()) {
+                fullAcademicYear(yearKey)
+            } else {
+                "${fullAcademicYear(yearKey)} 第${shortTerm}学期"
+            }
+            Triple(fullLabel, shortLabel, items)
+        }
+    return buildCumulativeTrend(buckets)
 }
 
 internal fun estimateTargetGpa(
@@ -121,9 +122,9 @@ internal fun estimateTargetGpa(
 ): TargetGpaEstimate {
     var totalCredits = 0.0
     var weightedSum = 0.0
-    grades.filterNot { isGpaExcludedGrade(it) }.forEach { g ->
+    deduplicateBestAttempts(grades).filter { isGradedForGpa(it) }.forEach { g ->
         val c = g.credits.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: return@forEach
-        val p = g.gpa.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: return@forEach
+        val p = effectiveGpaPoint(g) ?: return@forEach
         totalCredits += c
         weightedSum += c * p
     }
@@ -146,40 +147,88 @@ internal fun estimateTargetGpa(
     )
 }
 
-private fun computeGpaPoint(label: String, shortLabel: String, items: List<GradeItemUi>): GpaTrendPoint? {
-    var totalCredits = 0.0
-    var weighted = 0.0
-    var count = 0
-    for (g in items) {
-        val c = g.credits.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
-        val p = g.gpa.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: continue
-        totalCredits += c
-        weighted += c * p
-        count++
-    }
-    if (totalCredits <= 0.0 || count == 0) return null
-    return GpaTrendPoint(
-        label = label,
-        shortLabel = shortLabel,
-        gpa = weighted / totalCredits,
-        credits = totalCredits,
-        courseCount = count
-    )
+/** 统一正方 `xnm`（如 "2024"）与完整学年串（如 "2024-2025"）为起始年份 "2024"。 */
+private fun normalizeAcademicYearKey(raw: String): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    val start = trimmed.substringBefore('-').trim()
+    if (start.length == 4 && start.all { it.isDigit() }) return start
+    return trimmed
 }
 
-private fun shortenAcademicYear(year: String): String {
-    val parts = year.split('-')
+private fun fullAcademicYear(yearKey: String): String {
+    val y = yearKey.toIntOrNull()
+    return if (y != null && yearKey.length == 4) "$y-${y + 1}" else yearKey
+}
+
+/** 兼容正方 `xqm`（3=第1学期, 12=第2学期, 16=小学期）与展示文本。 */
+private fun normalizeTerm(raw: String): Pair<Int, String> {
+    val t = raw.trim()
+    return when {
+        t == "3" -> 1 to "1"
+        t == "12" -> 2 to "2"
+        t == "16" -> 3 to "小"
+        t.contains("1") || t.contains("一") -> 1 to "1"
+        t.contains("2") || t.contains("二") -> 2 to "2"
+        t.contains("3") || t.contains("三") || t.contains("小") -> 3 to "小"
+        t.isEmpty() -> 9 to ""
+        else -> 9 to t.take(2)
+    }
+}
+
+/** 按时间顺序累计学分与加权绩点：大一算大一，大二算大一+大二，同一门课重修/补考只保留最高绩点。 */
+private fun buildCumulativeTrend(
+    buckets: List<Triple<String, String, List<GradeItemUi>>>
+): List<GpaTrendPoint> {
+    val bestByCourse = LinkedHashMap<String, GradeItemUi>()
+    return buildList {
+        for ((label, shortLabel, items) in buckets) {
+            if (items.isEmpty()) continue
+            var updated = false
+            for (g in items) {
+                val c = g.credits.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
+                if (effectiveGpaPoint(g) == null || c <= 0.0) continue
+                val key = gradeCourseDedupKey(g)
+                val prev = bestByCourse[key]
+                bestByCourse[key] = if (prev == null) g else pickBetterGradeAttempt(prev, g)
+                updated = true
+            }
+            if (!updated) continue
+
+            var cumulativeCredits = 0.0
+            var cumulativeWeighted = 0.0
+            var cumulativeCount = 0
+            for (g in bestByCourse.values) {
+                val c = g.credits.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
+                val p = effectiveGpaPoint(g) ?: continue
+                cumulativeCredits += c
+                cumulativeWeighted += c * p
+                cumulativeCount++
+            }
+            if (cumulativeCredits <= 0.0 || cumulativeCount == 0) continue
+            add(
+                GpaTrendPoint(
+                    label = label,
+                    shortLabel = shortLabel,
+                    gpa = cumulativeWeighted / cumulativeCredits,
+                    credits = cumulativeCredits,
+                    courseCount = cumulativeCount
+                )
+            )
+        }
+    }
+}
+
+private fun shortenAcademicYear(yearKey: String): String {
+    val y = yearKey.toIntOrNull()
+    if (y != null && yearKey.length == 4) {
+        return "${(y % 100).toString().padStart(2, '0')}-${((y + 1) % 100).toString().padStart(2, '0')}"
+    }
+    val parts = yearKey.split('-')
     if (parts.size == 2 && parts[0].length == 4 && parts[1].length == 4) {
         return "${parts[0].takeLast(2)}-${parts[1].takeLast(2)}"
     }
-    return year.take(7)
-}
-
-private fun termOrder(term: String): Int = when {
-    term.contains("1") || term.contains("一") -> 1
-    term.contains("2") || term.contains("二") -> 2
-    term.contains("3") || term.contains("三") || term.contains("小") -> 3
-    else -> 9
+    return yearKey.take(7)
 }
 
 @Composable
@@ -221,7 +270,7 @@ internal fun GpaTrendCard(grades: List<GradeItemUi>) {
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
-                    text = "GPA 趋势",
+                    text = "累计 GPA 趋势",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )

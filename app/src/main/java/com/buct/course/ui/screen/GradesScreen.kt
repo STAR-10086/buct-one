@@ -105,7 +105,8 @@ data class GradeItemUi(
     val teachingClass: String = "",
     val jxbId: String = "",
     val jobId: String = "",
-    val detail: String = ""
+    val detail: String = "",
+    val examNature: String = ""
 )
 
 data class ExamItemUi(
@@ -206,8 +207,7 @@ fun mergeExamsWithLocal(
 internal fun isGpaExcludedGrade(grade: GradeItemUi): Boolean {
     // 1. 素质教育课程（课程性质含"素质教育"，如"素质教育课程选修"）
     if (grade.courseType.contains("素质教育")) return true
-    // 2. 体育课程（课程代码 PHE 开头，或课程名含"体育"）
-    if (grade.courseCode.startsWith("PHE", ignoreCase = true)) return true
+    // 2. 体育课程（课程名含"体育"；注意 PHE 前缀还包含 军事技能/军事理论，这两门计入 GPA，不能按 PHE 排除）
     if (grade.courseName.contains("体育")) return true
     // 3. 两级制计分课程（成绩只记 合格/不合格/P/U/Pass，无绩点）
     val g = grade.grade.trim()
@@ -219,11 +219,94 @@ internal fun isGpaExcludedGrade(grade: GradeItemUi): Boolean {
     return false
 }
 
+internal fun gradeCourseDedupKey(g: GradeItemUi): String {
+    val code = g.courseCode.trim().uppercase()
+    if (code.isNotEmpty()) return "code:$code"
+    val normName = g.courseName.trim()
+        .replace('（', '(')
+        .replace('）', ')')
+        .replace(" ", "")
+    return "name:$normName"
+}
+
+private fun isPassingGradeText(raw: String): Boolean {
+    val t = raw.trim()
+    val num = t.toDoubleOrNull()
+    if (num != null) return num >= 60.0
+    val upper = t.uppercase()
+    return upper.startsWith("A") || upper.startsWith("B") || upper.startsWith("C") || upper.startsWith("D")
+}
+
+internal fun effectiveGpaPoint(g: GradeItemUi): Double? {
+    val parsed = g.gpa.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }
+    if (parsed != null) return parsed
+    if (g.examNature.contains("补考") && isPassingGradeText(g.grade)) return 1.0
+    return null
+}
+
+internal fun isGradedForGpa(g: GradeItemUi): Boolean {
+    if (isGpaExcludedGrade(g)) return false
+    val raw = g.grade.trim()
+    if (raw.isEmpty() || raw == "--" || raw.equals("null", ignoreCase = true) ||
+        raw == "未出分" || raw == "缓考" || raw == "免修" || raw == "缺考"
+    ) return false
+    val c = g.credits.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: return false
+    val p = effectiveGpaPoint(g) ?: return false
+    return c > 0.0 && p >= 0.0
+}
+
+private fun attemptTermOrder(g: GradeItemUi): Pair<Int, Int> {
+    val y = g.year.trim().substringBefore('-').toIntOrNull() ?: 0
+    val t = when (val raw = g.term.trim()) {
+        "3" -> 1
+        "12" -> 2
+        "16" -> 3
+        else -> raw.toIntOrNull() ?: 0
+    }
+    return y to t
+}
+
+internal fun pickBetterGradeAttempt(existing: GradeItemUi, candidate: GradeItemUi): GradeItemUi {
+    val ep = effectiveGpaPoint(existing)
+    val cp = effectiveGpaPoint(candidate)
+    if (ep != null && cp != null) {
+        if (cp > ep + 1e-6) return candidate
+        if (ep > cp + 1e-6) return existing
+    } else if (cp != null && ep == null) {
+        return candidate
+    } else if (ep != null && cp == null) {
+        return existing
+    }
+    val es = existing.grade.trim().toDoubleOrNull()
+    val cs = candidate.grade.trim().toDoubleOrNull()
+    if (es != null && cs != null) {
+        if (cs > es + 1e-6) return candidate
+        if (es > cs + 1e-6) return existing
+    } else if (cs != null && es == null) {
+        return candidate
+    } else if (es != null && cs == null) {
+        return existing
+    }
+    val (ey, et) = attemptTermOrder(existing)
+    val (cy, ct) = attemptTermOrder(candidate)
+    return if (cy > ey || (cy == ey && ct >= et)) candidate else existing
+}
+
+internal fun deduplicateBestAttempts(grades: List<GradeItemUi>): List<GradeItemUi> {
+    val map = LinkedHashMap<String, GradeItemUi>()
+    for (g in grades) {
+        val key = gradeCourseDedupKey(g)
+        val prev = map[key]
+        map[key] = if (prev == null) g else pickBetterGradeAttempt(prev, g)
+    }
+    return map.values.toList()
+}
+
 internal fun semesterAverageGpa(grades: List<GradeItemUi>): String {
-    // 按北化官方规则：素质教育课程、两级制计分课程、体育课程不参与 GPA
-    val graded = grades.filterNot { isGpaExcludedGrade(it) }.mapNotNull { grade ->
+    // 按北化官方规则：素质教育课程、两级制计分课程、体育课程不参与 GPA，且同一门课只取最高绩点（重修/补考不重复计入）
+    val graded = deduplicateBestAttempts(grades).filter { isGradedForGpa(it) }.mapNotNull { grade ->
         val credit = grade.credits.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 } ?: return@mapNotNull null
-        val point = grade.gpa.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: return@mapNotNull null
+        val point = effectiveGpaPoint(grade) ?: return@mapNotNull null
         credit to point
     }
     val credits = graded.sumOf { it.first }
@@ -678,7 +761,11 @@ private fun SemesterGradesContent(
     topInset: Dp,
     bottomInset: Dp
 ) {
-    val totalCredits = remember(grades) { grades.filterNot { isGpaExcludedGrade(it) }.sumOf { it.credits.toDoubleOrNull() ?: 0.0 } }
+    val totalCredits = remember(grades) {
+        deduplicateBestAttempts(grades)
+            .filterNot { isGpaExcludedGrade(it) }
+            .sumOf { it.credits.toDoubleOrNull() ?: 0.0 }
+    }
     val averageGpa = remember(grades, currentSemester, officialOverallGpa) {
         // 学期「全部」直接展示官方绩点（N105515 GPA），避免合并接口绩点字段口径差异
         if (currentSemester == "全部" && officialOverallGpa.isNotBlank()
@@ -934,6 +1021,7 @@ private fun GradeItemRow(
     val notGraded = item.grade.isBlank() || item.grade == "--" || item.grade == "null"
     val semesterLabel = remember(item.year, item.term) { formatSemesterLabel(item.year, item.term) }
     val exam = remember(item.courseName, exams) { exams.firstOrNull { it.courseName == item.courseName } }
+    val natureBadge = remember(item.examNature) { gradeExamNatureBadge(item.examNature) }
     SystemCard(
         modifier = Modifier.fillMaxWidth().moduleEntrance(2),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
@@ -944,16 +1032,28 @@ private fun GradeItemRow(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top
             ) {
-                // 左侧：课程名 + 代码/学院
+                // 左侧：课程名 + 重修/补考徽章 + 代码/学院
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.courseName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = item.courseName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (natureBadge != null) {
+                            SystemStatusBadge(
+                                text = natureBadge.first,
+                                tone = natureBadge.second
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.height(4.dp))
                     val subInfo = buildString {
                         if (item.courseCode.isNotEmpty()) append(item.courseCode)
@@ -1120,6 +1220,7 @@ private fun GradeItemRow(
                     // 元信息落到小芯片上（复用筛选面板那一枚）：原先绩点根本没露过面，
                     // 教学班只在"无分项"那条分支里以裸文字出现。
                     val metaChips = buildList {
+                        if (item.examNature.isNotBlank() && item.examNature != "正常考试") add(item.examNature)
                         if (item.gpa.isNotBlank() && item.gpa != "0" && item.gpa != "0.0") add("绩点 ${item.gpa}")
                         if (item.credits.isNotBlank()) add("${item.credits} 学分")
                         if (item.courseType.isNotBlank()) add(item.courseType)
@@ -1144,6 +1245,45 @@ private fun GradeItemRow(
             }
         }
     }
+}
+
+internal fun gradeExamNatureBadge(examNature: String): Pair<String, SystemTone>? = when {
+    examNature.contains("重修") -> "重修" to SystemTone.Warning
+    examNature.contains("补考") -> "补考" to SystemTone.Warning
+    examNature.contains("缓考") -> "缓考" to SystemTone.Info
+    else -> null
+}
+
+internal fun normalizeGradeYear(raw: String): String = raw.trim().substringBefore('-')
+
+internal fun normalizeGradeTerm(raw: String): String = when (val t = raw.trim()) {
+    "3", "1" -> "1"
+    "12", "2" -> "2"
+    "16", "3" -> "3"
+    else -> t
+}
+
+private val WEIGHTED_COMPONENT_REGEX = Regex("""\((\d+(?:\.\d+)?)%\)\s*[:：]\s*(\d+(?:\.\d+)?)""")
+
+/** 校验分项加权结果是否与总评一致，避免旧挂科记录的平时/期末被误贴到重修成绩上。 */
+internal fun isDetailConsistentWithGrade(detail: String, grade: String): Boolean {
+    if (detail.isBlank()) return false
+    val total = grade.trim().toDoubleOrNull() ?: return true
+    var weightSum = 0.0
+    var weightedScore = 0.0
+    var count = 0
+    for (part in detail.split(Regex("""\s*[|;；]\s*"""))) {
+        val m = WEIGHTED_COMPONENT_REGEX.find(part) ?: continue
+        val w = m.groupValues[1].toDoubleOrNull() ?: continue
+        val s = m.groupValues[2].toDoubleOrNull() ?: continue
+        weightSum += w
+        weightedScore += w * s / 100.0
+        count++
+    }
+    if (count >= 2 && weightSum in 95.0..105.0) {
+        return kotlin.math.abs(weightedScore - total) <= 5.0
+    }
+    return true
 }
 
 private data class GradeComponent(val label: String, val score: Float)
