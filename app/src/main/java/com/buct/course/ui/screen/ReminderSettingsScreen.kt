@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -27,15 +28,18 @@ import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.Assignment
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.NotificationsNone
-import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.buct.course.reminder.OemBackgroundSettings
 import com.buct.course.reminder.ReminderChannels
 import com.buct.course.reminder.SmartReminderScheduler
 import com.buct.course.ui.system.GlassToaster
@@ -76,6 +81,7 @@ import java.util.Locale
 fun ReminderSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val store = remember(context) { ReminderStore(context) }
+    val brand = remember { OemBackgroundSettings.detectBrand() }
 
     var refreshTick by remember { mutableIntStateOf(0) }
     var settings by remember(context) { mutableStateOf(store.readSettings()) }
@@ -134,7 +140,7 @@ fun ReminderSettingsScreen(onBack: () -> Unit) {
         ) {
             InsetGroupedSection(
                 header = "通知与后台体检",
-                footer = "DDL、还书、考试闹钟由系统 AlarmManager 触发，划掉后台也能响；WorkManager 低频巡检则受省电策略影响。"
+                footer = "国产系统划掉后台后需同时开启「自启动」与「允许后台耗电/无限制」，否则系统会拦截离线闹钟。"
             ) {
                 InsetGroupedRow(
                     icon = Icons.Outlined.NotificationsActive,
@@ -195,34 +201,42 @@ fun ReminderSettingsScreen(onBack: () -> Unit) {
                     }
                 )
                 InsetGroupedRow(
+                    icon = Icons.Outlined.PowerSettingsNew,
+                    iconTint = Color(0xFF0A84FF),
+                    title = "允许自启动",
+                    subtitle = "已识别 ${brand.displayName} · 划掉后台后接收提醒需开启",
+                    showDivider = true,
+                    trailing = {
+                        TextButton(
+                            onClick = {
+                                if (!OemBackgroundSettings.openAutoStart(context)) {
+                                    GlassToaster.show(brand.autoStartGuide)
+                                }
+                            }
+                        ) {
+                            Text("去开启")
+                        }
+                    }
+                )
+                InsetGroupedRow(
                     icon = Icons.Outlined.BatteryChargingFull,
                     iconTint = if (diagnostics.ignoringBatteryOptimizations) Color(0xFF34C759) else Color(0xFF0A84FF),
-                    title = "电池优化白名单",
+                    title = "允许后台耗电 / 电池优化",
                     subtitle = if (diagnostics.ignoringBatteryOptimizations) {
-                        "已设为无限制 · 后台巡检更稳定"
+                        "已放行 · 已识别 ${brand.displayName}"
                     } else {
-                        "受系统省电限制 · 仅影响定时联网巡检"
+                        "已识别 ${brand.displayName} · ${brand.batteryGuide}"
                     },
                     showDivider = false,
                     trailing = {
                         TextButton(
                             onClick = {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                    runCatching {
-                                        context.startActivity(
-                                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                                data = Uri.parse("package:${context.packageName}")
-                                            }
-                                        )
-                                    }.onFailure {
-                                        runCatching {
-                                            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                                        }.onFailure { openAppDetailsSettings(context) }
-                                    }
+                                if (!OemBackgroundSettings.openBatteryOptimization(context)) {
+                                    GlassToaster.show(brand.batteryGuide)
                                 }
                             }
                         ) {
-                            Text(if (diagnostics.ignoringBatteryOptimizations) "已放行" else "去设置")
+                            Text(if (diagnostics.ignoringBatteryOptimizations) "管理" else "去设置")
                         }
                     }
                 )
@@ -337,8 +351,9 @@ fun ReminderSettingsScreen(onBack: () -> Unit) {
                         ) {
                             for (hours in ReminderRuleEngine.VALID_DDL_OFFSETS_HOURS) {
                                 val selected = hours in settings.theolOffsetsHours
-                                FilterChip(
+                                ReminderOptionChip(
                                     selected = selected,
+                                    label = "提前 ${hours}h",
                                     onClick = {
                                         val nextOffsets = if (selected) {
                                             settings.theolOffsetsHours - hours
@@ -350,8 +365,7 @@ fun ReminderSettingsScreen(onBack: () -> Unit) {
                                         } else {
                                             updateSettings(settings.copy(theolOffsetsHours = nextOffsets))
                                         }
-                                    },
-                                    label = { Text("提前 ${hours}h") }
+                                    }
                                 )
                             }
                         }
@@ -416,10 +430,10 @@ fun ReminderSettingsScreen(onBack: () -> Unit) {
                         Spacer(Modifier.height(6.dp))
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             for (hours in ReminderRuleEngine.VALID_SYNC_INTERVALS_HOURS) {
-                                FilterChip(
+                                ReminderOptionChip(
                                     selected = settings.syncIntervalHours == hours,
-                                    onClick = { updateSettings(settings.copy(syncIntervalHours = hours)) },
-                                    label = { Text("每 $hours 小时") }
+                                    label = "每 $hours 小时",
+                                    onClick = { updateSettings(settings.copy(syncIntervalHours = hours)) }
                                 )
                             }
                         }
@@ -478,10 +492,10 @@ fun ReminderSettingsScreen(onBack: () -> Unit) {
                         Spacer(Modifier.height(6.dp))
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             for (yuan in ReminderRuleEngine.VALID_CARD_THRESHOLDS_YUAN) {
-                                FilterChip(
+                                ReminderOptionChip(
                                     selected = settings.cardLowThresholdYuan == yuan,
-                                    onClick = { updateSettings(settings.copy(cardLowThresholdYuan = yuan)) },
-                                    label = { Text("低于 ¥$yuan") }
+                                    label = "低于 ¥$yuan",
+                                    onClick = { updateSettings(settings.copy(cardLowThresholdYuan = yuan)) }
                                 )
                             }
                         }
@@ -492,6 +506,48 @@ fun ReminderSettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(12.dp))
         }
     }
+}
+
+@Composable
+private fun ReminderOptionChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        leadingIcon = if (selected) {
+            {
+                Icon(
+                    imageVector = Icons.Outlined.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        } else {
+            null
+        },
+        label = {
+            Text(
+                text = label,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+            selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+            selectedBorderColor = Color.Transparent
+        )
+    )
 }
 
 private fun openAppNotificationSettings(context: android.content.Context) {
