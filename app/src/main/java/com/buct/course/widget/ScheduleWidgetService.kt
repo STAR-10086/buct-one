@@ -53,12 +53,15 @@ class ScheduleRemoteViewsFactory(
     private var courseColorMap = mutableMapOf<String, Int>()
     private var rowHasCourse = BooleanArray(12) { false }
     private var currentWeek = 1
+    private var isDarkMode = false
 
     override fun onCreate() {}
 
     override fun onDataSetChanged() {
         try {
             UserManager.getInstance().init(context)
+            // 主题只在这里读一次：getViewAt 要渲染 12 行，逐行读 SharedPreferences 没必要
+            isDarkMode = WidgetAppearance.isDarkMode(context)
             val scheduleJson = loadOwnScheduleJson()
 
             if (scheduleJson != null) {
@@ -102,26 +105,11 @@ class ScheduleRemoteViewsFactory(
         val period = position + 1
         var views = RemoteViews(context.packageName, R.layout.widget_schedule_row)
 
-        // 读取 APP 里的主题设置
-        val themePrefs = context.getSharedPreferences("appearance_settings", Context.MODE_PRIVATE)
-        val themeMode = themePrefs.getString("theme_mode", "system")
-
-        // 读取系统深色模式
-        val nightModeFlags = context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
-        val systemDark = nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES
-
-        // 决定是否是深色模式
-        val isDarkMode = when (themeMode) {
-            "light" -> false
-            "dark" -> true
-            else -> systemDark // system 模式
-        }
-
         val time = if (period - 1 < periodTimes.size) periodTimes[period - 1] else ""
         views.setTextViewText(R.id.item_period, "${period}\n${time}")
 
-        // 根据模式设置文字颜色
-        val textColor = if (isDarkMode) Color.WHITE else Color.BLACK
+        // 根据模式设置文字颜色（与表头/周次保持同一套取色）
+        val textColor = if (isDarkMode) Color.WHITE else 0xFF1C1C1E.toInt()
         views.setTextColor(R.id.item_period, textColor)
 
         // 空行快速路径：本行无课时只清空格子，跳过逐格查找，显著提速

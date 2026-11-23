@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课表 2×1：只放一堂课（默认下一节课），左右两端箭头翻看当天其它课程。
+     RemoteViews 只支持 FrameLayout / LinearLayout / RelativeLayout / GridLayout 这几种容器，
+     滚动容器放不进桌面小组件，所以这里用点击箭头分页。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg_light"
+    android:clipToOutline="true"
+    android:padding="4dp">
+
+    <LinearLayout
+        android:id="@+id/day_card_0"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:background="@drawable/widget_course_card_indigo"
+        android:paddingStart="21dp"
+        android:paddingEnd="21dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/day_name_0"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="课程名称"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/day_time_0"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:text="第1-2节  08:00-09:35"
+            android:textSize="9.5sp"
+            android:textColor="#E6FFFFFF"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/day_loc_0"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:text="上课教室"
+            android:textSize="9.5sp"
+            android:textColor="#D9FFFFFF"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/day_prev_course"
+        android:layout_width="20dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start|center_vertical"
+        android:src="@drawable/ic_widget_chevron_left_dark"
+        android:scaleType="centerInside"
+        android:padding="3dp"
+        android:contentDescription="上一节课" />
+
+    <ImageView
+        android:id="@+id/day_next_course"
+        android:layout_width="20dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end|center_vertical"
+        android:src="@drawable/ic_widget_chevron_right_dark"
+        android:scaleType="centerInside"
+        android:padding="3dp"
+        android:contentDescription="下一节课" />
+
+</FrameLayout>

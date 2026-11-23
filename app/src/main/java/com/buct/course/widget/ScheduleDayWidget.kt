@@ -6,190 +6,204 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 import com.buct.course.R
-import com.buct.course.manager.ScheduleSettingsManager
-import com.buct.course.manager.UserManager
-import com.buct.course.schedule.ScheduleJson
 import java.util.Calendar
 
+/** 4×2 列表一行的排版规格（行高 dp、是否排三行）。 */
+internal data class DayRowSpec(val heightDp: Int, val threeLines: Boolean)
+
 /**
- * 桌面「今日课表」小组件：可左右切换查看任意一天（含考试），一键回到今天。
- * 采用 ListView + RemoteViewsService，按桌面当前高度（行数）约束每屏显示的课程节数（2 行最多 2 节，3 行最多 3 节），
- * 当天课程超出时支持手动上下滑动。
+ * 桌面「今日课表」小组件。
+ *
+ * 两种尺寸自适应（尺寸判定见 [WidgetSizePolicy]）：
+ * - 最小 2×1 [WidgetLayoutMode.COMPACT]：只放一堂课，默认「下一节课」，
+ *   点卡片左右两端的箭头看当天前后课程；
+ * - 最小 4×2 [WidgetLayoutMode.FULL]：当天完整课程列表，放不下时上下滑动。
+ *
+ * 每节课只显示课程名称、上课教室、上课时间三样信息。
+ *
+ * 关于「左右滑动」：桌面小组件的视图树由 RemoteViews 还原，平台只允许
+ * FrameLayout / LinearLayout / RelativeLayout / GridLayout 这几种容器，
+ * ScrollView 与 HorizontalScrollView 根本 inflate 不出来，触摸拖动事件也不会
+ * 回传给 App，所以原生桌面小组件无法实现真正的滑动手势翻页。
+ * 这里用左右两端箭头点击翻页 —— 平台允许的唯一等效交互。
+ *
+ * 类名不能改：桌面上的旧实例绑定的就是 com.tyust.course.widget.ScheduleDayWidget。
  */
 open class ScheduleDayWidget : AppWidgetProvider() {
 
     companion object {
         const val ACTION_DAY_PREV = "com.buct.course.widget.DAY_PREV"
         const val ACTION_DAY_NEXT = "com.buct.course.widget.DAY_NEXT"
-        const val ACTION_DAY_TODAY = "com.buct.course.widget.DAY_TODAY"
-        private const val ACTION_REFRESH_WIDGET = "com.buct.course.widget.REFRESH_WIDGET"
         private const val ALARM_REQUEST_CODE = 4102
         private const val PREFS = "day_widget_prefs"
-        private const val KEY_OFFSET = "day_offset"
-        private val OFFSET_LOCK = Any()
+        private const val KEY_SELECTED = "selected_course"
 
-        fun getDayOffset(
-            context: Context,
-            appWidgetId: Int = AppWidgetManager.INVALID_APPWIDGET_ID
-        ): Int {
-            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
-                val perKey = "${KEY_OFFSET}_$appWidgetId"
-                if (p.contains(perKey)) return p.getInt(perKey, 0)
-            }
-            return p.getInt(KEY_OFFSET, 0)
-        }
+        /** 4×2 列表顶部日期栏高度（用于算每行高度）。 */
+        private const val FULL_HEADER_DP = 44
+        /** ListView 的分隔线高度（widget_schedule_day*.xml 里 dividerHeight）。 */
+        private const val ROW_DIVIDER_DP = 4
+        /** 行高够不够排三行（会再乘用户的小组件字号缩放）。 */
+        private const val THREE_LINE_THRESHOLD_DP = 50
+        private const val THREE_LINE_HEIGHT_DP = 56
+        private const val TWO_LINE_HEIGHT_DP = 38
 
-        private fun resolveDayLabels(
-            context: Context,
-            appWidgetId: Int,
-            offset: Int
-        ): Pair<String, String> {
-            val cal = Calendar.getInstance()
-            cal.add(Calendar.DAY_OF_YEAR, offset)
-            val month = cal.get(Calendar.MONTH) + 1
-            val day = cal.get(Calendar.DAY_OF_MONTH)
-            val weekdayIndex = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
-            val weekdayText = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[weekdayIndex - 1]
-            val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
-            val week = WidgetScheduleSource.weekForDate(startMillis, cal)
-            val dayInfo = "${month}月${day}日 · $weekdayText · 第${week}周"
-            val backToday = if (offset == 0) "今天" else "回到今天"
-            return dayInfo to backToday
-        }
+        /** 用户翻到的那一节；数据变了或换了天就自然失效，回到「下一节课」。 */
+        private fun storedSelection(context: Context, appWidgetId: Int): String? =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString("${KEY_SELECTED}_$appWidgetId", null)
 
-        private fun resolveAndSaveHeightDp(
-            context: Context,
-            options: Bundle?,
-            appWidgetId: Int
-        ): Int {
-            if (options == null) return WidgetConfigStore.widgetHeightDp(context, appWidgetId)
-            val isLandscape =
-                context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            val maxH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
-            val minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
-            val h = if (isLandscape) {
-                if (minH > 0) minH else maxH
+        private fun storeSelection(context: Context, appWidgetId: Int, key: String?) {
+            val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            if (key.isNullOrBlank()) {
+                editor.remove("${KEY_SELECTED}_$appWidgetId")
             } else {
-                if (maxH > 0) maxH else minH
+                editor.putString("${KEY_SELECTED}_$appWidgetId", key)
             }
-            if (h > 0) {
-                WidgetConfigStore.setWidgetHeightDp(context, appWidgetId, h)
-            }
-            return h
+            editor.commit()
         }
 
-        /** 构建完整视图（主题 + 日期 + 可滑动列表） */
-        private fun buildViews(
+        fun updateAppWidget(
             context: Context,
             appWidgetManager: AppWidgetManager,
             appWidgetId: Int
-        ): RemoteViews {
-            resolveAndSaveHeightDp(
+        ) {
+            val size = WidgetSizePolicy.resolve(
                 context,
                 appWidgetManager.getAppWidgetOptions(appWidgetId),
                 appWidgetId
             )
+            val views = when (WidgetSizePolicy.mode(size)) {
+                WidgetLayoutMode.COMPACT -> buildCompact(context, size, appWidgetId)
+                WidgetLayoutMode.FULL -> buildFull(context, appWidgetId)
+            }
+            appWidgetManager.updateAppWidget(appWidgetId, views)
+        }
 
-            val hideTitle = WidgetConfigStore.hideTitle(context, appWidgetId)
-            val layoutId = if (hideTitle) R.layout.widget_schedule_day_notitle else R.layout.widget_schedule_day
-            val views = RemoteViews(context.packageName, layoutId)
+        /**
+         * 选中课程：优先用用户上次翻到的那一节（同一天且课程还在），
+         * 否则回到默认 —— 下一节课（正在上的也算）。
+         */
+        private fun resolveSelectedCourse(
+            context: Context,
+            appWidgetId: Int,
+            data: TodayCourses
+        ): TodayCourse? {
+            if (data.courses.isEmpty() || data.nextIndex < 0) return null
+            val stored = storedSelection(context, appWidgetId)
+            if (!stored.isNullOrBlank()) {
+                data.courses.firstOrNull { it.key == stored }?.let { return it }
+            }
+            return data.courses.getOrNull(data.nextIndex)
+        }
 
-            val themePrefs = context.getSharedPreferences("appearance_settings", Context.MODE_PRIVATE)
-            val themeMode = themePrefs.getString("theme_mode", "system")
-            val nightModeFlags =
-                context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-            val systemDark = nightModeFlags == Configuration.UI_MODE_NIGHT_YES
-            val isDarkMode = when (themeMode) {
-                "light" -> false
-                "dark" -> true
-                else -> systemDark
+        private fun buildCompact(
+            context: Context,
+            size: WidgetSize,
+            appWidgetId: Int
+        ): RemoteViews {
+            val views = RemoteViews(context.packageName, R.layout.widget_schedule_day_compact)
+            views.setInt(R.id.widget_root, "setBackgroundResource", WidgetAppearance.backgroundRes(context))
+
+            val todayData = TodayCourseSource.load(context, appWidgetId)
+            val selected = resolveSelectedCourse(context, appWidgetId, todayData)
+            val twoLines = size.heightDp < 54
+            val fontScale = WidgetTextSizes.scale(context)
+            // 小部件被桌面缩放后高度差异很大，字号跟着高度走才不会溢出
+            val heightFactor = (size.heightDp / 64f).coerceIn(0.82f, 1.12f)
+
+            val placeholder = if (selected == null) {
+                if (todayData.courses.isEmpty()) "今天没有课" else "今天的课已上完"
+            } else {
+                null
             }
 
-            UserManager.getInstance().init(context)
-            val textColor = if (isDarkMode) android.graphics.Color.WHITE else 0xFF1C1C1E.toInt()
+            val nameText = selected?.name ?: placeholder.orEmpty()
+            val timeText = when {
+                selected == null -> ""
+                twoLines -> mergeTimeAndLocation(selected.timeText, selected.location)
+                else -> selected.timeText
+            }
+            val locationText = if (selected == null || twoLines) "" else selected.location
+
+            views.setTextViewText(R.id.day_name_0, nameText)
+            views.setTextViewText(R.id.day_time_0, timeText)
+            views.setTextViewText(R.id.day_loc_0, locationText)
+            views.setViewVisibility(R.id.day_time_0, if (timeText.isBlank()) View.GONE else View.VISIBLE)
+            views.setViewVisibility(R.id.day_loc_0, if (locationText.isBlank()) View.GONE else View.VISIBLE)
+            views.setFloat(R.id.day_name_0, "setTextSize", WidgetTextSizes.DAY_COMPACT_NAME_SP * fontScale * heightFactor)
+            views.setFloat(R.id.day_time_0, "setTextSize", WidgetTextSizes.DAY_COMPACT_DETAIL_SP * fontScale * heightFactor)
+            views.setFloat(R.id.day_loc_0, "setTextSize", WidgetTextSizes.DAY_COMPACT_DETAIL_SP * fontScale * heightFactor)
+
+            if (selected == null) {
+                views.setInt(R.id.day_card_0, "setBackgroundColor", Color.TRANSPARENT)
+                views.setTextColor(R.id.day_name_0, WidgetAppearance.secondaryTextColor(context))
+            } else {
+                views.setInt(R.id.day_card_0, "setBackgroundResource", WidgetAppearance.courseCardRes(selected.name))
+                views.setTextColor(R.id.day_name_0, Color.WHITE)
+                views.setTextColor(R.id.day_time_0, 0xE6FFFFFF.toInt())
+                views.setTextColor(R.id.day_loc_0, 0xD9FFFFFF.toInt())
+            }
+            views.setOnClickPendingIntent(
+                R.id.day_card_0,
+                openAppPendingIntent(context, appWidgetId)
+            )
+
+            // 当天只有一节课（或没有课）时不显示翻页箭头，避免点了没反应
+            val browsable = todayData.courses.size > 1 && selected != null
+            views.setViewVisibility(R.id.day_prev_course, if (browsable) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.day_next_course, if (browsable) View.VISIBLE else View.GONE)
+            if (browsable) {
+                val isDark = WidgetAppearance.isDarkMode(context)
+                views.setImageViewResource(
+                    R.id.day_prev_course,
+                    if (isDark) R.drawable.ic_widget_chevron_left_light else R.drawable.ic_widget_chevron_left_dark
+                )
+                views.setImageViewResource(
+                    R.id.day_next_course,
+                    if (isDark) R.drawable.ic_widget_chevron_right_light else R.drawable.ic_widget_chevron_right_dark
+                )
+                views.setOnClickPendingIntent(R.id.day_prev_course, pagingPendingIntent(context, appWidgetId, ACTION_DAY_PREV, 1))
+                views.setOnClickPendingIntent(R.id.day_next_course, pagingPendingIntent(context, appWidgetId, ACTION_DAY_NEXT, 2))
+            }
+            return views
+        }
+
+        private fun buildFull(context: Context, appWidgetId: Int): RemoteViews {
+            val hideTitle = WidgetConfigStore.hideTitle(context, appWidgetId)
+            val layoutId =
+                if (hideTitle) R.layout.widget_schedule_day_notitle else R.layout.widget_schedule_day
+            val views = RemoteViews(context.packageName, layoutId)
+            val todayData = TodayCourseSource.load(context, appWidgetId)
+            views.setInt(R.id.widget_root, "setBackgroundResource", WidgetAppearance.backgroundRes(context))
+
             if (!hideTitle) {
                 views.setTextViewText(
                     R.id.widget_title,
-                    WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = true)
+                    WidgetConfigStore.resolveTitle(context, appWidgetId, WidgetKind.DAY)
                 )
-                views.setTextColor(R.id.widget_title, textColor)
+                views.setTextColor(R.id.widget_title, WidgetAppearance.textColor(context))
             }
+            views.setTextViewText(R.id.widget_day_info, todayData.dayInfo)
+            views.setTextColor(R.id.widget_day_info, WidgetAppearance.secondaryTextColor(context))
 
-            views.setInt(
-                R.id.widget_root,
-                "setBackgroundResource",
-                if (isDarkMode) R.drawable.widget_bg_dark else R.drawable.widget_bg_light
-            )
-            views.setTextColor(R.id.widget_day_info, textColor)
-            views.setImageViewResource(
-                R.id.widget_prev_day,
-                if (isDarkMode) R.drawable.ic_widget_chevron_left_light else R.drawable.ic_widget_chevron_left_dark
-            )
-            views.setImageViewResource(
-                R.id.widget_next_day,
-                if (isDarkMode) R.drawable.ic_widget_chevron_right_light else R.drawable.ic_widget_chevron_right_dark
-            )
-            views.setTextColor(R.id.widget_back_today, textColor)
-
-            // 所选日期：今天 + offset（每实例独立）
-            val offset = getDayOffset(context, appWidgetId)
-            val (dayInfo, backToday) = resolveDayLabels(context, appWidgetId, offset)
-            views.setTextViewText(R.id.widget_day_info, dayInfo)
-            views.setTextViewText(R.id.widget_back_today, backToday)
-
-            // 导航按钮：按 appWidgetId 隔离 PendingIntent，避免多实例与 HyperOS 桌面合并/重放点击
-            fun pending(action: String, slot: Int): PendingIntent {
-                val intent = Intent(context, com.tyust.course.widget.ScheduleDayWidget::class.java)
-                    .setAction(action)
-                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                    .setData(Uri.parse("buctwidget://day/$appWidgetId/$action"))
-                val requestCode = (appWidgetId.coerceAtLeast(0) * 10) + slot
-                return PendingIntent.getBroadcast(
-                    context,
-                    requestCode,
-                    intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-            }
-            views.setOnClickPendingIntent(R.id.widget_prev_day, pending(ACTION_DAY_PREV, 1))
-            views.setOnClickPendingIntent(R.id.widget_next_day, pending(ACTION_DAY_NEXT, 2))
-            views.setOnClickPendingIntent(R.id.widget_back_today, pending(ACTION_DAY_TODAY, 3))
-
-            // 绑定可上下滑动的列表
             val serviceIntent = Intent(context, ScheduleDayWidgetService::class.java).apply {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
             }
             views.setRemoteAdapter(R.id.widget_day_list, serviceIntent)
-
-            val clickIntent = Intent(context, com.buct.course.MainActivity::class.java)
-            val clickPendingIntent = PendingIntent.getActivity(
-                context,
-                0,
-                clickIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            views.setPendingIntentTemplate(
+                R.id.widget_day_list,
+                openAppPendingIntent(context, appWidgetId)
             )
-            views.setPendingIntentTemplate(R.id.widget_day_list, clickPendingIntent)
 
-            val configIntent = Intent(context, com.buct.course.ui.widget.WidgetConfigActivity::class.java).apply {
-                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                putExtra(com.buct.course.ui.widget.WidgetConfigActivity.EXTRA_IS_DAY, true)
-                data = Uri.parse("buctwidget://config/day/$appWidgetId")
-            }
-            val configPendingIntent = PendingIntent.getActivity(
-                context,
-                appWidgetId + 2000,
-                configIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
+            val configPendingIntent = configPendingIntent(context, appWidgetId)
             if (!hideTitle) {
                 views.setOnClickPendingIntent(R.id.widget_title, configPendingIntent)
             }
@@ -203,18 +217,73 @@ open class ScheduleDayWidget : AppWidgetProvider() {
             return views
         }
 
-        fun updateAppWidget(
+        /** 2×1 翻页：按轮播顺序前进/后退一格，把结果记下来再整卡重建。 */
+        private fun pageSelection(context: Context, appWidgetId: Int, forward: Boolean) {
+            val data = TodayCourseSource.load(context, appWidgetId)
+            if (data.courses.isEmpty() || data.nextIndex < 0) return
+            val order = TodayCourseSource.carouselOrder(data.courses, data.nextIndex)
+            if (order.size <= 1) return
+            val current = resolveSelectedCourse(context, appWidgetId, data) ?: return
+            val index = order.indexOfFirst { it.key == current.key }.coerceAtLeast(0)
+            val target = if (forward) (index + 1) % order.size else (index - 1 + order.size) % order.size
+            storeSelection(context, appWidgetId, order[target].key)
+        }
+
+        private fun mergeTimeAndLocation(time: String, location: String): String = when {
+            location.isBlank() -> time
+            time.isBlank() -> location
+            else -> "$time · $location"
+        }
+
+        private fun openAppPendingIntent(context: Context, appWidgetId: Int): PendingIntent {
+            val intent = Intent(context, com.buct.course.MainActivity::class.java)
+                .setData(Uri.parse("buctwidget://today/open/$appWidgetId"))
+            return PendingIntent.getActivity(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        private fun configPendingIntent(context: Context, appWidgetId: Int): PendingIntent {
+            val intent = Intent(context, com.buct.course.ui.widget.WidgetConfigActivity::class.java).apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                putExtra(
+                    com.buct.course.ui.widget.WidgetConfigActivity.EXTRA_WIDGET_KIND,
+                    WidgetKind.DAY.name
+                )
+                data = Uri.parse("buctwidget://config/day/$appWidgetId")
+            }
+            return PendingIntent.getActivity(
+                context,
+                appWidgetId + 2000,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        private fun pagingPendingIntent(
             context: Context,
-            appWidgetManager: AppWidgetManager,
-            appWidgetId: Int
-        ) {
-            val views = buildViews(context, appWidgetManager, appWidgetId)
-            appWidgetManager.updateAppWidget(appWidgetId, views)
+            appWidgetId: Int,
+            action: String,
+            slot: Int
+        ): PendingIntent {
+            val intent = Intent(context, com.tyust.course.widget.ScheduleDayWidget::class.java)
+                .setAction(action)
+                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                .setData(Uri.parse("buctwidget://today/$appWidgetId/$action"))
+            return PendingIntent.getBroadcast(
+                context,
+                appWidgetId * 10 + slot,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
         }
 
         private fun refreshAlarmPendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, com.tyust.course.widget.ScheduleDayWidget::class.java)
-                .setAction(ACTION_REFRESH_WIDGET)
+                .setAction(WidgetProviders.ACTION_REFRESH)
             return PendingIntent.getBroadcast(
                 context,
                 ALARM_REQUEST_CODE,
@@ -231,8 +300,11 @@ open class ScheduleDayWidget : AppWidgetProvider() {
             }
         }
 
-        /** 预约今日最近一节待结束课程的下课时间自动刷新小组件（若今日已无后续课程则预约次日 00:01）。 */
-        fun scheduleNextClassEndRefresh(context: Context) {
+        /**
+         * 预约下一次需要换内容的时间点：当天最近一次「上课开始」或「下课」，
+         * 因为「下一节课」会在这两个时刻变化；当天没有课了则预约次日 00:01 换日期。
+         */
+        fun scheduleNextRefresh(context: Context) {
             val appContext = context.applicationContext
             val manager = runCatching { AppWidgetManager.getInstance(appContext) }.getOrNull() ?: return
             val dayIds = WidgetProviders.dayIds(appContext, manager)
@@ -245,57 +317,76 @@ open class ScheduleDayWidget : AppWidgetProvider() {
             val nowCal = Calendar.getInstance()
             val nowMillis = nowCal.timeInMillis
             val nowMinutes = nowCal.get(Calendar.HOUR_OF_DAY) * 60 + nowCal.get(Calendar.MINUTE)
-            val todayDay = ((nowCal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
-            val settingsManager = ScheduleSettingsManager.getInstance().apply { init(appContext) }
-            val periodTimes = settingsManager.getPeriodTimes()
-            val defaultPeriodTimes = settingsManager.getDefaultPeriodTimes()
 
-            var earliestEndMin: Int? = null
+            var nextBoundary: Int? = null
             for (appWidgetId in dayIds) {
-                val json = WidgetScheduleSource.loadOwnScheduleJson(appContext, appWidgetId)
+                val data = runCatching { TodayCourseSource.load(appContext, appWidgetId) }.getOrNull()
                     ?: continue
-                val courses = runCatching { ScheduleJson.parse(json) }.getOrNull().orEmpty()
-                if (courses.isEmpty()) continue
-                val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(appContext, appWidgetId)
-                val week = WidgetScheduleSource.weekForDate(startMillis, nowCal)
-                val merged = resolveMergedCoursesForDay(courses, todayDay, week)
-                for (c in merged) {
-                    val endMin = resolvePeriodTime(c.endPeriod, periodTimes, defaultPeriodTimes)
-                        ?.endTime
-                        ?.let(::parseClockMinutes)
-                        ?: continue
-                    if (endMin > nowMinutes && (earliestEndMin == null || endMin < earliestEndMin)) {
-                        earliestEndMin = endMin
+                for (course in data.courses) {
+                    for (boundary in listOfNotNull(course.startMinutes, course.endMinutes)) {
+                        val current = nextBoundary
+                        if (boundary > nowMinutes && (current == null || boundary < current)) {
+                            nextBoundary = boundary
+                        }
                     }
                 }
             }
 
-            val nextEndMin = earliestEndMin
             val triggerCal = (nowCal.clone() as Calendar).apply {
-                if (nextEndMin != null) {
-                    set(Calendar.HOUR_OF_DAY, nextEndMin / 60)
-                    set(Calendar.MINUTE, nextEndMin % 60)
-                    set(Calendar.SECOND, 2)
-                    set(Calendar.MILLISECOND, 0)
+                val boundary = nextBoundary
+                if (boundary != null) {
+                    set(Calendar.HOUR_OF_DAY, boundary / 60)
+                    set(Calendar.MINUTE, boundary % 60)
                 } else {
                     add(Calendar.DAY_OF_YEAR, 1)
                     set(Calendar.HOUR_OF_DAY, 0)
                     set(Calendar.MINUTE, 1)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
                 }
+                set(Calendar.SECOND, 2)
+                set(Calendar.MILLISECOND, 0)
             }
             val triggerAt = maxOf(triggerCal.timeInMillis, nowMillis + 5_000L)
-            val pi = refreshAlarmPendingIntent(appContext)
+            val pendingIntent = refreshAlarmPendingIntent(appContext)
             runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pi)
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pendingIntent)
                 } else {
-                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pi)
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pendingIntent)
                 }
             }.onFailure {
-                runCatching { alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pi) }
+                runCatching { alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, triggerAt, pendingIntent) }
             }
+        }
+
+        /**
+         * 4×2 列表每行怎么排：按桌面实际高度分档，放不下就交给 ListView 上下滑动。
+         *
+         * 两点必须一起算：
+         * 1. 扣掉 ListView 分隔线，否则最后一行会被切掉几个 dp；
+         * 2. 用户可以把小组件字号放大到 150%，行高要跟着长 —— 宁可一屏少显示几行也不能裁字。
+         */
+        internal fun fullRowSpec(
+            size: WidgetSize,
+            hideTitle: Boolean,
+            fontScale: Float
+        ): DayRowSpec {
+            val headerDp = if (hideTitle) (FULL_HEADER_DP - 18) else FULL_HEADER_DP
+            val listHeightDp = (size.heightDp - headerDp).coerceAtLeast(72)
+            val targetRows = when {
+                listHeightDp >= 300 -> 6
+                listHeightDp >= 220 -> 5
+                listHeightDp >= 160 -> 4
+                listHeightDp >= 100 -> 3
+                else -> 2
+            }
+            val slotHeightDp = (listHeightDp / targetRows) - ROW_DIVIDER_DP
+            val threeLines = slotHeightDp >= (THREE_LINE_THRESHOLD_DP * fontScale).toInt()
+            val contentHeightDp =
+                ((if (threeLines) THREE_LINE_HEIGHT_DP else TWO_LINE_HEIGHT_DP) * fontScale).toInt()
+            return DayRowSpec(
+                heightDp = maxOf(slotHeightDp, contentHeightDp).coerceIn(38, 170),
+                threeLines = threeLines
+            )
         }
     }
 
@@ -309,7 +400,7 @@ open class ScheduleDayWidget : AppWidgetProvider() {
         }
         if (appWidgetIds.isNotEmpty()) {
             appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.widget_day_list)
-            scheduleNextClassEndRefresh(context)
+            scheduleNextRefresh(context)
         } else {
             cancelScheduledRefresh(context)
         }
@@ -322,66 +413,32 @@ open class ScheduleDayWidget : AppWidgetProvider() {
         newOptions: Bundle
     ) {
         super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
-        resolveAndSaveHeightDp(context, newOptions, appWidgetId)
+        // 桌面拖动改变尺寸：重新判排版模式、记下新尺寸，列表数据也要重算行高
         updateAppWidget(context, appWidgetManager, appWidgetId)
         appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_day_list)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
+        val appWidgetManager = AppWidgetManager.getInstance(context)
         when (intent.action) {
-            ACTION_DAY_PREV, ACTION_DAY_NEXT, ACTION_DAY_TODAY -> {
-                val appWidgetManager = AppWidgetManager.getInstance(context)
+            ACTION_DAY_PREV, ACTION_DAY_NEXT -> {
                 val targetId = intent.getIntExtra(
                     AppWidgetManager.EXTRA_APPWIDGET_ID,
                     AppWidgetManager.INVALID_APPWIDGET_ID
                 )
-                val allIds = WidgetProviders.dayIds(context, appWidgetManager)
-                val ids = if (targetId != AppWidgetManager.INVALID_APPWIDGET_ID) intArrayOf(targetId) else allIds
-                if (ids.isEmpty()) return
-
-                val next = synchronized(OFFSET_LOCK) {
-                    val primaryId = ids.first()
-                    val current = getDayOffset(context, primaryId)
-                    val computed = when (intent.action) {
-                        ACTION_DAY_PREV -> current - 1
-                        ACTION_DAY_NEXT -> current + 1
-                        else -> 0
-                    }
-                    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    prefs.edit().apply {
-                        ids.forEach { putInt("${KEY_OFFSET}_$it", computed) }
-                        if (targetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
-                            putInt(KEY_OFFSET, computed)
-                        }
-                    }.commit()
-                    computed
+                val ids = if (targetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+                    intArrayOf(targetId)
+                } else {
+                    WidgetProviders.dayIds(context, appWidgetManager)
                 }
-
-                // 增量局部刷新日期栏，避免整卡重建引发 HyperOS 桌面 RemoteViews/PendingIntent 错乱回跳
-                for (id in ids) {
-                    val hideTitle = WidgetConfigStore.hideTitle(context, id)
-                    val layoutId = if (hideTitle) R.layout.widget_schedule_day_notitle else R.layout.widget_schedule_day
-                    val partial = RemoteViews(context.packageName, layoutId)
-                    val (dayInfo, backToday) = resolveDayLabels(context, id, next)
-                    partial.setTextViewText(R.id.widget_day_info, dayInfo)
-                    partial.setTextViewText(R.id.widget_back_today, backToday)
-                    WidgetTextSizes.apply(
-                        partial,
-                        if (hideTitle) WidgetTextSizes.DAY_ROOT_NO_TITLE else WidgetTextSizes.DAY_ROOT,
-                        WidgetTextSizes.scale(context)
-                    )
-                    appWidgetManager.partiallyUpdateAppWidget(intArrayOf(id), partial)
-                }
-                appWidgetManager.notifyAppWidgetViewDataChanged(ids, R.id.widget_day_list)
-                if (next == 0) {
-                    scheduleNextClassEndRefresh(context)
+                for (appWidgetId in ids) {
+                    pageSelection(context, appWidgetId, intent.action == ACTION_DAY_NEXT)
+                    updateAppWidget(context, appWidgetManager, appWidgetId)
                 }
             }
-            ACTION_REFRESH_WIDGET -> {
-                val appWidgetManager = AppWidgetManager.getInstance(context)
-                val ids = WidgetProviders.dayIds(context, appWidgetManager)
-                onUpdate(context, appWidgetManager, ids)
+            WidgetProviders.ACTION_REFRESH -> {
+                onUpdate(context, appWidgetManager, WidgetProviders.dayIds(context, appWidgetManager))
             }
         }
     }
@@ -390,9 +447,9 @@ open class ScheduleDayWidget : AppWidgetProvider() {
         super.onDeleted(context, appWidgetIds)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val editor = prefs.edit()
-        for (id in appWidgetIds) {
-            WidgetConfigStore.clear(context, id)
-            editor.remove("${KEY_OFFSET}_$id")
+        for (appWidgetId in appWidgetIds) {
+            WidgetConfigStore.clear(context, appWidgetId)
+            editor.remove("${KEY_SELECTED}_$appWidgetId")
         }
         editor.commit()
     }

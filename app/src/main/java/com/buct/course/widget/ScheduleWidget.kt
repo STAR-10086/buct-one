@@ -74,7 +74,7 @@ open class ScheduleWidget : AppWidgetProvider() {
                 appWidgetManager.partiallyUpdateAppWidget(intArrayOf(id), views)
             }
             appWidgetManager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
-        } else if (intent.action == "com.buct.course.widget.REFRESH_WIDGET") {
+        } else if (intent.action == ACTION_REFRESH) {
             // 主题变化，刷新所有小组件
             val appWidgetManager = AppWidgetManager.getInstance(context)
             val ids = WidgetProviders.weekIds(context, appWidgetManager)
@@ -99,7 +99,7 @@ open class ScheduleWidget : AppWidgetProvider() {
     companion object {
         const val ACTION_PREV_WEEK = "com.buct.course.widget.PREV_WEEK"
         const val ACTION_NEXT_WEEK = "com.buct.course.widget.NEXT_WEEK"
-        const val ACTION_REFRESH = "com.buct.course.widget.REFRESH_WIDGET"
+        const val ACTION_REFRESH = WidgetProviders.ACTION_REFRESH
         private val WEEK_LOCK = Any()
 
         internal fun readWeek(
@@ -180,36 +180,18 @@ open class ScheduleWidget : AppWidgetProvider() {
             val layoutId = if (hideTitle) R.layout.widget_schedule_notitle else R.layout.widget_schedule
             val views = RemoteViews(context.packageName, layoutId)
 
-            // 读取 APP 里的主题设置
-            val themePrefs = context.getSharedPreferences("appearance_settings", Context.MODE_PRIVATE)
-            val themeMode = themePrefs.getString("theme_mode", "system")
-
-            // 读取系统深色模式
-            val nightModeFlags = context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
-            val systemDark = nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES
-
-            // 决定是否是深色模式
-            val isDarkMode = when (themeMode) {
-                "light" -> false
-                "dark" -> true
-                else -> systemDark // system 模式
-            }
-
-            val textColor = if (isDarkMode) android.graphics.Color.WHITE else 0xFF1C1C1E.toInt()
+            val isDarkMode = WidgetAppearance.isDarkMode(context)
+            val textColor = WidgetAppearance.textColor(context)
             if (!hideTitle) {
                 views.setTextViewText(
                     R.id.widget_title,
-                    WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = false)
+                    WidgetConfigStore.resolveTitle(context, appWidgetId, WidgetKind.WEEK)
                 )
                 views.setTextColor(R.id.widget_title, textColor)
             }
 
             // 根据模式设置文字颜色、圆角背景和矢量箭头
-            views.setInt(
-                R.id.widget_root,
-                "setBackgroundResource",
-                if (isDarkMode) R.drawable.widget_bg_dark else R.drawable.widget_bg_light
-            )
+            views.setInt(R.id.widget_root, "setBackgroundResource", WidgetAppearance.backgroundRes(context))
             views.setTextColor(R.id.widget_week_info, textColor)
             views.setImageViewResource(
                 R.id.widget_prev_week,
