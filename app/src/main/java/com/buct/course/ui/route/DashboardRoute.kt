@@ -65,6 +65,7 @@ import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Science
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -110,6 +111,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.buct.course.CampusNetActivity
 import com.buct.course.EcardActivity
 import com.buct.course.ElectricityActivity
 import com.buct.course.MailActivity
@@ -149,13 +151,17 @@ import com.buct.one.data.model.SjcxSnapshot
 import com.buct.one.data.model.TheolHomeworkItem
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.model.TheolTestItem
+import com.buct.one.data.model.CampusNetSnapshot
 import com.buct.one.data.model.ElectricitySnapshot
 import com.buct.one.data.model.TyglSnapshot
+import com.buct.one.data.model.displayCampusNetTraffic
 import com.buct.one.data.model.electricityTargetBaseRoomName
 import com.buct.one.data.model.electricityTargetShortLabel
+import com.buct.one.data.model.formatCampusNetYuan
 import com.buct.one.data.model.formatElectricityPrimaryValue
 import com.buct.one.data.model.formatFenToYuan
 import com.buct.one.data.model.isLowElectricityBalance
+import com.buct.one.data.sync.CampusNetSyncService
 import com.buct.one.data.sync.CardSyncService
 import com.buct.one.data.sync.ElectricitySyncService
 import com.buct.one.data.sync.MailSyncService
@@ -307,6 +313,15 @@ private enum class DashboardModuleId(
         icon = Icons.Outlined.Bolt,
         defaultSize = CardSize.MEDIUM,
         defaultCol = 0,
+        defaultRow = 12
+    ),
+    CAMPUS_NET(
+        id = "campus_net",
+        title = "校园网 · 网费与账单",
+        shortTitle = "校园网费",
+        icon = Icons.Outlined.Wifi,
+        defaultSize = CardSize.MEDIUM,
+        defaultCol = 2,
         defaultRow = 12
     );
 
@@ -597,6 +612,9 @@ fun DashboardRoute(
     val electricitySlice by electricityService.electricityState.collectAsState()
     val electricitySyncing by electricityService.syncing.collectAsState()
     val electricityConsentAccepted by electricityService.consentAccepted.collectAsState()
+    val campusNetService = remember(context) { CampusNetSyncService.getInstance(context) }
+    val campusNetSlice by campusNetService.campusNetState.collectAsState()
+    val campusNetSyncing by campusNetService.syncing.collectAsState()
 
     var showEmptyClassroomDialog by remember { mutableStateOf(false) }
     var emptyClassroomInitialCampus by remember { mutableIntStateOf(2) }
@@ -724,7 +742,7 @@ fun DashboardRoute(
     }
     val bottomInset = LocalAppOverlayBottomInset.current
     val scrollState = rememberScrollState()
-    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing || mailSyncing || portalNewsSyncing || portalLibrarySyncing || electricitySyncing
+    val anySyncing = syncing || cardSyncing || sjcxSyncing || scsSyncing || tyglSyncing || mailSyncing || portalNewsSyncing || portalLibrarySyncing || electricitySyncing || campusNetSyncing
 
     val latestDraftState by rememberUpdatedState(draftConfigs)
 
@@ -815,6 +833,7 @@ fun DashboardRoute(
                             if (electricityService.canAutoSync()) {
                                 scope.launch { electricityService.refresh() }
                             }
+                            scope.launch { campusNetService.refresh() }
                         }
                     )
                 }
@@ -1132,6 +1151,7 @@ fun DashboardRoute(
                                     portalLibrarySlice = portalLibrarySlice,
                                     electricitySlice = electricitySlice,
                                     electricityConsentAccepted = electricityConsentAccepted,
+                                    campusNetSlice = campusNetSlice,
                                     classroomSlot = classroomSlot,
                                     classroomDayLabel = classroomDayLabel,
                                     onNavigateTab = ::navigateToPageOrWarn,
@@ -1652,6 +1672,7 @@ private fun RenderModuleCard(
     portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
     electricitySlice: DomainSlice<ElectricitySnapshot>,
     electricityConsentAccepted: Boolean,
+    campusNetSlice: DomainSlice<CampusNetSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1678,6 +1699,7 @@ private fun RenderModuleCard(
             portalLibrarySlice = portalLibrarySlice,
             electricitySlice = electricitySlice,
             electricityConsentAccepted = electricityConsentAccepted,
+            campusNetSlice = campusNetSlice,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1704,6 +1726,7 @@ private fun RenderModuleCard(
             portalLibrarySlice = portalLibrarySlice,
             electricitySlice = electricitySlice,
             electricityConsentAccepted = electricityConsentAccepted,
+            campusNetSlice = campusNetSlice,
             classroomSlot = classroomSlot,
             classroomDayLabel = classroomDayLabel,
             onNavigateTab = onNavigateTab,
@@ -1728,6 +1751,7 @@ private fun RenderModuleCard(
                 portalLibrarySlice = portalLibrarySlice,
                 electricitySlice = electricitySlice,
                 electricityConsentAccepted = electricityConsentAccepted,
+                campusNetSlice = campusNetSlice,
                 classroomSlot = classroomSlot,
                 classroomDayLabel = classroomDayLabel,
                 onNavigateTab = onNavigateTab,
@@ -1770,6 +1794,7 @@ private fun buildCompactSummary(
     portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
     electricitySlice: DomainSlice<ElectricitySnapshot>,
     electricityConsentAccepted: Boolean,
+    campusNetSlice: DomainSlice<CampusNetSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -1976,6 +2001,25 @@ private fun buildCompactSummary(
             ElectricityActivity.launch(context)
         }
     }
+
+    DashboardModuleId.CAMPUS_NET -> {
+        val snap = campusNetSlice.data
+        val valText = when {
+            snap == null -> "待查询"
+            else -> "消费 ¥${formatCampusNetYuan(snap.userCharge)}"
+        }
+        val miniText = when {
+            snap == null -> "网费"
+            else -> "¥${formatCampusNetYuan(snap.userCharge)}"
+        }
+        val sub = when {
+            snap == null -> "校园网网费与流量"
+            else -> "余 ¥${formatCampusNetYuan(snap.userBalance)} · 钱包 ¥${formatCampusNetYuan(snap.walletBalance)}"
+        }
+        ModuleCompactSummary("校园网费", valText, sub, miniText) {
+            CampusNetActivity.launch(context)
+        }
+    }
 }
 
 private data class LibraryUrgentInfo(
@@ -2086,6 +2130,7 @@ private fun RenderMediumModuleCard(
     portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
     electricitySlice: DomainSlice<ElectricitySnapshot>,
     electricityConsentAccepted: Boolean,
+    campusNetSlice: DomainSlice<CampusNetSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -2740,6 +2785,59 @@ private fun RenderMediumModuleCard(
                 }
             }
         }
+
+        DashboardModuleId.CAMPUS_NET -> {
+            val snap = campusNetSlice.data
+            MediumGlassCardFrame(
+                title = "校园网费",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { CampusNetActivity.launch(context) }
+            ) {
+                if (snap == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "点击查询",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "消费 · 余额 · 钱包 · 账单",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                    MediumBottomActionPill(text = "网费与流量明细 ›")
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            text = displayCampusNetTraffic(snap),
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "消费 ¥${formatCampusNetYuan(snap.userCharge)} · 余 ¥${formatCampusNetYuan(snap.userBalance)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    MediumBottomActionPill(
+                        text = if (snap.payRecords.isNotEmpty()) {
+                            "钱包 ¥${formatCampusNetYuan(snap.walletBalance)} · 缴费 ${snap.payRecords.size}笔 ›"
+                        } else {
+                            "钱包 ¥${formatCampusNetYuan(snap.walletBalance)} · 账单 ›"
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2837,6 +2935,7 @@ private fun RenderLargeModuleCard(
     portalLibrarySlice: DomainSlice<PortalLibrarySnapshot>,
     electricitySlice: DomainSlice<ElectricitySnapshot>,
     electricityConsentAccepted: Boolean,
+    campusNetSlice: DomainSlice<CampusNetSnapshot>,
     classroomSlot: ClassroomSlot,
     classroomDayLabel: String,
     onNavigateTab: (StartupPage) -> Unit,
@@ -3846,6 +3945,99 @@ private fun RenderLargeModuleCard(
                         ) {
                             ElectricityActivity.launch(context)
                         }
+                    }
+                }
+            }
+        }
+
+        DashboardModuleId.CAMPUS_NET -> {
+            val snap = campusNetSlice.data
+            val netBadge = when {
+                !campusNetSlice.lastError.isNullOrBlank() -> "需校内网"
+                snap == null -> "未查询"
+                snap.accountStatus.isNotBlank() -> snap.accountStatus
+                snap.isOnline -> "已在线"
+                else -> "未在线"
+            }
+            val netBadgeColor = when {
+                !campusNetSlice.lastError.isNullOrBlank() -> Color(0xFFFF9500)
+                snap?.isOnline == true || snap?.accountStatus?.contains("正常") == true -> Color(0xFF34C759)
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            DashboardGlassCard(
+                title = "校园网 · 网费与账单",
+                badge = netBadge,
+                badgeColor = netBadgeColor,
+                heightDp = slotHeightDp,
+                onClick = if (isEditing) null else ({ CampusNetActivity.launch(context) })
+            ) {
+                if (snap == null) {
+                    Text(
+                        text = "免密直连校内网网费网关（tree.buct.edu.cn），实时查看本月消费、产品余额、电子钱包、已用流量及缴费/月结算账单。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    QuickActionTile(
+                        label = "查询校园网网费",
+                        icon = Icons.Outlined.Wifi,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isEditing
+                    ) {
+                        CampusNetActivity.launch(context)
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "消费 ¥${formatCampusNetYuan(snap.userCharge)}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${snap.productsName.ifBlank { "校园网" }} · 流量 ${displayCampusNetTraffic(snap)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "余 ¥${formatCampusNetYuan(snap.userBalance)}",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "钱包 ¥${formatCampusNetYuan(snap.walletBalance)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    val recentBill = snap.payRecords.firstOrNull()?.let { "最近缴费：¥${it.amountText} (${it.payTime.take(10)})" }
+                        ?: snap.checkoutRecords.firstOrNull()?.let { "上月结算：¥${it.feeText} · ${it.trafficText}" }
+                    if (!recentBill.isNullOrBlank()) {
+                        Text(
+                            text = recentBill,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    QuickActionTile(
+                        label = "查看网费与账单明细",
+                        icon = Icons.Outlined.Wifi,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isEditing
+                    ) {
+                        CampusNetActivity.launch(context)
                     }
                 }
             }
