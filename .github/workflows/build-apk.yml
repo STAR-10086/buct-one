@@ -657,11 +657,24 @@ jobs:
             mkdir -p "$HOME/.ssh"
             chmod 700 "$HOME/.ssh"
             KEY_FILE="$HOME/.ssh/web_deploy_key"
-            printf '%s\n' "$WEB_REPO_DEPLOY_KEY" | tr -d '\r' > "$KEY_FILE"
+            python3 - "$KEY_FILE" << 'PY'
+          import base64, os, sys
+          dst = sys.argv[1]
+          raw = os.environ.get("WEB_REPO_DEPLOY_KEY", "").replace("\r\n", "\n").replace("\r", "\n").strip()
+          if "BEGIN " not in raw:
+              try:
+                  decoded = base64.b64decode(raw, validate=True).decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").strip()
+                  if "BEGIN " in decoded:
+                      raw = decoded
+              except Exception:
+                  pass
+          with open(dst, "w", encoding="utf-8", newline="\n") as f:
+              f.write(raw + "\n")
+          PY
             chmod 600 "$KEY_FILE"
             ssh-keygen -lf "$KEY_FILE" || echo "::warning::Deploy key unreadable"
-            ssh-keyscan -H github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
-            export GIT_SSH_COMMAND="ssh -i '$KEY_FILE' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+            ssh-keyscan -t ed25519,rsa,ecdsa -H github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+            export GIT_SSH_COMMAND="ssh -i '$KEY_FILE' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 
             if git clone --depth 1 git@github.com:STAR-10086/buct-one-web.git /tmp/buct-one-web; then
               python3 - "r2-dist/latest.json" "/tmp/buct-one-web/src/data/release-snapshot.json" << 'PY'
