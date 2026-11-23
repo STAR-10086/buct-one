@@ -53,6 +53,8 @@ import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.SystemPrimaryButton
 import com.buct.course.ui.system.SystemSecondaryButton
 import com.buct.course.ui.theme.CourseSelectorTheme
+import com.buct.course.widget.BalanceWidget
+import com.buct.course.widget.ExamCountdownWidget
 import com.buct.course.widget.ScheduleDayWidget
 import com.buct.course.widget.ScheduleWidget
 import com.buct.course.widget.TodayWidget
@@ -144,6 +146,10 @@ class WidgetConfigActivity : ComponentActivity() {
             when {
                 provider.contains("TodoWidget") ||
                     WidgetProviders.todoIds(this, manager).contains(appWidgetId) -> WidgetKind.TODO
+                provider.contains("ExamCountdownWidget") ||
+                    WidgetProviders.examIds(this, manager).contains(appWidgetId) -> WidgetKind.EXAM
+                provider.contains("BalanceWidget") ||
+                    WidgetProviders.balanceIds(this, manager).contains(appWidgetId) -> WidgetKind.BALANCE
                 provider.contains("TodayWidget") ||
                     WidgetProviders.todayIds(this, manager).contains(appWidgetId) -> WidgetKind.TODAY
                 provider.contains("ScheduleDayWidget") ||
@@ -185,6 +191,12 @@ class WidgetConfigActivity : ComponentActivity() {
                     TodoWidget.updateAppWidget(ctx, manager, appWidgetId)
                     manager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_todo_list)
                 }
+                WidgetKind.EXAM -> {
+                    ExamCountdownWidget.updateAppWidget(ctx, manager, appWidgetId)
+                }
+                WidgetKind.BALANCE -> {
+                    BalanceWidget.updateAppWidget(ctx, manager, appWidgetId)
+                }
                 WidgetKind.WEEK -> {
                     ScheduleWidget.updateAppWidget(ctx, manager, appWidgetId)
                     manager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_list)
@@ -225,7 +237,7 @@ private fun WidgetConfigPage(
         mutableStateOf(WidgetConfigStore.accountKey(context, appWidgetId))
     }
     val previewTitle = title.ifBlank { effectiveDefault }
-    val isScheduleWidget = kind != WidgetKind.TODO
+    val isScheduleWidget = kind == WidgetKind.WEEK || kind == WidgetKind.DAY || kind == WidgetKind.TODAY
 
     Column(
         modifier = Modifier
@@ -334,6 +346,8 @@ private fun WidgetConfigPage(
                         WidgetKind.TODAY -> "2×1 只显示一堂课（默认下一节课），拉到 4×2 显示当天完整列表"
                         WidgetKind.DAY -> "可前后翻天：今天之外的日子也能翻着看"
                         WidgetKind.TODO -> "一行一门课，汇总北化在线的待交作业与未完成测验"
+                        WidgetKind.EXAM -> "展示最近一场待考科目的倒计时与考场"
+                        WidgetKind.BALANCE -> "左列点击进校园卡，右列点击进宿舍电费"
                         WidgetKind.WEEK -> "内容：本机账号课表"
                     }
                 ) {
@@ -473,6 +487,46 @@ private fun WidgetMiniPreview(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+            WidgetKind.EXAM -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "高等数学（上）期末",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "还有 5 天",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0A84FF)
+                    )
+                }
+                Text(
+                    text = "1月12日 09:00 · 教阶201",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            WidgetKind.BALANCE -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("校园卡", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("¥86.50", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("宿舍电费", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("42.3 度", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     }
                 }
             }

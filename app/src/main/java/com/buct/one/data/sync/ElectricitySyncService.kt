@@ -172,6 +172,7 @@ class ElectricitySyncService private constructor(
                     parserVersion = ElectricityParser.PARSER_VERSION
                 )
                 _electricityState.value = committed
+                runCatching { com.buct.course.widget.WidgetProviders.refreshBalance(appContext) }
                 val snap = committed.data
                     ?: return@withContext Result.failure(IllegalStateException("电费快照提交失败"))
                 Result.success(snap)

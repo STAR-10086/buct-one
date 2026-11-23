@@ -20,5 +20,9 @@ enum class WidgetKind(
     /** 新版今日课表·卡片：2×1 单节课可翻页，4×2 当天完整列表。 */
     TODAY(defaultTitle = "今日课表", displayName = "今日课表·卡片"),
 
-    TODO(defaultTitle = "待办事项", displayName = "待办事项")
+    TODO(defaultTitle = "待办事项", displayName = "待办事项"),
+
+    EXAM(defaultTitle = "考试倒计时", displayName = "考试倒计时"),
+
+    BALANCE(defaultTitle = "校园卡与电费", displayName = "校园卡与电费")
 }

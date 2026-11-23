@@ -12,4 +12,6 @@
     <string name="widget_description">北化课表小组件</string>
     <string name="widget_todo_description">北化在线待办汇总小组件</string>
     <string name="widget_today_description">今日课表·卡片（2×1 单节课 / 4×2 当天全部）</string>
+    <string name="widget_exam_description">近期考试倒计时小组件</string>
+    <string name="widget_balance_description">校园卡与宿舍电费余额信息卡</string>
 </resources>

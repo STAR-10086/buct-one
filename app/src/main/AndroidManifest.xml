@@ -294,6 +294,34 @@
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 
+        <!-- 考试倒计时小组件 -->
+        <receiver
+            android:name=".widget.ExamCountdownWidget"
+            android:exported="true"
+            android:label="考试倒计时小组件">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.buct.course.widget.REFRESH_WIDGET" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_exam_countdown_info" />
+        </receiver>
+
+        <!-- 校园卡与电费余额小组件 -->
+        <receiver
+            android:name=".widget.BalanceWidget"
+            android:exported="true"
+            android:label="校园卡与电费小组件">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.buct.course.widget.REFRESH_WIDGET" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_balance_info" />
+        </receiver>
+
         <!-- 小组件配置页：桌面首次添加或点击小组件标题时进入 -->
         <activity
             android:name=".ui.widget.WidgetConfigActivity"

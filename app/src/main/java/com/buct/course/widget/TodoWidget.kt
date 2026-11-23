@@ -103,6 +103,11 @@ class TodoWidget : AppWidgetProvider() {
             views.setRemoteAdapter(R.id.widget_todo_list, serviceIntent)
             val openIntent = Intent(context, com.buct.course.MainActivity::class.java)
                 .setData(Uri.parse("buctwidget://todo/open/$appWidgetId"))
+                .putExtra(
+                    com.buct.course.MainActivity.EXTRA_TARGET_TAB,
+                    com.buct.course.manager.StartupPage.Homework.name
+                )
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             views.setPendingIntentTemplate(
                 R.id.widget_todo_list,
                 PendingIntent.getActivity(

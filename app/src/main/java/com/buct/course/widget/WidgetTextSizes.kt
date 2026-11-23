@@ -80,6 +80,21 @@ object WidgetTextSizes {
     )
     /** widget_todo.xml（隐藏标题栏） */
     val TODO_ROOT_NO_TITLE: Map<Int, Float> = emptyMap()
+    /** widget_exam_countdown.xml */
+    val EXAM_ROOT: Map<Int, Float> = mapOf(
+        R.id.exam_widget_title to 12.0f,
+        R.id.exam_widget_badge to 11.0f,
+        R.id.exam_widget_name to 13.5f,
+        R.id.exam_widget_detail to 10.5f,
+    )
+    /** widget_balance.xml */
+    val BALANCE_ROOT: Map<Int, Float> = mapOf(
+        R.id.balance_widget_title to 11.5f,
+        R.id.balance_card_label to 10.0f,
+        R.id.balance_card_value to 14.0f,
+        R.id.balance_ele_label to 10.0f,
+        R.id.balance_ele_value to 14.0f,
+    )
     /** widget_schedule.xml */
     val WEEK_ROOT: Map<Int, Float> = mapOf(
         R.id.widget_title to 16.0f,

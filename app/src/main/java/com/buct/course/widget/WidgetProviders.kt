@@ -41,14 +41,24 @@ object WidgetProviders {
         ComponentName(context, TodoWidget::class.java)
     )
 
+    fun exam(context: Context): List<ComponentName> = listOf(
+        ComponentName(context, ExamCountdownWidget::class.java)
+    )
+
+    fun balance(context: Context): List<ComponentName> = listOf(
+        ComponentName(context, BalanceWidget::class.java)
+    )
+
     fun all(context: Context): List<ComponentName> =
-        week(context) + day(context) + today(context) + todo(context)
+        week(context) + day(context) + today(context) + todo(context) + exam(context) + balance(context)
 
     fun components(context: Context, kind: WidgetKind): List<ComponentName> = when (kind) {
         WidgetKind.WEEK -> week(context)
         WidgetKind.DAY -> day(context)
         WidgetKind.TODAY -> today(context)
         WidgetKind.TODO -> todo(context)
+        WidgetKind.EXAM -> exam(context)
+        WidgetKind.BALANCE -> balance(context)
     }
 
     /** 指定一组组件上已添加实例的 id。 */
@@ -84,6 +94,10 @@ object WidgetProviders {
 
     fun todoIds(context: Context, manager: AppWidgetManager): IntArray = idsFor(todo(context), manager)
 
+    fun examIds(context: Context, manager: AppWidgetManager): IntArray = idsFor(exam(context), manager)
+
+    fun balanceIds(context: Context, manager: AppWidgetManager): IntArray = idsFor(balance(context), manager)
+
     /** 通知全部小组件刷新（含旧组件名）。 */
     fun refreshAll(context: Context) {
         refreshComponents(context, all(context))
@@ -92,6 +106,14 @@ object WidgetProviders {
     /** 仅通知「待办事项」小组件刷新（北化在线同步或过滤规则变更时调用）。 */
     fun refreshTodo(context: Context) {
         refreshComponents(context, todo(context))
+    }
+
+    fun refreshExam(context: Context) {
+        refreshComponents(context, exam(context))
+    }
+
+    fun refreshBalance(context: Context) {
+        refreshComponents(context, balance(context))
     }
 
     private fun refreshComponents(context: Context, components: List<ComponentName>) {

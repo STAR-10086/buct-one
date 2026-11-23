@@ -19,8 +19,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.ViewWeek
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -83,7 +85,11 @@ internal fun listWidgetInstances(context: Context): List<WidgetInstance> {
         .map { WidgetInstance(it, WidgetKind.TODAY) }
     val todo = WidgetProviders.todoIds(context, manager)
         .map { WidgetInstance(it, WidgetKind.TODO) }
-    return (week + day + today + todo)
+    val exam = WidgetProviders.examIds(context, manager)
+        .map { WidgetInstance(it, WidgetKind.EXAM) }
+    val balance = WidgetProviders.balanceIds(context, manager)
+        .map { WidgetInstance(it, WidgetKind.BALANCE) }
+    return (week + day + today + todo + exam + balance)
         .distinctBy { it.appWidgetId }
         .sortedWith(compareBy({ it.kind.ordinal }, { it.appWidgetId }))
 }
@@ -230,6 +236,8 @@ private fun sourceLabel(
     accounts: List<AccountOption>
 ): String {
     if (instance.kind == WidgetKind.TODO) return "北化在线待办"
+    if (instance.kind == WidgetKind.EXAM) return "本地考试与教务缓存"
+    if (instance.kind == WidgetKind.BALANCE) return "校园卡与宿舍电费"
     val key = WidgetConfigStore.accountKey(context, instance.appWidgetId)
         ?: return "跟随当前账号"
     return accounts.firstOrNull { it.key == key }?.label ?: "指定账号"
@@ -240,6 +248,8 @@ private fun iconFor(kind: WidgetKind): ImageVector = when (kind) {
     WidgetKind.DAY -> Icons.Outlined.CalendarToday
     WidgetKind.TODAY -> Icons.Outlined.CalendarToday
     WidgetKind.TODO -> Icons.Outlined.CheckCircle
+    WidgetKind.EXAM -> Icons.Outlined.Event
+    WidgetKind.BALANCE -> Icons.Outlined.Bolt
 }
 
 private fun tintFor(kind: WidgetKind): Color = when (kind) {
@@ -247,4 +257,6 @@ private fun tintFor(kind: WidgetKind): Color = when (kind) {
     WidgetKind.DAY -> Color(0xFF34C759)
     WidgetKind.TODAY -> Color(0xFF0A84FF)
     WidgetKind.TODO -> Color(0xFFFF9F0A)
+    WidgetKind.EXAM -> Color(0xFFFF375F)
+    WidgetKind.BALANCE -> Color(0xFF30B0C7)
 }

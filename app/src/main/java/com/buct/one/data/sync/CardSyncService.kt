@@ -188,6 +188,7 @@ class CardSyncService private constructor(
                     nowMillis = System.currentTimeMillis()
                 )
                 _cardState.value = committed
+                runCatching { com.buct.course.widget.WidgetProviders.refreshBalance(appContext) }
                 Result.success(snapshot)
             } catch (e: EcardAuthException) {
                 val failed = store.commitFailure(

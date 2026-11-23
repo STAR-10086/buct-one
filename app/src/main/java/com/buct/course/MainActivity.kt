@@ -138,7 +138,26 @@ import com.buct.course.manager.StartupPagePreferences
 import com.buct.course.ui.system.GlassRecipe
 import com.buct.course.ui.system.glass.drawBlurred
 
+object MainTabNavigation {
+    var requestedPage by mutableStateOf<StartupPage?>(null)
+        private set
+
+    fun accept(intent: Intent?) {
+        val raw = intent?.getStringExtra(MainActivity.EXTRA_TARGET_TAB) ?: return
+        val page = StartupPage.entries.firstOrNull { it.name == raw } ?: return
+        requestedPage = page
+    }
+
+    fun consume() {
+        requestedPage = null
+    }
+}
+
 class MainActivity : FragmentActivity() {
+    companion object {
+        const val EXTRA_TARGET_TAB = "extra_target_tab"
+    }
+
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(com.buct.course.manager.AppThemeCoordinator.wrapContext(newBase))
     }
@@ -148,7 +167,10 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
 
         UserManager.getInstance().init(this)
-        if (savedInstanceState == null) com.buct.course.schedule.CourseReminderNavigation.accept(intent)
+        if (savedInstanceState == null) {
+            com.buct.course.schedule.CourseReminderNavigation.accept(intent)
+            MainTabNavigation.accept(intent)
+        }
 
         val userManager = UserManager.getInstance()
         if (BuildConfig.UI_PREVIEW) {
@@ -174,6 +196,7 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         com.buct.course.schedule.CourseReminderNavigation.accept(intent)
+        MainTabNavigation.accept(intent)
     }
 }
 
@@ -267,6 +290,14 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
             items.indexOfFirst { it.page == currentPage }.takeIf { it >= 0 } ?: 0
         }
         previousNavItems = items
+    }
+    val tabRequest = MainTabNavigation.requestedPage
+    LaunchedEffect(tabRequest, items) {
+        if (tabRequest != null) {
+            val targetIdx = items.indexOfFirst { it.page == tabRequest }
+            if (targetIdx >= 0) selectedTab = targetIdx
+            MainTabNavigation.consume()
+        }
     }
     val reminderRequest = com.buct.course.schedule.CourseReminderNavigation.requestedId
     LaunchedEffect(reminderRequest, currentAccountStorageKey) {
