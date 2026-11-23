@@ -9,10 +9,26 @@ import com.buct.course.manager.ScheduleSettingsManager
  * 小组件字号缩放。
  *
  * RemoteViews 不能改样式表，只能在构建视图时对每个 TextView 显式调
- * `setTextSize`。这些 id 和基准字号是从 res/layout 的 widget_*.xml 生成的
+ * setTextSize。这些 id 和基准字号是从 res/layout 的 widget_*.xml 生成的
  * （tools/widget_text_maps.txt），布局改字号时记得同步重新生成。
  */
 object WidgetTextSizes {
+
+    /** 今日课表·卡片：2×1 单节卡片的基准字号（还会再乘桌面高度系数，见 TodayWidget）。 */
+    const val TODAY_COMPACT_NAME_SP = 11.5f
+    const val TODAY_COMPACT_DETAIL_SP = 9.5f
+
+    /** 今日课表·卡片：4×2 课程行每行的基准字号（行矮时用 TIGHT 一档）。 */
+    const val TODAY_ROW_NAME_SP = 13.5f
+    const val TODAY_ROW_NAME_TIGHT_SP = 12f
+    const val TODAY_ROW_DETAIL_SP = 10.5f
+    const val TODAY_ROW_DETAIL_TIGHT_SP = 9.5f
+
+    /** 待办事项每行的基准字号。 */
+    const val TODO_ROW_NAME_SP = 12.5f
+    const val TODO_ROW_NAME_TIGHT_SP = 11f
+    const val TODO_ROW_COUNT_SP = 10f
+    const val TODO_ROW_COUNT_TIGHT_SP = 9f
 
     fun scale(context: Context): Float =
         ScheduleSettingsManager.getInstance().apply { init(context) }.widgetFontScale
@@ -25,7 +41,7 @@ object WidgetTextSizes {
         }
     }
 
-    /** widget_schedule_day.xml */
+    /** widget_schedule_day.xml（旧版今日课表，可翻天） */
     val DAY_ROOT: Map<Int, Float> = mapOf(
         R.id.widget_title to 14.0f,
         R.id.widget_day_info to 11.0f,
@@ -48,6 +64,22 @@ object WidgetTextSizes {
         R.id.exam_time to 12.0f,
         R.id.exam_loc to 11.0f,
     )
+    /** widget_today.xml（今日课表·卡片，4×2 当天列表） */
+    val TODAY_ROOT: Map<Int, Float> = mapOf(
+        R.id.today_title to 13.5f,
+        R.id.today_day_info to 10.5f,
+    )
+    /** widget_today_notitle.xml */
+    val TODAY_ROOT_NO_TITLE: Map<Int, Float> = mapOf(
+        R.id.today_day_info to 10.5f,
+    )
+    /** widget_todo.xml */
+    val TODO_ROOT: Map<Int, Float> = mapOf(
+        R.id.widget_title to 13f,
+        R.id.widget_todo_count to 10f,
+    )
+    /** widget_todo.xml（隐藏标题栏） */
+    val TODO_ROOT_NO_TITLE: Map<Int, Float> = emptyMap()
     /** widget_schedule.xml */
     val WEEK_ROOT: Map<Int, Float> = mapOf(
         R.id.widget_title to 16.0f,

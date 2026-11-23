@@ -6,8 +6,9 @@ import com.buct.course.manager.ScheduleSettingsManager
 /**
  * 桌面小组件按 appWidgetId 保存的实例级配置：
  * - 标题（实例自定义 → 全局默认 → 兜底文案）
- * - 显示账号（9.13 配置页可选；空 = 跟随当前账号）
+ * - 显示账号（配置页可选；空 = 跟随当前账号）
  * - 来源（空 = 本机账号；`friend:<id>` = 好友传来的课表，见 WidgetScheduleSource）
+ * - 最近一次解析到的桌面尺寸（RemoteViewsService 拿不到 AppWidgetOptions 时复用）
  *
  * 全部存在独立的 widget_config SharedPreferences，删除实例时按 id 清理，避免 id 复用串配置。
  */
@@ -55,6 +56,9 @@ object WidgetConfigStore {
         prefs(context).edit().putBoolean("hide_title_$appWidgetId", hide).commit()
     }
 
+    fun widgetWidthDp(context: Context, appWidgetId: Int): Int =
+        prefs(context).getInt("width_dp_$appWidgetId", 0)
+
     fun widgetHeightDp(context: Context, appWidgetId: Int): Int =
         prefs(context).getInt("height_dp_$appWidgetId", 0)
 
@@ -64,7 +68,7 @@ object WidgetConfigStore {
     }
 
     /**
-     * 按桌面格高（dp）限制每屏最多可见的课程卡片数量：
+     * 按桌面格高（dp）限制每屏最多可见的课程卡片数量（旧版今日课表用）：
      * 2 行最多 2 节，3 行最多 3 节，4 行最多 4 节，以此类推；超出可上下滑动查看。
      */
     fun visibleCourseSlots(heightDp: Int): Int = when {
@@ -75,10 +79,25 @@ object WidgetConfigStore {
         else -> 6
     }
 
+    fun setWidgetSize(context: Context, appWidgetId: Int, widthDp: Int, heightDp: Int) {
+        if (widthDp <= 0 || heightDp <= 0) return
+        val store = prefs(context)
+        if (store.getInt("width_dp_$appWidgetId", 0) == widthDp &&
+            store.getInt("height_dp_$appWidgetId", 0) == heightDp
+        ) {
+            return
+        }
+        store.edit()
+            .putInt("width_dp_$appWidgetId", widthDp)
+            .putInt("height_dp_$appWidgetId", heightDp)
+            .commit()
+    }
+
     fun clear(context: Context, appWidgetId: Int) {
         prefs(context).edit()
             .remove("title_$appWidgetId")
             .remove("hide_title_$appWidgetId")
+            .remove("width_dp_$appWidgetId")
             .remove("height_dp_$appWidgetId")
             .remove("account_$appWidgetId")
             .remove("source_$appWidgetId")
@@ -95,13 +114,20 @@ object WidgetConfigStore {
         p.edit().apply { stale.forEach { remove(it) } }.apply()
     }
 
-    /** 实例标题解析：实例自定义 → 全局默认 → 朋友课表名 → 兜底「今日课表 / 我的课表」。 */
-    fun resolveTitle(context: Context, appWidgetId: Int, isDay: Boolean): String {
+    /**
+     * 实例标题解析：实例自定义 → 全局默认 → 兜底文案（按组件类型区分）。
+     *
+     * 全局标题是「课表设置」里的那一项，只对课表类小组件生效；
+     * 待办事项用它会出现「我的课表」挂在一个待办列表上。
+     */
+    fun resolveTitle(context: Context, appWidgetId: Int, kind: WidgetKind): String {
         title(context, appWidgetId)?.let { return it }
-        val global = runCatching {
-            ScheduleSettingsManager.getInstance().apply { init(context) }.widgetTitle
-        }.getOrNull()
-        if (!global.isNullOrBlank()) return global
-        return if (isDay) "今日课表" else "我的课表"
+        if (kind != WidgetKind.TODO) {
+            val global = runCatching {
+                ScheduleSettingsManager.getInstance().apply { init(context) }.widgetTitle
+            }.getOrNull()
+            if (!global.isNullOrBlank()) return global
+        }
+        return kind.defaultTitle
     }
 }

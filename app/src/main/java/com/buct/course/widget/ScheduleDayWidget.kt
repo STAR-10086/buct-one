@@ -118,7 +118,7 @@ open class ScheduleDayWidget : AppWidgetProvider() {
             if (!hideTitle) {
                 views.setTextViewText(
                     R.id.widget_title,
-                    WidgetConfigStore.resolveTitle(context, appWidgetId, isDay = true)
+                    WidgetConfigStore.resolveTitle(context, appWidgetId, WidgetKind.DAY)
                 )
                 views.setTextColor(R.id.widget_title, textColor)
             }

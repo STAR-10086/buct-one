@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -233,9 +233,52 @@
                 android:resource="@xml/widget_schedule_day_info" />
         </receiver>
 
-        <!-- 浠婃棩璇捐〃灏忕粍浠?Service -->
+        <!-- 今日课表小组件 Service（旧版：可上下滑动，按高度限制每屏节数） -->
         <service
             android:name=".widget.ScheduleDayWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <!-- 今日课表·卡片小组件：2×1 单节课可翻页 / 4×2 当天完整列表。
+             与上面按天翻页的旧「今日课表」是两个独立组件，桌面可同时存在。 -->
+        <receiver
+            android:name=".widget.TodayWidget"
+            android:exported="true"
+            android:label="今日课表·卡片小组件">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.buct.course.widget.TODAY_PREV" />
+                <action android:name="com.buct.course.widget.TODAY_NEXT" />
+                <action android:name="com.buct.course.widget.REFRESH_WIDGET" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_today_info" />
+        </receiver>
+
+        <!-- 今日课表·卡片小组件 Service（4×2 模式的当天课程列表） -->
+        <service
+            android:name=".widget.TodayWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <!-- 待办事项小组件 -->
+        <receiver
+            android:name=".widget.TodoWidget"
+            android:exported="true"
+            android:label="待办事项小组件">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.buct.course.widget.REFRESH_WIDGET" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_todo_info" />
+        </receiver>
+
+        <!-- 待办事项小组件 Service -->
+        <service
+            android:name=".widget.TodoWidgetService"
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 

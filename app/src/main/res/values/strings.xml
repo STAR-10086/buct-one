@@ -10,4 +10,6 @@
     <string name="refresh_captcha">看不清？换一张</string>
     <string name="school_select">选择学校</string>
     <string name="widget_description">北化课表小组件</string>
+    <string name="widget_todo_description">北化在线待办汇总小组件</string>
+    <string name="widget_today_description">今日课表·卡片（2×1 单节课 / 4×2 当天全部）</string>
 </resources>

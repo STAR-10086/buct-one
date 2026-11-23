@@ -1,10 +1,8 @@
 package com.buct.course.ui.screen
 
 import android.appwidget.AppWidgetManager
-import android.content.ComponentName
 import android.content.Context
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,9 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ViewWeek
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,11 +34,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.buct.course.manager.UserManager
@@ -49,15 +47,14 @@ import com.buct.course.ui.system.InsetGroupedSection
 import com.buct.course.ui.system.SystemIconButton
 import com.buct.course.ui.system.SystemTopBar
 import com.buct.course.ui.widget.WidgetConfigActivity
-import com.buct.course.widget.ScheduleDayWidget
-import com.buct.course.widget.ScheduleWidget
 import com.buct.course.widget.WidgetConfigStore
+import com.buct.course.widget.WidgetKind
 import com.buct.course.widget.WidgetProviders
 
 /** 一个已经摆在桌面上的小组件实例。 */
 internal data class WidgetInstance(
     val appWidgetId: Int,
-    val isDay: Boolean
+    val kind: WidgetKind
 )
 
 /**
@@ -73,23 +70,29 @@ private data class WidgetRowData(
     val subtitle: String
 )
 
-/** 枚举本 App 当前所有桌面小组件实例（课表 + 今日课表两种 provider）。 */
+/** 枚举本 App 当前所有桌面小组件实例（周课表 / 今日课表 / 待办事项三种 provider）。 */
 internal fun listWidgetInstances(context: Context): List<WidgetInstance> {
     val manager = runCatching { AppWidgetManager.getInstance(context) }.getOrNull() ?: return emptyList()
     // 桌面上实际注册的是旧包名的兼容壳，这里必须按 WidgetProviders 把新旧组件都数上，
     // 否则用户明明摆着小组件，管理页却显示「还没有小组件」。
-    val week = WidgetProviders.weekIds(context, manager).map { WidgetInstance(it, isDay = false) }
-    val day = WidgetProviders.dayIds(context, manager).map { WidgetInstance(it, isDay = true) }
-    return (week + day)
+    val week = WidgetProviders.weekIds(context, manager)
+        .map { WidgetInstance(it, WidgetKind.WEEK) }
+    val day = WidgetProviders.dayIds(context, manager)
+        .map { WidgetInstance(it, WidgetKind.DAY) }
+    val today = WidgetProviders.todayIds(context, manager)
+        .map { WidgetInstance(it, WidgetKind.TODAY) }
+    val todo = WidgetProviders.todoIds(context, manager)
+        .map { WidgetInstance(it, WidgetKind.TODO) }
+    return (week + day + today + todo)
         .distinctBy { it.appWidgetId }
-        .sortedWith(compareBy({ it.isDay }, { it.appWidgetId }))
+        .sortedWith(compareBy({ it.kind.ordinal }, { it.appWidgetId }))
 }
 
 /**
  * 桌面小组件管理页。
  *
  * 设置页入口进来后能看到桌面上到底摆了几个小组件，每个实例单独设置：
- * - 显示哪个账号的课表（空 = 跟随 App 当前账号）
+ * - 显示哪个账号的课表（空 = 跟随 App 当前账号，待办事项不适用）
  * - 小组件标题（留空用 App 里的默认名称）
  *
  * 数据源是 AppWidgetManager 的实时查询，不是本地缓存，所以在桌面删掉实例后回来就少一个。
@@ -106,7 +109,13 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
         fun reload() {
             val accounts = loadAccounts(context)
             rows = loadRows(context, accounts)
-            WidgetConfigStore.prune(context, rows.map { it.instance.appWidgetId }.toSet())
+            // 只有四个组件都成功查完才清理：某个 provider 查询失败也会返回空列表，
+            // 那样会把用户所有实例配置（标题 / 指定账号 / 尺寸）一次性抹掉。
+            val aliveIds = runCatching { AppWidgetManager.getInstance(context) }.getOrNull()
+                ?.let { WidgetProviders.allIdsOrNull(context, it) }
+            if (aliveIds != null && aliveIds.isNotEmpty()) {
+                WidgetConfigStore.prune(context, aliveIds)
+            }
         }
         reload()
         val observer = LifecycleEventObserver { _, event ->
@@ -146,11 +155,11 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                         InsetGroupedRow(
                             title = row.title,
                             subtitle = row.subtitle,
-                            icon = if (row.instance.isDay) Icons.Outlined.CalendarToday else Icons.Outlined.ViewWeek,
-                            iconTint = if (row.instance.isDay) Color(0xFF34C759) else Color(0xFF5E5CE6),
+                            icon = iconFor(row.instance.kind),
+                            iconTint = tintFor(row.instance.kind),
                             showDivider = index != rows.lastIndex,
                             onClick = {
-                                WidgetConfigActivity.start(context, row.instance.appWidgetId, row.instance.isDay)
+                                WidgetConfigActivity.start(context, row.instance.appWidgetId, row.instance.kind)
                             },
                             trailing = {
                                 Icon(
@@ -173,7 +182,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "1. 回到桌面，长按空白处\n2. 选「小组件」\n3. 找到「BUCT One」，把课表小组件拖到桌面",
+                                text = "1. 回到桌面，长按空白处\n2. 选「小组件」\n3. 找到「BUCT One」，把课表 / 今日课表 / 今日课表·卡片 / 待办事项拖到桌面",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -182,7 +191,9 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                 }
 
                 Text(
-                    text = "想再放一个？回到桌面长按空白处 → 小组件（或「桌面卡片」）→ 找到「BUCT One」→ 拖到桌面即可。",
+                    text = "想再放一个？回到桌面长按空白处 → 小组件（或「桌面卡片」）→ 找到「BUCT One」→ 拖到桌面即可。" +
+                        "「今日课表」可前后翻天；「今日课表·卡片」默认 2×1 只显示一堂课，拖到 4×2 会变成当天完整列表。" +
+                        "2×1 的卡片没有标题栏，想改标题或账号请在本页点开对应实例修改。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp)
@@ -204,13 +215,12 @@ private fun loadAccounts(context: Context): List<AccountOption> = runCatching {
 /** 组装列表数据：每个实例的标题与来源说明都在这里定稿。 */
 private fun loadRows(context: Context, accounts: List<AccountOption>): List<WidgetRowData> =
     listWidgetInstances(context).mapIndexed { index, instance ->
-        val type = if (instance.isDay) "今日课表" else "课表"
         WidgetRowData(
             instance = instance,
             title = runCatching {
-                WidgetConfigStore.resolveTitle(context, instance.appWidgetId, instance.isDay)
+                WidgetConfigStore.resolveTitle(context, instance.appWidgetId, instance.kind)
             }.getOrDefault(""),
-            subtitle = "$type · 第 ${index + 1} 个 · ${sourceLabel(context, instance, accounts)}"
+            subtitle = "${instance.kind.displayName} · 第 ${index + 1} 个 · ${sourceLabel(context, instance, accounts)}"
         )
     }
 
@@ -219,7 +229,22 @@ private fun sourceLabel(
     instance: WidgetInstance,
     accounts: List<AccountOption>
 ): String {
+    if (instance.kind == WidgetKind.TODO) return "北化在线待办"
     val key = WidgetConfigStore.accountKey(context, instance.appWidgetId)
         ?: return "跟随当前账号"
     return accounts.firstOrNull { it.key == key }?.label ?: "指定账号"
+}
+
+private fun iconFor(kind: WidgetKind): ImageVector = when (kind) {
+    WidgetKind.WEEK -> Icons.Outlined.ViewWeek
+    WidgetKind.DAY -> Icons.Outlined.CalendarToday
+    WidgetKind.TODAY -> Icons.Outlined.CalendarToday
+    WidgetKind.TODO -> Icons.Outlined.CheckCircle
+}
+
+private fun tintFor(kind: WidgetKind): Color = when (kind) {
+    WidgetKind.WEEK -> Color(0xFF5E5CE6)
+    WidgetKind.DAY -> Color(0xFF34C759)
+    WidgetKind.TODAY -> Color(0xFF0A84FF)
+    WidgetKind.TODO -> Color(0xFFFF9F0A)
 }

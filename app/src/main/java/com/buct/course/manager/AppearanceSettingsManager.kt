@@ -1,4 +1,4 @@
-﻿package com.buct.course.manager
+package com.buct.course.manager
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -206,10 +206,9 @@ object AppearanceSettingsManager {
         prefs?.let { AppThemePreferences(it).write(value) }
         AppThemeCoordinator.preferenceChanged(value)
 
-        // 刷新所有桌面小组件
+        // 刷新所有桌面小组件（课表 / 今日课表 / 待办事项都按深浅色各自取色）
         val ctx = appContext ?: return
-        val refreshIntent = android.content.Intent(ctx, com.buct.course.widget.ScheduleWidget::class.java)
-        refreshIntent.action = "com.buct.course.widget.REFRESH_WIDGET"
+        com.buct.course.widget.WidgetProviders.refreshAll(ctx)
     }
 
     /**
