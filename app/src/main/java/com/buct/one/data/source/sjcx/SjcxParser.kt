@@ -14,7 +14,7 @@ import org.json.JSONObject
  * 遵循数据层铁律 3：改动解析逻辑必须递增 PARSER_VERSION。
  */
 object SjcxParser {
-    const val PARSER_VERSION: Int = 1
+    const val PARSER_VERSION: Int = 2
 
     data class CasLoginInfo(
         val rsaPublicKeyBase64: String,
@@ -52,6 +52,17 @@ object SjcxParser {
         }.getOrDefault(1)
     }
 
+    private fun shouldPreferReportItem(
+        candidate: SjcxExperimentReportItem,
+        existing: SjcxExperimentReportItem
+    ): Boolean {
+        if (candidate.isSubmitted != existing.isSubmitted) return candidate.isSubmitted
+        val candHasDoc = candidate.uploadedDocName.isNotBlank()
+        val existHasDoc = existing.uploadedDocName.isNotBlank()
+        if (candHasDoc != existHasDoc) return candHasDoc
+        return candidate.state > existing.state
+    }
+
     fun parseExperimentReports(rawJson: String): List<SjcxExperimentReportItem> {
         val root = JSONObject(rawJson)
         val code = root.optInt("code", -1)
@@ -59,7 +70,7 @@ object SjcxParser {
             throw IllegalStateException(root.optCleanString("msg", "获取实验报告失败"))
         }
         val list = root.optJSONObject("data")?.optJSONArray("list") ?: JSONArray()
-        val result = ArrayList<SjcxExperimentReportItem>()
+        val deduped = LinkedHashMap<String, SjcxExperimentReportItem>()
         for (i in 0 until list.length()) {
             val courseObj = list.optJSONObject(i) ?: continue
             val courseId = courseObj.optCleanString("course_id")
@@ -71,28 +82,31 @@ object SjcxParser {
                 val expId = exp.optCleanString("exp_id")
                 val expName = exp.optCleanString("exp_name")
                 if (expName.isBlank()) continue
-                result.add(
-                    SjcxExperimentReportItem(
-                        courseId = courseId,
-                        courseCode = courseCode,
-                        courseName = courseName,
-                        expId = expId,
-                        expCode = exp.optCleanString("exp_code"),
-                        expName = expName,
-                        stuId = exp.optCleanString("stu_id"),
-                        groupId = exp.optCleanString("group_id"),
-                        reportId = exp.optCleanString("report_id"),
-                        templateName = exp.optCleanString("report"),
-                        uploadedDocName = exp.optCleanString("doc_name"),
-                        canUpload = exp.optInt("canupload", 0) == 1,
-                        state = exp.optInt("state", 1),
-                        opinion = exp.optCleanString("opinion"),
-                        yearterm = exp.optCleanString("yearterm")
-                    )
+                val item = SjcxExperimentReportItem(
+                    courseId = courseId,
+                    courseCode = courseCode,
+                    courseName = courseName,
+                    expId = expId,
+                    expCode = exp.optCleanString("exp_code"),
+                    expName = expName,
+                    stuId = exp.optCleanString("stu_id"),
+                    groupId = exp.optCleanString("group_id"),
+                    reportId = exp.optCleanString("report_id"),
+                    templateName = exp.optCleanString("report"),
+                    uploadedDocName = exp.optCleanString("doc_name"),
+                    canUpload = exp.optInt("canupload", 0) == 1,
+                    state = exp.optInt("state", 1),
+                    opinion = exp.optCleanString("opinion"),
+                    yearterm = exp.optCleanString("yearterm")
                 )
+                val dedupKey = "$courseId|$expId|${item.expCode}|$expName|${item.stuId}|${item.groupId}|${item.reportId}|${item.yearterm}"
+                val existing = deduped[dedupKey]
+                if (existing == null || shouldPreferReportItem(item, existing)) {
+                    deduped[dedupKey] = item
+                }
             }
         }
-        return result
+        return deduped.values.toList()
     }
 
     fun parseExperimentSchedules(rawJson: String): List<SjcxExperimentScheduleItem> {
@@ -122,7 +136,7 @@ object SjcxParser {
                 )
             )
         }
-        return result.sortedWith(compareBy<SjcxExperimentScheduleItem> { it.week }.thenBy { it.weekDay }.thenBy { it.jcText })
+        return result.distinct().sortedWith(compareBy<SjcxExperimentScheduleItem> { it.week }.thenBy { it.weekDay }.thenBy { it.jcText })
     }
 
     fun parseExperimentScores(rawJson: String): List<SjcxExperimentScoreItem> {
@@ -163,7 +177,7 @@ object SjcxParser {
                 )
             }
         }
-        return result
+        return result.distinct()
     }
 
     fun parseLectureBatches(rawJson: String): List<SjcxLectureBatchItem> {
@@ -200,7 +214,7 @@ object SjcxParser {
                 )
             )
         }
-        return result
+        return result.distinctBy { it.id }
     }
 
     fun parseMyLectures(rawJson: String): List<SjcxMyLectureItem> {
@@ -233,7 +247,7 @@ object SjcxParser {
                 )
             )
         }
-        return result
+        return result.distinctBy { "${it.creProjectStuId}|${it.projectId}|${it.batchName}|${it.beginTime}" }
     }
 
     fun parseCreditRecords(rawJson: String): Pair<Double, List<SjcxCreditRecordItem>> {
@@ -261,7 +275,8 @@ object SjcxParser {
                 )
             )
         }
-        val computedTotal = if (totalCredit > 0.0) totalCredit else result.sumOf { it.credit }
-        return computedTotal to result
+        val deduped = result.distinct()
+        val computedTotal = if (totalCredit > 0.0) totalCredit else deduped.sumOf { it.credit }
+        return computedTotal to deduped
     }
 }

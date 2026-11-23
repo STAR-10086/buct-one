@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -216,6 +216,24 @@ fun HomeworkRoute() {
     val expReports = sjcxSlice.data?.reports.orEmpty()
     val activeTodos = remember(localTodos) { localTodos.filter { !it.deleted } }
 
+    val pendingHomeworkKeys = remember(pendingHomeworks) {
+        uniqueLazyKeys(pendingHomeworks) { "${it.lid}:${it.hwtid}" }
+    }
+    val homeworkKeys = remember(homeworks) {
+        uniqueLazyKeys(homeworks) { "${it.lid}:${it.hwtid}" }
+    }
+    val testKeys = remember(tests) {
+        uniqueLazyKeys(tests) { "${it.lid}:${it.testId}" }
+    }
+    val expReportKeys = remember(expReports) {
+        uniqueLazyKeys(expReports) {
+            "${it.courseId}:${it.expId}:${it.expCode}:${it.groupId}:${it.reportId}:${it.stuId}:${it.expName}"
+        }
+    }
+    val activeTodoKeys = remember(activeTodos) {
+        uniqueLazyKeys(activeTodos) { it.id }
+    }
+
     val hasActiveFilters = filterPrefs.blacklistedCourses.isNotEmpty() ||
         filterPrefs.hiddenHomeworkIds.isNotEmpty() ||
         filterPrefs.hiddenTestKeys.isNotEmpty()
@@ -352,7 +370,7 @@ fun HomeworkRoute() {
                                 )
                             }
                         } else {
-                            items(pendingHomeworks, key = { it.hwtid }) { hw ->
+                            itemsIndexed(pendingHomeworks, key = { idx, _ -> pendingHomeworkKeys[idx] }) { _, hw ->
                                 val targetUrl = hw.submitHref.ifBlank { hw.detailHref }
                                 HomeworkGlassCard(
                                     hw = hw,
@@ -384,7 +402,7 @@ fun HomeworkRoute() {
                                 )
                             }
                         } else {
-                            items(homeworks, key = { it.hwtid }) { hw ->
+                            itemsIndexed(homeworks, key = { idx, _ -> homeworkKeys[idx] }) { _, hw ->
                                 val targetUrl = when {
                                     hw.canSubmit -> hw.submitHref.ifBlank { hw.detailHref }
                                     hw.resultHref.isNotBlank() -> hw.resultHref
@@ -420,7 +438,7 @@ fun HomeworkRoute() {
                                 )
                             }
                         } else {
-                            items(tests, key = { "${it.lid}:${it.testId}" }) { test ->
+                            itemsIndexed(tests, key = { idx, _ -> testKeys[idx] }) { _, test ->
                                 TestGlassCard(
                                     test = test,
                                     onOpenDetail = { selectedTestForDetail = test },
@@ -455,7 +473,7 @@ fun HomeworkRoute() {
                                 )
                             }
                         } else {
-                            items(expReports, key = { "${it.courseId}:${it.expId}:${it.stuId}" }) { exp ->
+                            itemsIndexed(expReports, key = { idx, _ -> expReportKeys[idx] }) { _, exp ->
                                 ExperimentReportGlassCard(
                                     item = exp,
                                     enabled = !syncing,
@@ -515,7 +533,7 @@ fun HomeworkRoute() {
                                 )
                             }
                         } else {
-                            items(activeTodos, key = { it.id }) { todo ->
+                            itemsIndexed(activeTodos, key = { idx, _ -> activeTodoKeys[idx] }) { _, todo ->
                                 LocalTodoGlassCard(
                                     item = todo,
                                     onToggle = { service.toggleTodoCompleted(todo.id) },
@@ -2007,5 +2025,16 @@ private fun ExperimentReportGlassCard(
                 )
             }
         }
+    }
+}
+
+/** 为 Compose LazyColumn 列表项生成防碰撞的唯一键，避免服务端重复数据导致渲染崩溃 */
+private fun <T> uniqueLazyKeys(items: List<T>, baseKey: (T) -> String): List<String> {
+    val counts = HashMap<String, Int>(items.size)
+    return items.map { item ->
+        val raw = baseKey(item)
+        val count = counts.getOrDefault(raw, 0)
+        counts[raw] = count + 1
+        if (count == 0) raw else "$raw#$count"
     }
 }

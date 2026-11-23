@@ -23,7 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -272,11 +272,39 @@ private fun SjcxScreen(
 
     val data = slice.data
     val schedules = data?.schedules.orEmpty()
+    val filteredSchedules = remember(schedules, selectedWeekFilter) {
+        if (selectedWeekFilter == 0) schedules else schedules.filter { it.week == selectedWeekFilter }
+    }
     val openLectures = data?.openLectures.orEmpty()
     val endedLectures = data?.endedLectures.orEmpty()
+    val activeList = if (showEndedLectures) endedLectures else openLectures
     val myLectures = data?.myLectures.orEmpty()
     val expScores = data?.scores.orEmpty()
     val creditRecords = data?.creditRecords.orEmpty()
+
+    val filteredScheduleKeys = remember(filteredSchedules) {
+        uniqueLazyKeys(filteredSchedules) {
+            "${it.courseName}:${it.expName}:${it.week}:${it.weekDay}:${it.jcText}:${it.roomName}:${it.teacherName}:${it.seatNumber}"
+        }
+    }
+    val activeLectureKeys = remember(activeList) {
+        uniqueLazyKeys(activeList) { it.id }
+    }
+    val myLectureKeys = remember(myLectures) {
+        uniqueLazyKeys(myLectures) {
+            "${it.creProjectStuId}:${it.projectId}:${it.batchName}:${it.beginTime}"
+        }
+    }
+    val expScoreKeys = remember(expScores) {
+        uniqueLazyKeys(expScores) {
+            "${it.courseId}:${it.expName}:${it.week}:${it.weekDay}:${it.jcText}:${it.teacherName}"
+        }
+    }
+    val creditRecordKeys = remember(creditRecords) {
+        uniqueLazyKeys(creditRecords) {
+            "${it.creStuId}:${it.projectName}:${it.addTime}:${it.standardName}"
+        }
+    }
     val timeFormatter = remember { SimpleDateFormat("MM-dd HH:mm", Locale.CHINA) }
 
     val sub = when (slice.provenance.refreshState) {
@@ -451,12 +479,6 @@ private fun SjcxScreen(
                             }
                         }
 
-                        val filteredSchedules = if (selectedWeekFilter == 0) {
-                            schedules
-                        } else {
-                            schedules.filter { it.week == selectedWeekFilter }
-                        }
-
                         if (filteredSchedules.isEmpty()) {
                             item {
                                 SystemEmptyState(
@@ -470,10 +492,10 @@ private fun SjcxScreen(
                                 )
                             }
                         } else {
-                            items(
+                            itemsIndexed(
                                 filteredSchedules,
-                                key = { "${it.courseName}:${it.expName}:${it.week}:${it.weekDay}:${it.jcText}" }
-                            ) { item ->
+                                key = { idx, _ -> filteredScheduleKeys[idx] }
+                            ) { _, item ->
                                 ExperimentScheduleCard(
                                     item = item,
                                     isCurrentWeek = item.week == (data?.currentWeek ?: -1)
@@ -509,7 +531,6 @@ private fun SjcxScreen(
                             }
                         }
 
-                        val activeList = if (showEndedLectures) endedLectures else openLectures
                         if (activeList.isEmpty()) {
                             item {
                                 SystemEmptyState(
@@ -523,7 +544,7 @@ private fun SjcxScreen(
                                 )
                             }
                         } else {
-                            items(activeList, key = { it.id }) { lecture ->
+                            itemsIndexed(activeList, key = { idx, _ -> activeLectureKeys[idx] }) { _, lecture ->
                                 val isPollingThis = pollingLecture?.id == lecture.id
                                 LectureBatchCard(
                                     item = lecture,
@@ -554,7 +575,7 @@ private fun SjcxScreen(
                                 )
                             }
                         } else {
-                            items(myLectures, key = { "${it.creProjectStuId}:${it.projectId}:${it.batchName}" }) { myItem ->
+                            itemsIndexed(myLectures, key = { idx, _ -> myLectureKeys[idx] }) { _, myItem ->
                                 MyLectureCard(
                                     item = myItem,
                                     enabled = !syncing,
@@ -620,7 +641,7 @@ private fun SjcxScreen(
                                     modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
-                            items(expScores, key = { "${it.courseId}:${it.expName}:${it.week}" }) { sc ->
+                            itemsIndexed(expScores, key = { idx, _ -> expScoreKeys[idx] }) { _, sc ->
                                 ExperimentScoreCard(item = sc)
                             }
                         }
@@ -634,7 +655,7 @@ private fun SjcxScreen(
                                     modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
-                            items(creditRecords, key = { "${it.creStuId}:${it.projectName}:${it.addTime}" }) { cr ->
+                            itemsIndexed(creditRecords, key = { idx, _ -> creditRecordKeys[idx] }) { _, cr ->
                                 CreditRecordCard(item = cr)
                             }
                         }
@@ -1554,5 +1575,16 @@ private fun CreditRecordCard(item: SjcxCreditRecordItem) {
                 color = Color(0xFF34C759)
             )
         }
+    }
+}
+
+/** 为 Compose LazyColumn 列表项生成防碰撞的唯一键，避免服务端重复数据导致渲染崩溃 */
+private fun <T> uniqueLazyKeys(items: List<T>, baseKey: (T) -> String): List<String> {
+    val counts = HashMap<String, Int>(items.size)
+    return items.map { item ->
+        val raw = baseKey(item)
+        val count = counts.getOrDefault(raw, 0)
+        counts[raw] = count + 1
+        if (count == 0) raw else "$raw#$count"
     }
 }
