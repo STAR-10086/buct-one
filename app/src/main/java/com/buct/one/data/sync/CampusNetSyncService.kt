@@ -1,6 +1,7 @@
 package com.buct.one.data.sync
 
 import android.content.Context
+import com.buct.course.login.BuctWebVpnAuthRequiredException
 import com.buct.course.manager.UserManager
 import com.buct.one.data.model.CampusNetSnapshot
 import com.buct.one.data.model.DomainSlice
@@ -62,11 +63,14 @@ class CampusNetSyncService private constructor(
     }
 
     private fun mapErrorMessage(t: Throwable): String {
+        if (t is BuctWebVpnAuthRequiredException) {
+            return t.message?.takeIf { it.isNotBlank() } ?: "校外查询校园网网费需先完成 WebVPN 认证"
+        }
         return when (t) {
             is UnknownHostException, is ConnectException, is SocketTimeoutException ->
-                "无法连接校园网网关 tree.buct.edu.cn，请确认已接入北化校园网 Wi-Fi"
+                "无法连接校园网网关（已尝试直连与 WebVPN），请检查网络或重新完成 WebVPN 认证"
             is IOException ->
-                t.message?.takeIf { it.isNotBlank() } ?: "校园网网费查询网络异常，请确认当前处于校内网"
+                t.message?.takeIf { it.isNotBlank() } ?: "校园网网费查询网络异常，请检查网络后重试"
             else ->
                 t.message?.takeIf { it.isNotBlank() } ?: "校园网网费查询失败，请稍后重试"
         }

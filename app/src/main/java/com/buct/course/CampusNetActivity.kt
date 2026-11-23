@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +55,7 @@ import com.buct.course.ui.system.GlassWindowHost
 import com.buct.course.ui.system.SystemEmptyState
 import com.buct.course.ui.system.SystemIconButton
 import com.buct.course.ui.system.SystemPrimaryButton
+import com.buct.course.ui.system.SystemSecondaryButton
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
 import com.buct.course.ui.theme.CourseSelectorTheme
@@ -89,6 +92,23 @@ class CampusNetActivity : ComponentActivity() {
 
                     val slice by service.campusNetState.collectAsState()
                     val syncing by service.syncing.collectAsState()
+
+                    val webVpnAuthLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.StartActivityForResult()
+                    ) { res ->
+                        if (res.resultCode == RESULT_OK) {
+                            scope.launch { service.refresh() }
+                        }
+                    }
+
+                    fun launchWebVpnAuth() {
+                        webVpnAuthLauncher.launch(
+                            Intent(this@CampusNetActivity, LoginActivity::class.java).apply {
+                                putExtra(LoginActivity.EXTRA_WEBVPN_AUTH_MODE, true)
+                                putExtra(LoginActivity.EXTRA_RETURN_TO_CALLER, true)
+                            }
+                        )
+                    }
 
                     LaunchedEffect(Unit) {
                         service.refresh()
@@ -129,6 +149,7 @@ class CampusNetActivity : ComponentActivity() {
                             lastError = slice.lastError,
                             syncing = syncing,
                             padding = padding,
+                            onWebVpnAuth = ::launchWebVpnAuth,
                             onRefresh = {
                                 scope.launch {
                                     service.refresh()
@@ -156,6 +177,7 @@ private fun CampusNetBillingContent(
     lastError: String?,
     syncing: Boolean,
     padding: PaddingValues,
+    onWebVpnAuth: () -> Unit,
     onRefresh: () -> Unit
 ) {
     var billTab by remember { mutableIntStateOf(0) }
@@ -173,35 +195,47 @@ private fun CampusNetBillingContent(
         if (!lastError.isNullOrBlank()) {
             item {
                 val errShape = RoundedCornerShape(16.dp)
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(errShape)
                         .background(MaterialTheme.colorScheme.error.copy(alpha = 0.10f))
                         .border(0.6.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), errShape)
                         .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.WarningAmber,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = lastError,
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.error
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.WarningAmber,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
                         )
-                        if (snapshot != null) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                text = "已保留最近一次成功同步的网费与账单快照",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = lastError,
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.error
                             )
+                            if (snapshot != null) {
+                                Text(
+                                    text = "已保留最近一次成功同步的网费与账单快照",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
+                    }
+                    if (lastError.contains("WebVPN", ignoreCase = true)) {
+                        SystemSecondaryButton(
+                            text = "前往 WebVPN 认证",
+                            onClick = onWebVpnAuth,
+                            enabled = !syncing,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -211,7 +245,7 @@ private fun CampusNetBillingContent(
             item {
                 SystemEmptyState(
                     title = "暂无校园网账单数据",
-                    message = "连入北化校园网后点击刷新即可免密查询网费余额、已用流量、缴费清单与月度结算账单",
+                    message = "校内直连或校外自动走 WebVPN 即可免密查询网费余额、已用流量、缴费清单与月度结算账单",
                     icon = Icons.Outlined.Wifi,
                     action = {
                         SystemPrimaryButton(

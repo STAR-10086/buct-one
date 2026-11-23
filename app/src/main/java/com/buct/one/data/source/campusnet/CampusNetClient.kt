@@ -2,75 +2,55 @@ package com.buct.one.data.source.campusnet
 
 import android.os.Build
 import com.buct.course.BuildConfig
+import com.buct.course.login.BuctDns
 import com.buct.course.login.BuctTlsTrustManager
+import com.buct.course.login.BuctWebVpnAuthRequiredException
+import com.buct.course.login.BuctWebVpnInterceptor
+import com.buct.course.login.BuctWebVpnNetworkInterceptor
+import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.CampusNetCheckoutRecord
 import com.buct.one.data.model.CampusNetPayRecord
 import com.buct.one.data.model.CampusNetSnapshot
-import okhttp3.Cookie
-import okhttp3.CookieJar
-import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.Base64
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * 北化校园网网费与账单直连查询客户端：
- * 1. https://tree.buct.edu.cn/cgi-bin/rad_user_info 查询当前网关在线状态与实时计量；
+ * 北化校园网网费与账单客户端：
+ * 1. https://tree.buct.edu.cn/cgi-bin/rad_user_info 查询实时在线与计量状态；
  * 2. http://tree.buct.edu.cn:8800/site/sso 免密同步自服务平台 /home、/log/pay、/log/check-out。
- * HTTPS 请求强制通过 BuctTlsTrustManager 校验证书，绝不经过 WebVPN。
+ * 已接入 BuctWebVpn 直连优先探测 + 校外 WebVPN 自动降级与 BuctTlsTrustManager 证书校验。
  */
 internal class CampusNetClient {
 
     companion object {
         private const val PORTAL_BASE_URL = "https://tree.buct.edu.cn"
         private const val SELF_SERVICE_BASE_URL = "http://tree.buct.edu.cn:8800"
+        private const val MAX_REDIRECT_HOPS = 6
     }
 
     private val trustManager = BuctTlsTrustManager()
-
-    private class InMemoryCookieJar : CookieJar {
-        private val store = ConcurrentHashMap<String, MutableList<Cookie>>()
-
-        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-            val host = url.host
-            val list = store.computeIfAbsent(host) { mutableListOf() }
-            synchronized(list) {
-                for (cookie in cookies) {
-                    list.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
-                    if (cookie.expiresAt > System.currentTimeMillis() || cookie.expiresAt == Long.MAX_VALUE) {
-                        list.add(cookie)
-                    }
-                }
-            }
-        }
-
-        override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            val now = System.currentTimeMillis()
-            val list = store[url.host] ?: return emptyList()
-            synchronized(list) {
-                list.removeAll { it.expiresAt <= now }
-                return list.filter { it.matches(url) }.toList()
-            }
-        }
-
-        fun clear() = store.clear()
-    }
-
-    private val cookieJar = InMemoryCookieJar()
+    private val cookieJar = MatchingMemoryCookieJar()
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
         .cookieJar(cookieJar)
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .followRedirects(true)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .sslSocketFactory(trustManager.sslSocketFactory(), trustManager)
+        .dns(BuctDns)
+        .addInterceptor(BuctWebVpnInterceptor())
+        .addNetworkInterceptor(BuctWebVpnNetworkInterceptor())
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
     fun fetchBillingSnapshot(fallbackStudentId: String): CampusNetSnapshot {
         val radRes = runCatching { fetchRadUserInfo() }
+        radRes.exceptionOrNull()?.let { err ->
+            if (err is BuctWebVpnAuthRequiredException) throw err
+        }
         val rad = radRes.getOrNull()
         val resolvedStudentId = rad?.username?.takeIf { it.isNotBlank() } ?: fallbackStudentId.trim()
 
@@ -92,6 +72,9 @@ internal class CampusNetClient {
                 CampusNetParser.parseSelfServiceHome(homeHtml)
                     ?: throw IllegalStateException("校园网自服务平台返回了未登录页面")
             }
+            homeRes.exceptionOrNull()?.let { err ->
+                if (err is BuctWebVpnAuthRequiredException) throw err
+            }
             home = homeRes.getOrNull()
             selfServiceError = homeRes.exceptionOrNull()
 
@@ -109,8 +92,8 @@ internal class CampusNetClient {
         }
 
         if (rad == null && home == null) {
-            throw (radRes.exceptionOrNull()
-                ?: selfServiceError
+            throw (selfServiceError
+                ?: radRes.exceptionOrNull()
                 ?: IllegalStateException("未能获取到校园网网费数据"))
         }
 
@@ -135,19 +118,35 @@ internal class CampusNetClient {
     }
 
     private fun executeGet(url: String, referer: String): String {
-        val req = Request.Builder()
-            .url(url)
-            .get()
-            .header("User-Agent", buildUserAgent())
-            .header("Referer", referer)
-            .build()
-        httpClient.newCall(req).execute().use { resp ->
-            val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful && body.isBlank()) {
-                throw IllegalStateException("校园网服务响应异常（HTTP ${resp.code}）")
+        var currentUrl = url.toHttpUrl()
+        var currentReferer = referer
+        repeat(MAX_REDIRECT_HOPS) {
+            val req = Request.Builder()
+                .url(currentUrl)
+                .get()
+                .header("User-Agent", buildUserAgent())
+                .header("Referer", currentReferer)
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.code in 300..399) {
+                    val loc = resp.header("Location")?.trim().orEmpty()
+                    if (loc.isNotEmpty()) {
+                        val next = currentUrl.resolve(loc)
+                        if (next != null) {
+                            currentReferer = currentUrl.toString()
+                            currentUrl = next
+                            return@use
+                        }
+                    }
+                }
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful && body.isBlank()) {
+                    throw IllegalStateException("校园网服务响应异常（HTTP ${resp.code}）")
+                }
+                return body
             }
-            return body
         }
+        throw IllegalStateException("校园网网关重定向次数过多")
     }
 
     private fun buildUserAgent(): String {

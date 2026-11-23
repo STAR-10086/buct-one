@@ -64,7 +64,8 @@ object BuctWebVpn {
         "ecard.buct.edu.cn",
         "gmis.buct.edu.cn",
         "i.buct.edu.cn",
-        "mnews.buct.edu.cn"
+        "mnews.buct.edu.cn",
+        "tree.buct.edu.cn"
     )
 
     private val keyBytes = CRYPT_KEY.toByteArray(Charsets.US_ASCII)

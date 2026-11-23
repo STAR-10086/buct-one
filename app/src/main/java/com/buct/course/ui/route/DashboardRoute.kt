@@ -3973,7 +3973,7 @@ private fun RenderLargeModuleCard(
             ) {
                 if (snap == null) {
                     Text(
-                        text = "免密直连校内网网费网关（tree.buct.edu.cn），实时查看本月消费、产品余额、电子钱包、已用流量及缴费/月结算账单。",
+                        text = "直连优先、校外自动走 WebVPN 免密查询校园网网关（tree.buct.edu.cn），实时查看本月消费、产品余额、电子钱包、已用流量及缴费/月结算账单。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 3,
