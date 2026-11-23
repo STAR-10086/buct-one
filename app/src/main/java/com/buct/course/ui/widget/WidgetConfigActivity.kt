@@ -55,6 +55,7 @@ import com.buct.course.ui.system.SystemSecondaryButton
 import com.buct.course.ui.theme.CourseSelectorTheme
 import com.buct.course.widget.ScheduleDayWidget
 import com.buct.course.widget.ScheduleWidget
+import com.buct.course.widget.TodayWidget
 import com.buct.course.widget.TodoWidget
 import com.buct.course.widget.WidgetConfigStore
 import com.buct.course.widget.WidgetKind
@@ -143,6 +144,8 @@ class WidgetConfigActivity : ComponentActivity() {
             when {
                 provider.contains("TodoWidget") ||
                     WidgetProviders.todoIds(this, manager).contains(appWidgetId) -> WidgetKind.TODO
+                provider.contains("TodayWidget") ||
+                    WidgetProviders.todayIds(this, manager).contains(appWidgetId) -> WidgetKind.TODAY
                 provider.contains("ScheduleDayWidget") ||
                     WidgetProviders.dayIds(this, manager).contains(appWidgetId) -> WidgetKind.DAY
                 else -> WidgetKind.WEEK
@@ -173,6 +176,10 @@ class WidgetConfigActivity : ComponentActivity() {
                 WidgetKind.DAY -> {
                     ScheduleDayWidget.updateAppWidget(ctx, manager, appWidgetId)
                     manager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_day_list)
+                }
+                WidgetKind.TODAY -> {
+                    TodayWidget.updateAppWidget(ctx, manager, appWidgetId)
+                    manager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.today_list)
                 }
                 WidgetKind.TODO -> {
                     TodoWidget.updateAppWidget(ctx, manager, appWidgetId)
@@ -270,6 +277,7 @@ private fun WidgetConfigPage(
                         title = "隐藏顶部标题（${kind.displayName}）",
                         subtitle = when (kind) {
                             WidgetKind.TODO -> "开启后不再显示标题与统计，整块高度都留给课程名"
+                            WidgetKind.TODAY -> "开启后释放顶部空间；2×1 形态本来就没有标题栏"
                             else -> "开启后释放顶部空间，点日期/周次栏仍可回到本配置页"
                         },
                         showDivider = false,
@@ -323,7 +331,8 @@ private fun WidgetConfigPage(
                 InsetGroupedSection(
                     header = "预览",
                     footer = when (kind) {
-                        WidgetKind.DAY -> "2×1 只显示一堂课（默认下一节课），拉到 4×2 显示当天完整列表"
+                        WidgetKind.TODAY -> "2×1 只显示一堂课（默认下一节课），拉到 4×2 显示当天完整列表"
+                        WidgetKind.DAY -> "可前后翻天：今天之外的日子也能翻着看"
                         WidgetKind.TODO -> "一行一门课，汇总北化在线的待交作业与未完成测验"
                         WidgetKind.WEEK -> "内容：本机账号课表"
                     }
@@ -397,7 +406,7 @@ private fun WidgetMiniPreview(
         )
 
         when (kind) {
-            WidgetKind.DAY -> {
+            WidgetKind.DAY, WidgetKind.TODAY -> {
                 // 2×1：单节卡片；下面再示意 4×2 的当天列表
                 Row(
                     modifier = Modifier

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课表 4×2 及以上：当天完整课程列表，放不下时上下滑动 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/today_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_light"
+    android:clipToOutline="true"
+    android:padding="9dp">
+
+    <TextView
+        android:id="@+id/today_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="今日课表"
+        android:textSize="13.5sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFF"
+        android:gravity="center"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:paddingBottom="1dp" />
+
+    <TextView
+        android:id="@+id/today_day_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="9月23日 · 周三 · 第4周"
+        android:textSize="10.5sp"
+        android:textColor="#FFFFFF"
+        android:gravity="center"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:paddingBottom="3dp" />
+
+    <ListView
+        android:id="@+id/today_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@android:color/transparent"
+        android:dividerHeight="4dp"
+        android:scrollbars="none"
+        android:clipToPadding="false" />
+
+</LinearLayout>

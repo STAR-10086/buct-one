@@ -79,9 +79,11 @@ internal fun listWidgetInstances(context: Context): List<WidgetInstance> {
         .map { WidgetInstance(it, WidgetKind.WEEK) }
     val day = WidgetProviders.dayIds(context, manager)
         .map { WidgetInstance(it, WidgetKind.DAY) }
+    val today = WidgetProviders.todayIds(context, manager)
+        .map { WidgetInstance(it, WidgetKind.TODAY) }
     val todo = WidgetProviders.todoIds(context, manager)
         .map { WidgetInstance(it, WidgetKind.TODO) }
-    return (week + day + todo)
+    return (week + day + today + todo)
         .distinctBy { it.appWidgetId }
         .sortedWith(compareBy({ it.kind.ordinal }, { it.appWidgetId }))
 }
@@ -107,10 +109,12 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
         fun reload() {
             val accounts = loadAccounts(context)
             rows = loadRows(context, accounts)
-            // 枚举不到任何实例时不清理：idsFor 查询失败也会返回空，
-            // 那样会把用户所有实例配置（标题/账号/尺寸）一次性抹掉。
-            if (rows.isNotEmpty()) {
-                WidgetConfigStore.prune(context, rows.map { it.instance.appWidgetId }.toSet())
+            // 只有四个组件都成功查完才清理：某个 provider 查询失败也会返回空列表，
+            // 那样会把用户所有实例配置（标题 / 指定账号 / 尺寸）一次性抹掉。
+            val aliveIds = runCatching { AppWidgetManager.getInstance(context) }.getOrNull()
+                ?.let { WidgetProviders.allIdsOrNull(context, it) }
+            if (aliveIds != null && aliveIds.isNotEmpty()) {
+                WidgetConfigStore.prune(context, aliveIds)
             }
         }
         reload()
@@ -178,7 +182,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "1. 回到桌面，长按空白处\n2. 选「小组件」\n3. 找到「BUCT One」，把课表 / 今日课表 / 待办事项拖到桌面",
+                                text = "1. 回到桌面，长按空白处\n2. 选「小组件」\n3. 找到「BUCT One」，把课表 / 今日课表 / 今日课表·卡片 / 待办事项拖到桌面",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -188,7 +192,8 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
 
                 Text(
                     text = "想再放一个？回到桌面长按空白处 → 小组件（或「桌面卡片」）→ 找到「BUCT One」→ 拖到桌面即可。" +
-                        "今日课表默认 2×1 只显示一堂课，拖到 4×2 会变成当天完整列表。",
+                        "「今日课表」可前后翻天；「今日课表·卡片」默认 2×1 只显示一堂课，拖到 4×2 会变成当天完整列表。" +
+                        "2×1 的卡片没有标题栏，想改标题或账号请在本页点开对应实例修改。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp)
@@ -233,11 +238,13 @@ private fun sourceLabel(
 private fun iconFor(kind: WidgetKind): ImageVector = when (kind) {
     WidgetKind.WEEK -> Icons.Outlined.ViewWeek
     WidgetKind.DAY -> Icons.Outlined.CalendarToday
+    WidgetKind.TODAY -> Icons.Outlined.CalendarToday
     WidgetKind.TODO -> Icons.Outlined.CheckCircle
 }
 
 private fun tintFor(kind: WidgetKind): Color = when (kind) {
     WidgetKind.WEEK -> Color(0xFF5E5CE6)
     WidgetKind.DAY -> Color(0xFF34C759)
+    WidgetKind.TODAY -> Color(0xFF0A84FF)
     WidgetKind.TODO -> Color(0xFFFF9F0A)
 }

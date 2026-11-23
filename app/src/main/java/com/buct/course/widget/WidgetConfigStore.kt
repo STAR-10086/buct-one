@@ -62,6 +62,23 @@ object WidgetConfigStore {
     fun widgetHeightDp(context: Context, appWidgetId: Int): Int =
         prefs(context).getInt("height_dp_$appWidgetId", 0)
 
+    fun setWidgetHeightDp(context: Context, appWidgetId: Int, heightDp: Int) {
+        if (heightDp <= 0) return
+        prefs(context).edit().putInt("height_dp_$appWidgetId", heightDp).commit()
+    }
+
+    /**
+     * 按桌面格高（dp）限制每屏最多可见的课程卡片数量（旧版今日课表用）：
+     * 2 行最多 2 节，3 行最多 3 节，4 行最多 4 节，以此类推；超出可上下滑动查看。
+     */
+    fun visibleCourseSlots(heightDp: Int): Int = when {
+        heightDp <= 0 || heightDp <= 195 -> 2
+        heightDp <= 275 -> 3
+        heightDp <= 355 -> 4
+        heightDp <= 435 -> 5
+        else -> 6
+    }
+
     fun setWidgetSize(context: Context, appWidgetId: Int, widthDp: Int, heightDp: Int) {
         if (widthDp <= 0 || heightDp <= 0) return
         val store = prefs(context)

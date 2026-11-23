@@ -6,21 +6,88 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.util.TypedValue
-import android.view.Gravity
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import com.buct.course.R
+import com.buct.course.manager.ScheduleSettingsManager
+import com.buct.course.manager.UserManager
+import com.buct.course.schedule.NetworkScheduleCourse
+import com.buct.course.schedule.ScheduleJson
+import com.buct.course.schedule.ScheduleWeeks
+import org.json.JSONArray
+import java.util.Calendar
+
+internal data class MergedDayCourse(
+    val name: String,
+    val location: String,
+    val teacher: String,
+    val startPeriod: Int,
+    val endPeriod: Int
+)
+
+private val EXAM_TIME_RANGE_REGEX = Regex("""(\d{1,2}):(\d{2})\s*[-~–至]\s*(\d{1,2}):(\d{2})""")
+
+internal fun parseClockMinutes(rawTime: String): Int? {
+    val parts = rawTime.trim().split(':')
+    if (parts.size < 2) return null
+    val h = parts[0].trim().toIntOrNull() ?: return null
+    val m = parts[1].trim().toIntOrNull() ?: return null
+    if (h !in 0..23 || m !in 0..59) return null
+    return h * 60 + m
+}
+
+internal fun resolvePeriodTime(
+    period: Int,
+    periodTimes: List<ScheduleSettingsManager.PeriodTime>,
+    defaultPeriodTimes: List<ScheduleSettingsManager.PeriodTime>
+): ScheduleSettingsManager.PeriodTime? =
+    periodTimes.firstOrNull { it.period == period }
+        ?: defaultPeriodTimes.firstOrNull { it.period == period }
+
+internal fun parseExamEndMinutes(rawExamTime: String): Int? {
+    val match = EXAM_TIME_RANGE_REGEX.find(rawExamTime) ?: return null
+    val h = match.groupValues[3].toIntOrNull() ?: return null
+    val m = match.groupValues[4].toIntOrNull() ?: return null
+    if (h !in 0..23 || m !in 0..59) return null
+    return h * 60 + m
+}
+
+internal fun resolveMergedCoursesForDay(
+    courses: List<NetworkScheduleCourse>,
+    day: Int,
+    week: Int
+): List<MergedDayCourse> {
+    val dayCourses = courses
+        .filter {
+            it.course.day == day &&
+                ScheduleWeeks.parse(it.course.weeks).visibleIn(week)
+        }
+        .map { it.course }
+        .sortedBy { it.startPeriod }
+
+    return buildList {
+        for (c in dayCourses) {
+            val last = lastOrNull()
+            if (last != null && last.name == c.name && last.location == c.location &&
+                last.teacher == c.teacher && c.startPeriod == last.endPeriod + 1
+            ) {
+                this[lastIndex] = last.copy(endPeriod = c.endPeriod)
+            } else {
+                add(MergedDayCourse(c.name, c.location, c.teacher, c.startPeriod, c.endPeriod))
+            }
+        }
+    }
+}
 
 /**
- * 桌面「今日课表」4×2 模式的 RemoteViewsService：当天完整课程列表。
- *
- * 每行只显示课程名称、上课时间、上课教室；桌面高度不够时行高压到 40dp，
- * 时间与教室并成一行，仍然放不下就让 ListView 上下滑动。
+ * 桌面「今日课表」小组件的 RemoteViewsService。
+ * 按实例当前的桌面高度（行数）动态固定每张卡片高度（2 行最多每屏 2 节，3 行最多 3 节…），
+ * 查看当天时自动隐藏已过下课时间的课程，当日未结束课程超出视图时可手动上下滑动查看。
  */
 class ScheduleDayWidgetService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory {
-        return ScheduleDayRemoteViewsFactory(applicationContext, intent)
+        return ScheduleDayRemoteViewsFactory(this.applicationContext, intent)
     }
 }
 
@@ -34,137 +101,252 @@ class ScheduleDayRemoteViewsFactory(
         AppWidgetManager.INVALID_APPWIDGET_ID
     )
 
-    private var courses: List<TodayCourse> = emptyList()
-    private var nowMinutes: Int = 0
-    private var emptyText: String = "今天没有课"
-    private var rowHeightDp: Int = 56
-    private var threeLines: Boolean = true
-    private var isDarkMode: Boolean = false
+    private var courses: List<NetworkScheduleCourse> = emptyList()
+    private var courseColorMap = mutableMapOf<String, Int>()
+    private var selectedDay = 1
+    private var selectedDate = ""
+    private var dayOffset = 0
+    private var hadScheduledItems = false
+    private var dayExams: List<ExamRow> = emptyList()
+    private var merged: List<MergedDayCourse> = emptyList()
+    private var periodTimes: List<ScheduleSettingsManager.PeriodTime> = emptyList()
+    private var defaultPeriodTimes: List<ScheduleSettingsManager.PeriodTime> = emptyList()
+    private var cardHeightDp: Int = 56
+    private var isCompact: Boolean = true
+
+    private data class ExamRow(
+        val name: String,
+        val time: String,
+        val loc: String,
+        val endMinutes: Int? = null
+    )
 
     override fun onCreate() {}
 
     override fun onDataSetChanged() {
-        val size = WidgetSizePolicy.stored(context, appWidgetId)
+        val rawHeight = WidgetConfigStore.widgetHeightDp(context, appWidgetId).let { if (it > 0) it else 160 }
         val hideTitle = WidgetConfigStore.hideTitle(context, appWidgetId)
-        val fontScale = WidgetTextSizes.scale(context)
-        val rowSpec = ScheduleDayWidget.fullRowSpec(size, hideTitle, fontScale)
-        rowHeightDp = rowSpec.heightDp
-        threeLines = rowSpec.threeLines
-        isDarkMode = WidgetAppearance.isDarkMode(context)
+        val slots = WidgetConfigStore.visibleCourseSlots(rawHeight)
+        val headerDp = if (hideTitle) 52 else 74
+        val listHeightDp = (rawHeight - headerDp).coerceAtLeast(96)
+        val dividerTotal = 4 * (slots - 1)
+        cardHeightDp = ((listHeightDp - dividerTotal) / slots).coerceIn(46, 115)
+        isCompact = cardHeightDp <= 60
 
-        val data = runCatching { TodayCourseSource.load(context, appWidgetId) }.getOrNull()
-        courses = data?.courses.orEmpty()
-        nowMinutes = data?.nowMinutes ?: 0
-        emptyText = if (data != null && data.courses.isNotEmpty() && data.nextIndex < 0) {
-            "今天的课已全部上完"
-        } else {
-            "今天没有课"
+        try {
+            UserManager.getInstance().init(context)
+            val settingsManager = ScheduleSettingsManager.getInstance().apply { init(context) }
+            periodTimes = settingsManager.getPeriodTimes()
+            defaultPeriodTimes = settingsManager.getDefaultPeriodTimes()
+
+            val scheduleJson = WidgetScheduleSource.loadOwnScheduleJson(context, appWidgetId)
+
+            if (scheduleJson != null) {
+                courses = ScheduleJson.parse(scheduleJson) ?: emptyList()
+                val courseNames = courses.map { it.course.name }.distinct()
+                courseColorMap.clear()
+                courseNames.forEachIndexed { index, name ->
+                    courseColorMap[name] = index
+                }
+            } else {
+                courses = emptyList()
+            }
+
+            dayOffset = ScheduleDayWidget.getDayOffset(context, appWidgetId)
+            val cal = Calendar.getInstance()
+            cal.add(Calendar.DAY_OF_YEAR, dayOffset)
+            selectedDay = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
+            selectedDate = String.format(
+                java.util.Locale.US, "%04d-%02d-%02d",
+                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)
+            )
+
+            val startMillis = WidgetScheduleSource.resolveSemesterStartMillis(context, appWidgetId)
+            val currentWeek = WidgetScheduleSource.weekForDate(startMillis, cal)
+            val allMerged = resolveMergedCoursesForDay(courses, selectedDay, currentWeek)
+
+            var allExams: List<ExamRow> = emptyList()
+            val examPrefs = context.getSharedPreferences("exam_cache", Context.MODE_PRIVATE)
+            val examJson = examPrefs.getString("exams", null)
+            if (examJson != null) {
+                val arr = JSONArray(examJson)
+                allExams = buildList {
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        val time = o.optString("examTime", "")
+                        if (time.startsWith(selectedDate)) {
+                            val name = o.optString("courseName", "考试")
+                            val timeText = formatExamTime(time)
+                            val loc = buildString {
+                                val location = o.optString("location", "")
+                                val seat = o.optString("seatNumber", "")
+                                val examName = o.optString("examName", "")
+                                if (examName.isNotBlank()) {
+                                    if (location.isNotBlank() || seat.isNotBlank()) append("$examName · ")
+                                    else append(examName)
+                                }
+                                if (location.isNotBlank()) append(location)
+                                if (seat.isNotBlank()) append(" · $seat")
+                            }
+                            add(ExamRow(name, timeText, loc, parseExamEndMinutes(timeText)))
+                        }
+                    }
+                }.sortedBy { it.time }
+            }
+
+            hadScheduledItems = allMerged.isNotEmpty() || allExams.isNotEmpty()
+            if (dayOffset == 0) {
+                val nowCal = Calendar.getInstance()
+                val nowMinutes = nowCal.get(Calendar.HOUR_OF_DAY) * 60 + nowCal.get(Calendar.MINUTE)
+                merged = allMerged.filter { c ->
+                    val endMin = resolvePeriodTime(c.endPeriod, periodTimes, defaultPeriodTimes)
+                        ?.endTime
+                        ?.let(::parseClockMinutes)
+                    endMin == null || endMin > nowMinutes
+                }
+                dayExams = allExams.filter { e ->
+                    e.endMinutes == null || e.endMinutes > nowMinutes
+                }
+            } else {
+                merged = allMerged
+                dayExams = allExams
+            }
+        } catch (_: Exception) {
+            courses = emptyList()
+            merged = emptyList()
+            dayExams = emptyList()
+            hadScheduledItems = false
         }
+    }
+
+    private fun formatExamTime(time: String): String {
+        val idx = time.indexOf(' ')
+        return if (idx > 0) time.substring(idx + 1) else time
     }
 
     override fun onDestroy() {}
 
-    override fun getCount(): Int = if (courses.isEmpty()) 1 else courses.size
+    override fun getCount(): Int {
+        val total = dayExams.size + merged.size
+        return if (total == 0) 1 else total
+    }
 
     override fun getViewAt(position: Int): RemoteViews {
-        if (courses.isEmpty()) {
-            return buildEmptyView()
+        val themePrefs = context.getSharedPreferences("appearance_settings", Context.MODE_PRIVATE)
+        val themeMode = themePrefs.getString("theme_mode", "system")
+        val nightModeFlags =
+            context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        val systemDark = nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val isDarkMode = when (themeMode) {
+            "light" -> false
+            "dark" -> true
+            else -> systemDark
         }
-        val course = courses.getOrNull(position) ?: return buildEmptyView()
-        val views = RemoteViews(context.packageName, R.layout.widget_schedule_day_row)
-        val ended = course.hasEnded(nowMinutes)
-        val location = course.location
-        val timeText = if (threeLines) course.timeText else mergeText(course.timeText, location)
 
-        views.setTextViewText(R.id.item_name, course.name)
+        if (dayExams.isEmpty() && merged.isEmpty()) {
+            val views = RemoteViews(context.packageName, R.layout.widget_schedule_day_row)
+            val emptyText = if (dayOffset == 0 && hadScheduledItems) {
+                "今日课程已全部上完"
+            } else {
+                "当天没有课程安排"
+            }
+            views.setTextViewText(R.id.item_name, emptyText)
+            views.setTextViewText(R.id.item_time, "")
+            views.setTextViewText(R.id.item_loc, "")
+            views.setViewVisibility(R.id.item_time, View.GONE)
+            views.setViewVisibility(R.id.item_loc, View.GONE)
+            views.setInt(R.id.item_root, "setBackgroundColor", Color.TRANSPARENT)
+            views.setTextColor(R.id.item_name, if (isDarkMode) 0xCCFFFFFF.toInt() else 0xFF6E6E73.toInt())
+            views.setInt(R.id.item_name, "setGravity", android.view.Gravity.CENTER)
+            applyCardSizing(views, R.id.item_root, R.id.item_name, R.id.item_time, R.id.item_loc)
+            views.setFloat(R.id.item_name, "setTextSize", 12.5f * WidgetTextSizes.scale(context))
+            return views
+        }
+
+        if (position < dayExams.size) {
+            val e = dayExams[position]
+            val views = RemoteViews(context.packageName, R.layout.widget_schedule_exam_row)
+            views.setTextViewText(R.id.exam_name, e.name)
+            views.setTextViewText(R.id.exam_time, e.time)
+            views.setTextViewText(R.id.exam_loc, e.loc)
+            views.setViewVisibility(R.id.exam_time, if (e.time.isBlank()) View.GONE else View.VISIBLE)
+            views.setViewVisibility(R.id.exam_loc, if (e.loc.isBlank()) View.GONE else View.VISIBLE)
+            views.setInt(R.id.exam_root, "setBackgroundResource", R.drawable.widget_exam_bg)
+            applyCardSizing(views, R.id.exam_root, R.id.exam_name, R.id.exam_time, R.id.exam_loc)
+            return views
+        }
+
+        val views = RemoteViews(context.packageName, R.layout.widget_schedule_day_row)
+        val c = merged[position - dayExams.size]
+
+        val startTime = resolvePeriodTime(c.startPeriod, periodTimes, defaultPeriodTimes)?.startTime ?: ""
+        val endTime = resolvePeriodTime(c.endPeriod, periodTimes, defaultPeriodTimes)?.endTime ?: ""
+        val span = if (c.endPeriod > c.startPeriod) "第${c.startPeriod}-${c.endPeriod}节" else "第${c.startPeriod}节"
+        val timeText = if (startTime.isNotBlank() || endTime.isNotBlank()) "$span  $startTime-$endTime" else span
+        val locText = buildString {
+            if (c.location.isNotBlank()) append(c.location)
+            if (c.teacher.isNotBlank()) append(" · ${c.teacher}")
+        }
+
+        views.setTextViewText(R.id.item_name, c.name)
+        views.setTextColor(R.id.item_name, Color.WHITE)
+        views.setInt(R.id.item_name, "setGravity", android.view.Gravity.START)
         views.setTextViewText(R.id.item_time, timeText)
-        views.setTextViewText(R.id.item_loc, location)
-        views.setViewVisibility(R.id.item_time, if (timeText.isBlank()) View.GONE else View.VISIBLE)
-        views.setViewVisibility(
-            R.id.item_loc,
-            if (threeLines && location.isNotBlank()) View.VISIBLE else View.GONE
-        )
-        views.setInt(R.id.item_root, "setBackgroundResource", WidgetAppearance.courseCardRes(course.name))
-        views.setTextColor(R.id.item_name, if (ended) 0x99FFFFFF.toInt() else Color.WHITE)
-        views.setTextColor(R.id.item_time, if (ended) 0x8CFFFFFF.toInt() else 0xE6FFFFFF.toInt())
-        views.setTextColor(R.id.item_loc, if (ended) 0x8CFFFFFF.toInt() else 0xD9FFFFFF.toInt())
-        applyRowSizing(views)
-        views.setOnClickFillInIntent(R.id.item_root, Intent())
-        return views
-    }
+        views.setViewVisibility(R.id.item_time, View.VISIBLE)
+        views.setTextViewText(R.id.item_loc, locText)
+        views.setViewVisibility(R.id.item_loc, if (locText.isBlank()) View.GONE else View.VISIBLE)
 
-    private fun buildEmptyView(): RemoteViews {
-        val views = RemoteViews(context.packageName, R.layout.widget_schedule_day_row)
-        views.setTextViewText(R.id.item_name, emptyText)
-        views.setTextViewText(R.id.item_time, "")
-        views.setTextViewText(R.id.item_loc, "")
-        views.setViewVisibility(R.id.item_time, View.GONE)
-        views.setViewVisibility(R.id.item_loc, View.GONE)
-        views.setInt(R.id.item_root, "setBackgroundColor", Color.TRANSPARENT)
-        views.setTextColor(
-            R.id.item_name,
-            if (isDarkMode) 0xCCFFFFFF.toInt() else 0xFF6E6E73.toInt()
-        )
-        views.setInt(R.id.item_name, "setGravity", Gravity.CENTER)
-        val emptySize = if (rowHeightDp <= 44) {
-            WidgetTextSizes.DAY_ROW_NAME_TIGHT_SP
-        } else {
-            WidgetTextSizes.DAY_ROW_NAME_SP
+        val colorIdx = courseColorMap[c.name] ?: 0
+        val bgRes = when (colorIdx % 8) {
+            0 -> R.drawable.widget_course_card_indigo
+            1 -> R.drawable.widget_course_card_blue
+            2 -> R.drawable.widget_course_card_green
+            3 -> R.drawable.widget_course_card_orange
+            4 -> R.drawable.widget_course_card_purple
+            5 -> R.drawable.widget_course_card_red
+            6 -> R.drawable.widget_course_card_cyan
+            else -> R.drawable.widget_course_card_brown
         }
-        views.setFloat(R.id.item_name, "setTextSize", emptySize * WidgetTextSizes.scale(context))
+        views.setInt(R.id.item_root, "setBackgroundResource", bgRes)
+        applyCardSizing(views, R.id.item_root, R.id.item_name, R.id.item_time, R.id.item_loc)
+
         return views
     }
 
-    private fun applyRowSizing(views: RemoteViews) {
+    private fun applyCardSizing(
+        views: RemoteViews,
+        rootId: Int,
+        nameId: Int,
+        timeId: Int,
+        locId: Int
+    ) {
         val density = context.resources.displayMetrics.density
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            views.setViewLayoutHeight(
-                R.id.item_root,
-                rowHeightDp.toFloat(),
-                TypedValue.COMPLEX_UNIT_DIP
-            )
+            views.setViewLayoutHeight(rootId, cardHeightDp.toFloat(), TypedValue.COMPLEX_UNIT_DIP)
         } else {
-            views.setInt(R.id.item_root, "setMinimumHeight", (rowHeightDp * density).toInt())
+            views.setInt(rootId, "setMinimumHeight", (cardHeightDp * density).toInt())
         }
         val scale = WidgetTextSizes.scale(context)
-        val nameSize = if (rowHeightDp <= 44) {
-            WidgetTextSizes.DAY_ROW_NAME_TIGHT_SP
-        } else {
-            WidgetTextSizes.DAY_ROW_NAME_SP
-        }
-        val detailSize = if (rowHeightDp <= 44) {
-            WidgetTextSizes.DAY_ROW_DETAIL_TIGHT_SP
-        } else {
-            WidgetTextSizes.DAY_ROW_DETAIL_SP
-        }
-        views.setFloat(R.id.item_name, "setTextSize", nameSize * scale)
-        views.setFloat(R.id.item_time, "setTextSize", detailSize * scale)
-        views.setFloat(R.id.item_loc, "setTextSize", detailSize * scale)
-        views.setInt(R.id.item_name, "setMaxLines", 1)
-        views.setInt(R.id.item_time, "setMaxLines", 1)
-        views.setInt(R.id.item_loc, "setMaxLines", 1)
-        val horizontalPadding = (10 * density).toInt()
-        val verticalPadding = ((if (rowHeightDp <= 44) 2 else 4) * density).toInt()
-        views.setViewPadding(
-            R.id.item_root,
-            horizontalPadding,
-            verticalPadding,
-            horizontalPadding,
-            verticalPadding
-        )
-    }
-
-    private fun mergeText(time: String, location: String): String = when {
-        location.isBlank() -> time
-        time.isBlank() -> location
-        else -> "$time · $location"
+        val nameSize = (if (isCompact) 12.5f else 14f) * scale
+        val timeSize = (if (isCompact) 10.5f else 11.5f) * scale
+        val locSize = (if (isCompact) 10f else 11f) * scale
+        views.setFloat(nameId, "setTextSize", nameSize)
+        views.setFloat(timeId, "setTextSize", timeSize)
+        views.setFloat(locId, "setTextSize", locSize)
+        views.setInt(nameId, "setMaxLines", if (isCompact) 1 else 2)
+        views.setInt(timeId, "setMaxLines", 1)
+        views.setInt(locId, "setMaxLines", 1)
+        val hPad = ((if (isCompact) 8 else 10) * density).toInt()
+        val vPad = ((if (isCompact) 4 else 6) * density).toInt()
+        views.setViewPadding(rootId, hPad, vPad, hPad, vPad)
+        views.setOnClickFillInIntent(rootId, Intent())
     }
 
     override fun getLoadingView(): RemoteViews? = null
 
-    override fun getViewTypeCount(): Int = 1
+    override fun getViewTypeCount(): Int = 2
 
     override fun getItemId(position: Int): Long = position.toLong()
 
-    override fun hasStableIds(): Boolean = false
+    override fun hasStableIds(): Boolean = true
 }

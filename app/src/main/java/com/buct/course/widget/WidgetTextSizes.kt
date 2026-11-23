@@ -14,15 +14,15 @@ import com.buct.course.manager.ScheduleSettingsManager
  */
 object WidgetTextSizes {
 
-    /** 2×1 单节卡片的基准字号（还会再乘桌面高度系数，见 ScheduleDayWidget）。 */
-    const val DAY_COMPACT_NAME_SP = 11.5f
-    const val DAY_COMPACT_DETAIL_SP = 9.5f
+    /** 今日课表·卡片：2×1 单节卡片的基准字号（还会再乘桌面高度系数，见 TodayWidget）。 */
+    const val TODAY_COMPACT_NAME_SP = 11.5f
+    const val TODAY_COMPACT_DETAIL_SP = 9.5f
 
-    /** 4×2 课程行每行的基准字号（行矮时用 TTight 一档）。 */
-    const val DAY_ROW_NAME_SP = 13.5f
-    const val DAY_ROW_NAME_TIGHT_SP = 12f
-    const val DAY_ROW_DETAIL_SP = 10.5f
-    const val DAY_ROW_DETAIL_TIGHT_SP = 9.5f
+    /** 今日课表·卡片：4×2 课程行每行的基准字号（行矮时用 TIGHT 一档）。 */
+    const val TODAY_ROW_NAME_SP = 13.5f
+    const val TODAY_ROW_NAME_TIGHT_SP = 12f
+    const val TODAY_ROW_DETAIL_SP = 10.5f
+    const val TODAY_ROW_DETAIL_TIGHT_SP = 9.5f
 
     /** 待办事项每行的基准字号。 */
     const val TODO_ROW_NAME_SP = 12.5f
@@ -41,14 +41,37 @@ object WidgetTextSizes {
         }
     }
 
-    /** widget_schedule_day.xml */
+    /** widget_schedule_day.xml（旧版今日课表，可翻天） */
     val DAY_ROOT: Map<Int, Float> = mapOf(
-        R.id.widget_title to 13.5f,
-        R.id.widget_day_info to 10.5f,
+        R.id.widget_title to 14.0f,
+        R.id.widget_day_info to 11.0f,
+        R.id.widget_back_today to 11.0f,
     )
     /** widget_schedule_day_notitle.xml */
     val DAY_ROOT_NO_TITLE: Map<Int, Float> = mapOf(
-        R.id.widget_day_info to 10.5f,
+        R.id.widget_day_info to 11.0f,
+        R.id.widget_back_today to 11.0f,
+    )
+    /** widget_schedule_day_row.xml */
+    val DAY_ROW: Map<Int, Float> = mapOf(
+        R.id.item_name to 14.0f,
+        R.id.item_time to 11.0f,
+        R.id.item_loc to 11.0f,
+    )
+    /** widget_schedule_exam_row.xml */
+    val DAY_EXAM_ROW: Map<Int, Float> = mapOf(
+        R.id.exam_name to 14.0f,
+        R.id.exam_time to 12.0f,
+        R.id.exam_loc to 11.0f,
+    )
+    /** widget_today.xml（今日课表·卡片，4×2 当天列表） */
+    val TODAY_ROOT: Map<Int, Float> = mapOf(
+        R.id.today_title to 13.5f,
+        R.id.today_day_info to 10.5f,
+    )
+    /** widget_today_notitle.xml */
+    val TODAY_ROOT_NO_TITLE: Map<Int, Float> = mapOf(
+        R.id.today_day_info to 10.5f,
     )
     /** widget_todo.xml */
     val TODO_ROOT: Map<Int, Float> = mapOf(
@@ -83,9 +106,36 @@ object WidgetTextSizes {
         R.id.item_sunday to 9.0f,
     )
     /** widget_schedule_row_cell.xml */
-    val WEEK_CELL: Map<Int, Float> = WEEK_ROW
+    val WEEK_CELL: Map<Int, Float> = mapOf(
+        R.id.item_period to 10.0f,
+        R.id.item_monday to 9.0f,
+        R.id.item_tuesday to 9.0f,
+        R.id.item_wednesday to 9.0f,
+        R.id.item_thursday to 9.0f,
+        R.id.item_friday to 9.0f,
+        R.id.item_saturday to 9.0f,
+        R.id.item_sunday to 9.0f,
+    )
     /** widget_schedule_row_top.xml */
-    val WEEK_ROW_TOP: Map<Int, Float> = WEEK_ROW
+    val WEEK_ROW_TOP: Map<Int, Float> = mapOf(
+        R.id.item_period to 10.0f,
+        R.id.item_monday to 9.0f,
+        R.id.item_tuesday to 9.0f,
+        R.id.item_wednesday to 9.0f,
+        R.id.item_thursday to 9.0f,
+        R.id.item_friday to 9.0f,
+        R.id.item_saturday to 9.0f,
+        R.id.item_sunday to 9.0f,
+    )
     /** widget_schedule_row_bottom.xml */
-    val WEEK_ROW_BOTTOM: Map<Int, Float> = WEEK_ROW
+    val WEEK_ROW_BOTTOM: Map<Int, Float> = mapOf(
+        R.id.item_period to 10.0f,
+        R.id.item_monday to 9.0f,
+        R.id.item_tuesday to 9.0f,
+        R.id.item_wednesday to 9.0f,
+        R.id.item_thursday to 9.0f,
+        R.id.item_friday to 9.0f,
+        R.id.item_saturday to 9.0f,
+        R.id.item_sunday to 9.0f,
+    )
 }

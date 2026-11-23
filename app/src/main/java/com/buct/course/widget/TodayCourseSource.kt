@@ -2,13 +2,11 @@ package com.buct.course.widget
 
 import android.content.Context
 import com.buct.course.manager.ScheduleSettingsManager
-import com.buct.course.schedule.NetworkScheduleCourse
 import com.buct.course.schedule.ScheduleJson
-import com.buct.course.schedule.ScheduleWeeks
 import java.util.Calendar
 
 /**
- * 「今日课表」小组件要显示的一节课。
+ * 「今日课表·卡片」小组件要显示的一节课。
  *
  * 只保留三样信息：课程名称 [name]、上课教室 [location]、上课时间 [timeText]。
  * 老师、学分等一律不进小组件（桌面上放不下，也不是一眼要看的东西）。
@@ -33,7 +31,13 @@ internal data class TodayCourses(
     val courses: List<TodayCourse>,
     /** 「9月23日 · 周三 · 第4周」 */
     val dayInfo: String,
-    val nowMinutes: Int
+    val nowMinutes: Int,
+    /**
+     * 是否读到了真实的课表快照。
+     * false 表示「还没同步过 / 解析失败」，此时课程列表为空也不能说「今天没有课」
+     * —— 数据层铁律 2：NEVER ≠ EMPTY_CONFIRMED。
+     */
+    val hasScheduleData: Boolean
 ) {
     /** 下一节课（正在上的也算）在 [courses] 中的下标；当天课程全部结束时为 -1。 */
     val nextIndex: Int
@@ -41,8 +45,9 @@ internal data class TodayCourses(
 }
 
 /**
- * 今日课表的数据来源：读本机账号当前学期课表 → 取今天 → 合并连堂课 → 补上节次时间。
- * 与周课表小组件、App 内课表同源（WidgetScheduleSource）。
+ * 「今日课表·卡片」的数据来源：读本机账号当前学期课表 → 取今天 → 合并连堂课 → 补上节次时间。
+ * 与周课表小组件、旧「今日课表」小组件同源（WidgetScheduleSource），
+ * 连堂合并与节次时间辅助函数复用 ScheduleDayWidgetService 里的那份（同包 internal）。
  */
 internal object TodayCourseSource {
 
@@ -68,8 +73,9 @@ internal object TodayCourseSource {
 
         val json = runCatching {
             WidgetScheduleSource.loadOwnScheduleJson(context, appWidgetId)
-        }.getOrNull() ?: return TodayCourses(emptyList(), dayInfo, nowMinutes)
-        val courses = runCatching { ScheduleJson.parse(json) }.getOrNull().orEmpty()
+        }.getOrNull() ?: return TodayCourses(emptyList(), dayInfo, nowMinutes, hasScheduleData = false)
+        val courses = runCatching { ScheduleJson.parse(json) }.getOrNull()
+            ?: return TodayCourses(emptyList(), dayInfo, nowMinutes, hasScheduleData = false)
 
         val settings = runCatching {
             ScheduleSettingsManager.getInstance().apply { init(context) }
@@ -92,7 +98,7 @@ internal object TodayCourseSource {
                 key = "$dateKey#${course.startPeriod}#${course.name}"
             )
         }
-        return TodayCourses(list, dayInfo, nowMinutes)
+        return TodayCourses(list, dayInfo, nowMinutes, hasScheduleData = true)
     }
 
     /**
@@ -121,65 +127,3 @@ internal object TodayCourseSource {
         return if (clock.isBlank()) span else "$span  $clock"
     }
 }
-
-/** 把 "08:45" 解析成当天第几分钟；格式不对返回 null（当作「不知道下课时间」）。 */
-internal fun parseClockMinutes(rawTime: String): Int? {
-    val parts = rawTime.trim().split(':')
-    if (parts.size < 2) return null
-    val hour = parts[0].trim().toIntOrNull() ?: return null
-    val minute = parts[1].trim().toIntOrNull() ?: return null
-    if (hour !in 0..23 || minute !in 0..59) return null
-    return hour * 60 + minute
-}
-
-internal fun resolvePeriodTime(
-    period: Int,
-    periodTimes: List<ScheduleSettingsManager.PeriodTime>,
-    defaultPeriodTimes: List<ScheduleSettingsManager.PeriodTime>
-): ScheduleSettingsManager.PeriodTime? =
-    periodTimes.firstOrNull { it.period == period }
-        ?: defaultPeriodTimes.firstOrNull { it.period == period }
-
-/** 同一天里同一门课、同一教室、节次连续的记录合并成一条（3-4 节连堂只显示一行）。 */
-internal fun resolveMergedCoursesForDay(
-    courses: List<NetworkScheduleCourse>,
-    day: Int,
-    week: Int
-): List<MergedDayCourse> {
-    val dayCourses = courses
-        .filter {
-            it.course.day == day &&
-                ScheduleWeeks.parse(it.course.weeks).visibleIn(week)
-        }
-        .map { it.course }
-        .sortedBy { it.startPeriod }
-
-    return buildList {
-        for (course in dayCourses) {
-            val last = lastOrNull()
-            if (last != null && last.name == course.name && last.location == course.location &&
-                last.teacher == course.teacher && course.startPeriod == last.endPeriod + 1
-            ) {
-                this[lastIndex] = last.copy(endPeriod = course.endPeriod)
-            } else {
-                add(
-                    MergedDayCourse(
-                        name = course.name,
-                        location = course.location,
-                        teacher = course.teacher,
-                        startPeriod = course.startPeriod,
-                        endPeriod = course.endPeriod
-                    )
-                )
-            }
-        }
-    }
-}
-
-internal data class MergedDayCourse(
-    val name: String,
-    val location: String,
-    val teacher: String,
-    val startPeriod: Int,
-    val endPeriod: Int
-)

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课表·卡片：最小 2×1（单节卡片，可翻页），拉到 4×2 及以上换成当天完整列表。
+     与按天翻页的旧「今日课表」是两个独立组件，桌面可同时添加。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeWidth="420dp"
+    android:maxResizeHeight="320dp"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_today_compact"
+    android:previewLayout="@layout/widget_today_compact"
+    android:configure="com.buct.course.ui.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional"
+    android:description="@string/widget_today_description"
+    android:previewImage="@mipmap/ic_launcher" />
