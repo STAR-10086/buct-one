@@ -654,11 +654,14 @@ jobs:
           PAGES_DEPLOY_HOOK: ${{ secrets.PAGES_DEPLOY_HOOK }}
         run: |
           if [ -n "${WEB_REPO_DEPLOY_KEY:-}" ]; then
-            mkdir -p ~/.ssh
-            printf '%s\n' "$WEB_REPO_DEPLOY_KEY" > ~/.ssh/web_deploy_key
-            chmod 600 ~/.ssh/web_deploy_key
-            ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
-            export GIT_SSH_COMMAND="ssh -i ~/.ssh/web_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+            mkdir -p "$HOME/.ssh"
+            chmod 700 "$HOME/.ssh"
+            KEY_FILE="$HOME/.ssh/web_deploy_key"
+            printf '%s\n' "$WEB_REPO_DEPLOY_KEY" | tr -d '\r' > "$KEY_FILE"
+            chmod 600 "$KEY_FILE"
+            ssh-keygen -lf "$KEY_FILE" || echo "::warning::Deploy key unreadable"
+            ssh-keyscan -H github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
+            export GIT_SSH_COMMAND="ssh -i '$KEY_FILE' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
             if git clone --depth 1 git@github.com:STAR-10086/buct-one-web.git /tmp/buct-one-web; then
               python3 - "r2-dist/latest.json" "/tmp/buct-one-web/src/data/release-snapshot.json" << 'PY'
@@ -687,7 +690,7 @@ jobs:
             else
               echo "::warning::Clone buct-one-web failed (non-fatal)"
             fi
-            rm -rf ~/.ssh/web_deploy_key /tmp/buct-one-web
+            rm -rf "$KEY_FILE" /tmp/buct-one-web
           fi
           if [ -n "${PAGES_DEPLOY_HOOK:-}" ]; then
             curl -fsS -X POST "${PAGES_DEPLOY_HOOK}" || echo "::warning::Pages deploy hook failed (non-fatal)"
