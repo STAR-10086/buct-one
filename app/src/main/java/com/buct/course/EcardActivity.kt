@@ -979,7 +979,15 @@ private fun EcardHomePane(
             }
         }
 
-        // 5. 空列表或流水明细
+        // 5. 消费洞察与流水明细
+        if (snapshot.transactions.isNotEmpty()) {
+            item {
+                com.buct.course.ui.screen.EcardInsightsCard(
+                    transactions = snapshot.transactions,
+                    hideAmount = hideBalance
+                )
+            }
+        }
         if (snapshot.transactions.isEmpty()) {
             item {
                 SystemEmptyState(
