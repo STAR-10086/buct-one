@@ -37,7 +37,7 @@ CI 里 `Package dependency rules` 这一步会 grep 检查，违反即失败。
 ## 界面与预测性返回手势
 
 - 全局启用 Android 14+ 预测性返回手势（`android:enableOnBackInvokedCallback="true"`），并受「我的 → 外观 → 预测性返回手势」（`AppearanceSettingsManager.predictiveBackEnabled`）控制。
-- **工作台一级功能模块必须使用独立 `ComponentActivity` + `GlassWindowHost` 承载**（如校园卡、实践教学、第二课堂、体测、校园邮箱、i北化、教务消息、空闲教室 `EmptyClassroomActivity`、选课抢课 `CourseSelectionActivity`），以确保获得系统级跨 Activity 预测性返回动画；`GlassSubpage` 仅用于同一页面内部的二级详情/设置子页。
+- **工作台一级功能模块必须使用独立 `ComponentActivity` + `GlassWindowHost` 承载**（如校园卡、实践教学、第二课堂、体测、校园邮箱、i北化、教务消息、北化在线 `TheolCourseActivity` / `TheolCourseDetailActivity`、表格导入 `TaskImportActivity`、宿舍电费 `ElectricityActivity`、校园网网费 `CampusNetActivity`、空闲教室 `EmptyClassroomActivity`、选课抢课 `CourseSelectionActivity`），以确保获得系统级跨 Activity 预测性返回动画；`GlassSubpage` 仅用于同一页面内部的二级详情/设置子页。
 
 ## 安全
 
