@@ -334,6 +334,40 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".TaskImportActivity"
+            android:exported="true"
+            android:label="导入作业表格"
+            android:configChanges="uiMode"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/comma-separated-values" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:host="*" android:pathPattern=".*\\.xlsx" />
+                <data android:scheme="content" android:host="*" android:pathPattern=".*\\.csv" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.xlsx" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\\.csv" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/comma-separated-values" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+        </activity>
+
         <!-- FileProvider for sharing iCal files -->
         <provider
             android:name="androidx.core.content.FileProvider"

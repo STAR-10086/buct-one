@@ -193,10 +193,10 @@ object SmartReminderScheduler {
         out: MutableList<ScheduledAlarm>
     ) {
         val theolStore = TheolStore(appContext)
-        val snapshot = runCatching { theolStore.readTheol(0).data }.getOrNull() ?: return
+        val snapshot = runCatching { theolStore.readTheol(0).data }.getOrNull()
         val filters = runCatching { theolStore.readFilterPrefs() }.getOrNull()
 
-        snapshot.homeworks
+        snapshot?.homeworks.orEmpty()
             .distinctBy { "${it.lid}:${it.hwtid}" }
             .filter { it.canSubmit && it.deadlineMillis != null && filters?.isHomeworkVisible(it) != false }
             .forEach { hw ->
@@ -214,7 +214,7 @@ object SmartReminderScheduler {
                 }
             }
 
-        snapshot.tests
+        snapshot?.tests.orEmpty()
             .distinctBy { "${it.lid}:${it.testId}" }
             .filter { !it.hasResult && it.endTimeMillis != null && filters?.isTestVisible(it) != false }
             .forEach { test ->
@@ -226,6 +226,24 @@ object SmartReminderScheduler {
                         triggerAt = deadline - offsetHours * 3_600_000L,
                         title = "测验临期：$course",
                         body = "「${test.title}」还有 $offsetHours 小时截止",
+                        channelId = if (offsetHours <= 3) ReminderChannels.CHANNEL_URGENT else ReminderChannels.CHANNEL_DIGEST,
+                        target = TARGET_MAIN
+                    )
+                }
+            }
+
+        runCatching { theolStore.readLocalTodos() }.getOrDefault(emptyList())
+            .filter { !it.deleted && !it.completed && it.deadlineMillis != null }
+            .forEach { todo ->
+                val deadline = todo.deadlineMillis ?: return@forEach
+                val course = todo.courseName.ifBlank { "待办事项" }
+                val submitSuffix = todo.submitWay.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()
+                for (offsetHours in offsetsHours) {
+                    out += ScheduledAlarm(
+                        key = "todo:${todo.id}:$offsetHours",
+                        triggerAt = deadline - offsetHours * 3_600_000L,
+                        title = "任务临期：$course",
+                        body = "「${todo.title}」${submitSuffix}还有 $offsetHours 小时截止",
                         channelId = if (offsetHours <= 3) ReminderChannels.CHANNEL_URGENT else ReminderChannels.CHANNEL_DIGEST,
                         target = TARGET_MAIN
                     )

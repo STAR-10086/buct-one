@@ -134,7 +134,11 @@ class TheolStore(private val rootDir: File) {
                             remind24h = o.optBoolean("remind24h", true),
                             remind12h = o.optBoolean("remind12h", true),
                             remind1h = o.optBoolean("remind1h", true),
-                            createdAt = o.optLong("createdAt", 0L)
+                            createdAt = o.optLong("createdAt", 0L),
+                            submitWay = o.optString("submitWay", ""),
+                            note = o.optString("note", ""),
+                            linkUrl = o.optString("linkUrl", ""),
+                            importKey = o.optString("importKey", "")
                         )
                     )
                 }
@@ -159,6 +163,10 @@ class TheolStore(private val rootDir: File) {
                     put("remind12h", item.remind12h)
                     put("remind1h", item.remind1h)
                     put("createdAt", item.createdAt)
+                    if (item.submitWay.isNotEmpty()) put("submitWay", item.submitWay)
+                    if (item.note.isNotEmpty()) put("note", item.note)
+                    if (item.linkUrl.isNotEmpty()) put("linkUrl", item.linkUrl)
+                    if (item.importKey.isNotEmpty()) put("importKey", item.importKey)
                 }
             )
         }

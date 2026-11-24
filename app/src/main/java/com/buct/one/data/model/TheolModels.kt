@@ -128,5 +128,9 @@ data class LocalTodoItem(
     val remind24h: Boolean = true,
     val remind12h: Boolean = true,
     val remind1h: Boolean = true,
-    val createdAt: Long = 0L
+    val createdAt: Long = 0L,
+    val submitWay: String = "",
+    val note: String = "",
+    val linkUrl: String = "",
+    val importKey: String = ""
 )

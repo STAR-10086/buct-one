@@ -719,6 +719,20 @@ private fun MailScreen(
                             }
                         }
                     }
+                },
+                onImportAttachment = { attachment ->
+                    if (downloadingPartId == null) {
+                        scope.launch {
+                            downloadingPartId = attachment.partId
+                            val res = service.downloadAttachment(currentMsg.id, attachment)
+                            downloadingPartId = null
+                            res.onSuccess { file ->
+                                TaskImportActivity.launchWithFile(context, file.filePath, file.fileName)
+                            }.onFailure { err ->
+                                GlassToaster.show(err.message ?: "附件下载失败")
+                            }
+                        }
+                    }
                 }
             )
         }
@@ -967,7 +981,8 @@ private fun MailDetailView(
     onReload: () -> Unit,
     onToggleRead: () -> Unit,
     onDeleteClick: () -> Unit,
-    onDownloadAttachment: (MailAttachment) -> Unit
+    onDownloadAttachment: (MailAttachment) -> Unit,
+    onImportAttachment: (MailAttachment) -> Unit
 ) {
     val senderHeader = detail?.fromList?.firstOrNull()?.takeIf { it.isNotBlank() }
         ?: message.fromName.ifBlank { message.fromAddress }.ifBlank { "未知发件人" }
@@ -1093,11 +1108,30 @@ private fun MailDetailView(
                             if (isDownloading) {
                                 GlassLoadingIndicator(size = 24.dp)
                             } else {
-                                Text(
-                                    text = "打开",
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    if (isImportableTaskTable(att.filename)) {
+                                        Text(
+                                            text = "导入待办",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = Color(0xFF34C759),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF34C759).copy(alpha = 0.14f))
+                                                .clickable(enabled = downloadingPartId == null) {
+                                                    onImportAttachment(att)
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "打开",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                     }
@@ -1538,6 +1572,11 @@ private fun formatMailFileSize(bytes: Long): String {
     if (kb < 1024.0) return String.format(Locale.US, "%.1f KB", kb)
     val mb = kb / 1024.0
     return String.format(Locale.US, "%.1f MB", mb)
+}
+
+private fun isImportableTaskTable(filename: String): Boolean {
+    val lower = filename.trim().lowercase(Locale.ROOT)
+    return lower.endsWith(".xlsx") || lower.endsWith(".csv")
 }
 
 private fun openMailAttachment(context: Context, file: MailDownloadedFile) {

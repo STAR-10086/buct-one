@@ -1,5 +1,6 @@
 package com.buct.course.ui.route
 
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -72,6 +73,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.buct.course.TaskImportActivity
 import com.buct.course.TheolAttachmentOpener
 import com.buct.course.TheolSubmitWebViewActivity
 import com.buct.course.ui.system.GlassLoadingIndicator
@@ -214,7 +216,17 @@ fun HomeworkRoute() {
         allTests.filter { filterPrefs.isTestVisible(it) }
     }
     val expReports = sjcxSlice.data?.reports.orEmpty()
-    val activeTodos = remember(localTodos) { localTodos.filter { !it.deleted } }
+    val activeTodos = remember(localTodos) {
+        localTodos
+            .filter { !it.deleted }
+            .sortedWith(
+                compareBy<LocalTodoItem>(
+                    { it.completed },
+                    { it.deadlineMillis ?: Long.MAX_VALUE },
+                    { it.createdAt }
+                )
+            )
+    }
 
     val pendingHomeworkKeys = remember(pendingHomeworks) {
         uniqueLazyKeys(pendingHomeworks) { "${it.lid}:${it.hwtid}" }
@@ -262,6 +274,11 @@ fun HomeworkRoute() {
                     contentDescription = "黑名单与已隐藏管理",
                     tint = if (hasActiveFilters) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     onClick = { showFilterManageDialog = true }
+                )
+                SystemIconButton(
+                    icon = Icons.Outlined.UploadFile,
+                    contentDescription = "从表格导入任务",
+                    onClick = { TaskImportActivity.launch(context) }
                 )
                 SystemIconButton(
                     icon = Icons.Outlined.Add,
@@ -1701,38 +1718,105 @@ private fun LocalTodoGlassCard(
     onToggle: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val context = LocalContext.current
     val shape = RoundedCornerShape(22.dp)
+    val deadlineFmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.CHINA) }
+    val urgency = remember(item.deadlineMillis, item.completed) {
+        todoDeadlineUrgency(item.deadlineMillis, item.completed)
+    }
+    val metaLine = remember(item.courseName, item.deadlineMillis, item.submitWay) {
+        buildList {
+            if (item.courseName.isNotBlank()) add(item.courseName)
+            item.deadlineMillis?.let { add("截止 ${deadlineFmt.format(Date(it))}") }
+            if (item.submitWay.isNotBlank()) add(item.submitWay)
+        }.joinToString(" · ")
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(glassSurfaceColor())
-            .border(0.5.dp, glassBorderColor(), shape)
+            .border(
+                width = if (urgency != null) 0.8.dp else 0.5.dp,
+                color = urgency?.second?.copy(alpha = 0.35f) ?: glassBorderColor(),
+                shape = shape
+            )
             .clickable(onClick = onToggle)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (urgency != null) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(34.dp)
+                    .clip(CircleShape)
+                    .background(urgency.second)
+            )
+        }
         Icon(
             imageVector = if (item.completed) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
             contentDescription = null,
-            tint = if (item.completed) Color(0xFF34C759) else MaterialTheme.colorScheme.primary,
+            tint = if (item.completed) Color(0xFF34C759) else urgency?.second ?: MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(22.dp)
         )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Medium,
-                    textDecoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None
-                ),
-                color = if (item.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
-            )
-            if (item.courseName.isNotBlank()) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 Text(
-                    text = item.courseName,
+                    text = item.title,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Medium,
+                        textDecoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None
+                    ),
+                    color = if (item.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (urgency != null) {
+                    Text(
+                        text = urgency.first,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = urgency.second,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(urgency.second.copy(alpha = 0.14f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            if (metaLine.isNotBlank()) {
+                Text(
+                    text = metaLine,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (item.note.isNotBlank()) {
+                Text(
+                    text = item.note,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (item.linkUrl.isNotBlank()) {
+                Text(
+                    text = "打开链接: ${item.linkUrl}",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(item.linkUrl)))
+                        }.onFailure {
+                            GlassToaster.show("无法打开链接")
+                        }
+                    }
                 )
             }
         }
@@ -1744,6 +1828,30 @@ private fun LocalTodoGlassCard(
                 .size(20.dp)
                 .clickable(onClick = onDelete)
         )
+    }
+}
+
+private fun todoDeadlineUrgency(deadlineMillis: Long?, completed: Boolean): Pair<String, Color>? {
+    if (completed || deadlineMillis == null) return null
+    val remain = deadlineMillis - System.currentTimeMillis()
+    return when {
+        remain < 0L -> "已过期" to Color(0xFFFF3B30)
+        remain <= 24 * 3600_000L -> {
+            val hours = (remain / 3600_000L).coerceAtLeast(1L)
+            "剩 ${hours}h" to Color(0xFFFF3B30)
+        }
+        remain <= 3 * 24 * 3600_000L -> {
+            val days = ((remain + 3600_000L * 12) / (24 * 3600_000L)).coerceAtLeast(1L)
+            "剩 ${days}天" to Color(0xFFFF9500)
+        }
+        remain <= 7 * 24 * 3600_000L -> {
+            val days = (remain / (24 * 3600_000L)).coerceAtLeast(3L)
+            "剩 ${days}天" to Color(0xFF007AFF)
+        }
+        else -> {
+            val days = remain / (24 * 3600_000L)
+            "剩 ${days}天" to Color(0xFF34C759)
+        }
     }
 }
 

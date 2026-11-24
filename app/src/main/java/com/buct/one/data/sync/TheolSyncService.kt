@@ -4,6 +4,7 @@ import android.content.Context
 import com.buct.course.widget.WidgetProviders
 import com.buct.one.data.model.BlacklistedCourse
 import com.buct.one.data.model.DomainSlice
+import com.buct.one.data.model.ImportedTaskDraft
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.TheolCourseInfo
 import com.buct.one.data.model.TheolDownloadedFile
@@ -516,6 +517,71 @@ class TheolSyncService private constructor(
         val updated = listOf(item) + _todosState.value
         store.writeLocalTodos(updated)
         _todosState.value = updated
+        notifyTodoWidget()
+    }
+
+    @Synchronized
+    fun upsertImportedTodos(drafts: List<ImportedTaskDraft>): Pair<Int, Int> {
+        if (drafts.isEmpty()) return 0 to 0
+        val current = _todosState.value.toMutableList()
+        val newItems = mutableListOf<LocalTodoItem>()
+        val now = System.currentTimeMillis()
+        var added = 0
+        var updatedCount = 0
+
+        for ((idx, draft) in drafts.withIndex()) {
+            val cleanTitle = draft.title.trim()
+            if (cleanTitle.isBlank()) continue
+            val cleanCourse = draft.cleanCourseName.ifBlank { draft.courseName }.trim()
+            val mergedNote = buildList {
+                if (draft.location.isNotBlank()) add("地点: ${draft.location.trim()}")
+                if (draft.scope.isNotBlank() && draft.scope != "全体") add("适用: ${draft.scope.trim()}")
+                if (draft.note.isNotBlank()) add(draft.note.trim())
+            }.joinToString(" · ")
+
+            val existingIdx = if (draft.importKey.isNotBlank()) {
+                current.indexOfFirst { !it.deleted && it.importKey == draft.importKey }
+            } else -1
+
+            if (existingIdx >= 0) {
+                val prev = current[existingIdx]
+                val next = prev.copy(
+                    title = cleanTitle,
+                    courseName = cleanCourse,
+                    deadlineMillis = draft.deadlineMillis,
+                    submitWay = draft.submitWay.trim(),
+                    note = mergedNote,
+                    linkUrl = draft.linkUrl.trim()
+                )
+                if (next != prev) {
+                    current[existingIdx] = next
+                    updatedCount++
+                }
+            } else {
+                newItems += LocalTodoItem(
+                    id = UUID.randomUUID().toString(),
+                    title = cleanTitle,
+                    courseName = cleanCourse,
+                    deadlineMillis = draft.deadlineMillis,
+                    priority = if (draft.taskType == "测验") 2 else 1,
+                    createdAt = now + idx,
+                    submitWay = draft.submitWay.trim(),
+                    note = mergedNote,
+                    linkUrl = draft.linkUrl.trim(),
+                    importKey = draft.importKey
+                )
+                added++
+            }
+        }
+        if (newItems.isNotEmpty()) {
+            current.addAll(0, newItems)
+        }
+        if (added > 0 || updatedCount > 0) {
+            store.writeLocalTodos(current)
+            _todosState.value = current
+            notifyTodoWidget()
+        }
+        return added to updatedCount
     }
 
     fun toggleTodoCompleted(id: String) {
@@ -524,6 +590,7 @@ class TheolSyncService private constructor(
         }
         store.writeLocalTodos(updated)
         _todosState.value = updated
+        notifyTodoWidget()
     }
 
     fun softDeleteTodo(id: String) {
@@ -532,6 +599,7 @@ class TheolSyncService private constructor(
         }
         store.writeLocalTodos(updated)
         _todosState.value = updated
+        notifyTodoWidget()
     }
 
     fun restoreTodo(id: String) {
@@ -540,6 +608,7 @@ class TheolSyncService private constructor(
         }
         store.writeLocalTodos(updated)
         _todosState.value = updated
+        notifyTodoWidget()
     }
 
     @Synchronized
