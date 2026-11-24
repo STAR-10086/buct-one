@@ -892,7 +892,7 @@ object TheolParser {
             val primaryLink = links.firstOrNull { a ->
                 val text = a.text().trim()
                 text.isNotEmpty() && text !in ignoredTexts && !text.startsWith("返回上一级")
-            } ?: links.first()
+            } ?: links[0]
             val item = parseResourceElement(
                 link = primaryLink,
                 row = row,
