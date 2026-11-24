@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.MoreVert
@@ -75,6 +76,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.buct.course.TaskImportActivity
 import com.buct.course.TheolAttachmentOpener
+import com.buct.course.TheolCourseActivity
 import com.buct.course.TheolSubmitWebViewActivity
 import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassTextField
@@ -269,6 +271,11 @@ fun HomeworkRoute() {
             title = "作业",
             subtitle = subtitle,
             actions = {
+                SystemIconButton(
+                    icon = Icons.Outlined.Folder,
+                    contentDescription = "北化在线课程与课件",
+                    onClick = { TheolCourseActivity.launch(context) }
+                )
                 SystemIconButton(
                     icon = Icons.Outlined.FilterList,
                     contentDescription = "黑名单与已隐藏管理",

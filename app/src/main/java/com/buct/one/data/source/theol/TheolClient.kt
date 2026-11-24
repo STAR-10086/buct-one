@@ -8,9 +8,11 @@ import com.buct.course.login.BuctTlsTrustManager
 import com.buct.course.login.BuctWebVpn
 import com.buct.course.login.MatchingMemoryCookieJar
 import com.buct.one.data.model.TheolCourseInfo
+import com.buct.one.data.model.TheolCourseUnit
 import com.buct.one.data.model.TheolDownloadedFile
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
+import com.buct.one.data.model.TheolResourcePage
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
@@ -511,7 +513,8 @@ class TheolClient {
         url: String,
         suggestedName: String,
         courseLid: String,
-        cacheRootDir: File
+        cacheRootDir: File,
+        allowHtmlDirectRetry: Boolean = true
     ): TheolDownloadedFile {
         val secureUrl = normalizeSecureCourseUrl(url.trim())
         val parsed = secureUrl.toHttpUrlOrNull() ?: throw IOException("附件链接无效")
@@ -526,6 +529,7 @@ class TheolClient {
         for (attempt in 0..1) {
             enterCourseContext(courseLid, force = attempt > 0)
             var needsReauth = false
+            var htmlDirectRetryUrl: String? = null
             val downloaded: TheolDownloadedFile? = try {
                 followAttachmentRedirects(secureUrl, hwReferer).use { resp ->
                     if (resp.code == 401 || resp.code == 403 || isMeolLoginUrl(resp.request.url)) {
@@ -548,6 +552,13 @@ class TheolClient {
                         if (TheolParser.isPermissionDeniedOrExpired(html)) {
                             needsReauth = true
                             return@use null
+                        }
+                        if (allowHtmlDirectRetry) {
+                            val directUrl = TheolParser.extractDirectDownloadUrl(html, resp.request.url.toString())
+                            if (!directUrl.isNullOrBlank() && directUrl != secureUrl) {
+                                htmlDirectRetryUrl = directUrl
+                                return@use null
+                            }
                         }
                         return@use TheolDownloadedFile(
                             filePath = "",
@@ -575,6 +586,13 @@ class TheolClient {
                             if (TheolParser.isPermissionDeniedOrExpired(fullHtml)) {
                                 needsReauth = true
                                 return@use null
+                            }
+                            if (allowHtmlDirectRetry) {
+                                val directUrl = TheolParser.extractDirectDownloadUrl(fullHtml, resp.request.url.toString())
+                                if (!directUrl.isNullOrBlank() && directUrl != secureUrl) {
+                                    htmlDirectRetryUrl = directUrl
+                                    return@use null
+                                }
                             }
                             return@use TheolDownloadedFile(
                                 filePath = "",
@@ -644,6 +662,15 @@ class TheolClient {
 
             if (downloaded != null) {
                 return downloaded
+            }
+            if (!htmlDirectRetryUrl.isNullOrBlank()) {
+                return downloadAttachment(
+                    url = htmlDirectRetryUrl!!,
+                    suggestedName = suggestedName,
+                    courseLid = courseLid,
+                    cacheRootDir = cacheRootDir,
+                    allowHtmlDirectRetry = false
+                )
             }
             if (needsReauth) {
                 if (attempt == 0 && ensureSessionActive(forceSso = true)) {
@@ -795,7 +822,8 @@ class TheolClient {
             snapshot = TheolSnapshot(
                 homeworks = sortHomeworks(allHomeworks),
                 tests = sortTests(allTests),
-                failedCourseCount = failedCourses
+                failedCourseCount = failedCourses,
+                courses = catalogCourses
             ),
             remainingHwCourses = remainingHwCourses,
             remainingTestCourses = remainingTestCourses
@@ -920,7 +948,8 @@ class TheolClient {
         return TheolSnapshot(
             homeworks = sortHomeworks(mergedHw),
             tests = sortTests(mergedTests),
-            failedCourseCount = failed
+            failedCourseCount = failed,
+            courses = phase1.snapshot.courses
         )
     }
 
@@ -931,6 +960,215 @@ class TheolClient {
             throw SessionExpiredSignal("课程会话已过期")
         }
         return TheolParser.parseTestList(testHtml, lid, courseName, MEOL_BASE)
+    }
+
+    /** 只读拉取指定课程的「单元学习」目录列表 */
+    fun fetchCourseUnits(lid: String): List<TheolCourseUnit> {
+        val cleanLid = lid.trim()
+        val encodedLid = URLEncoder.encode(cleanLid, "UTF-8")
+        val courseHomeUrl = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=$encodedLid"
+        val courseHtml = fetchHtml(courseHomeUrl, MEOL_WELCOME_HOME)
+        if (TheolParser.isPermissionDeniedOrExpired(courseHtml)) {
+            activeCourseLid = ""
+            activeCourseActivatedAt = 0L
+            throw SessionExpiredSignal("课程会话已过期")
+        }
+        activeCourseLid = cleanLid
+        activeCourseActivatedAt = System.currentTimeMillis()
+        return TheolParser.parseCourseUnits(courseHtml, courseHomeUrl)
+    }
+
+    /** 只读拉取指定「单元学习」节点下的资源 / 课件内容 */
+    fun fetchUnitResources(
+        lid: String,
+        courseName: String,
+        unit: TheolCourseUnit
+    ): TheolResourcePage {
+        val secureUnitUrl = normalizeSecureCourseUrl(unit.url.trim())
+        val parsed = secureUnitUrl.toHttpUrlOrNull() ?: throw IOException("单元链接无效")
+        if (!parsed.isHttps || !isTrustedBuctHost(parsed.host)) {
+            throw IOException("仅允许访问北化校园域名资源")
+        }
+        val cleanLid = lid.trim()
+        val encodedLid = URLEncoder.encode(cleanLid, "UTF-8")
+        val courseHomeUrl = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=$encodedLid"
+        if (!isCourseContextFresh(cleanLid)) {
+            val courseHtml = fetchHtml(courseHomeUrl, MEOL_WELCOME_HOME)
+            if (TheolParser.isPermissionDeniedOrExpired(courseHtml)) {
+                activeCourseLid = ""
+                activeCourseActivatedAt = 0L
+                throw SessionExpiredSignal("课程会话已过期")
+            }
+            activeCourseLid = cleanLid
+            activeCourseActivatedAt = System.currentTimeMillis()
+        }
+        return fetchResourcePageWithUnwrap(
+            startUrl = secureUnitUrl,
+            referer = courseHomeUrl,
+            lid = cleanLid,
+            courseName = courseName,
+            fallbackFolderTitle = unit.title
+        ) ?: TheolResourcePage(
+            lid = cleanLid,
+            courseName = courseName,
+            currentUrl = secureUnitUrl,
+            folderTitle = unit.title.ifBlank { "单元学习" },
+            items = emptyList()
+        )
+    }
+
+    /** 只读拉取指定课程的教学资源 / 课件目录页 */
+    fun fetchCourseResources(
+        lid: String,
+        courseName: String,
+        folderUrl: String? = null,
+        folderTitle: String? = null
+    ): TheolResourcePage {
+        val secureFolderUrl = folderUrl?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
+            val normalized = normalizeSecureCourseUrl(raw)
+            val parsed = normalized.toHttpUrlOrNull() ?: throw IOException("课程资源链接无效")
+            if (!parsed.isHttps || !isTrustedBuctHost(parsed.host)) {
+                throw IOException("仅允许访问北化校园域名资源")
+            }
+            normalized
+        }
+
+        val cleanLid = lid.trim()
+        val encodedLid = URLEncoder.encode(cleanLid, "UTF-8")
+        val courseHomeUrl = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=$encodedLid"
+        var cachedCourseHtml: String? = null
+
+        fun ensureActiveCourseHtml(): String {
+            cachedCourseHtml?.let { return it }
+            val html = fetchHtml(courseHomeUrl, MEOL_WELCOME_HOME)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) {
+                activeCourseLid = ""
+                activeCourseActivatedAt = 0L
+                throw SessionExpiredSignal("课程会话已过期")
+            }
+            activeCourseLid = cleanLid
+            activeCourseActivatedAt = System.currentTimeMillis()
+            cachedCourseHtml = html
+            return html
+        }
+
+        if (!isCourseContextFresh(cleanLid)) {
+            ensureActiveCourseHtml()
+        }
+
+        if (secureFolderUrl != null) {
+            return fetchResourcePageWithUnwrap(
+                startUrl = secureFolderUrl,
+                referer = courseHomeUrl,
+                lid = cleanLid,
+                courseName = courseName,
+                fallbackFolderTitle = folderTitle
+            ) ?: TheolResourcePage(
+                lid = cleanLid,
+                courseName = courseName,
+                currentUrl = secureFolderUrl,
+                folderTitle = folderTitle?.takeIf { it.isNotBlank() } ?: courseName.ifBlank { "课程资料" },
+                items = emptyList()
+            )
+        }
+
+        // 首选实测确认的根目录直达地址（groupid=4&lid=<courseId>&folderid=0）
+        val directRootUrl = "$MEOL_BASE/meol/common/script/listview.jsp?groupid=4&lid=$encodedLid&folderid=0"
+        val directHtml = runCatching { fetchHtml(directRootUrl, courseHomeUrl) }.getOrNull()
+        if (directHtml != null) {
+            if (TheolParser.isPermissionDeniedOrExpired(directHtml)) {
+                throw SessionExpiredSignal("课程会话已过期")
+            }
+            val directParsed = TheolParser.parseResourceList(
+                html = directHtml,
+                pageUrl = directRootUrl,
+                lid = cleanLid,
+                courseName = courseName,
+                fallbackFolderTitle = folderTitle
+            )
+            if (directParsed.items.isNotEmpty() || directHtml.contains("class=\"valuelist\"", ignoreCase = true)) {
+                return directParsed
+            }
+        }
+
+        val courseHtml = ensureActiveCourseHtml()
+        val homeDoc = Jsoup.parse(courseHtml, courseHomeUrl)
+        val candidates = linkedSetOf<String>()
+        candidates.addAll(TheolParser.discoverResourceEntryUrls(homeDoc, courseHomeUrl))
+
+        for (frame in homeDoc.select("frame[src], iframe[src]")) {
+            val frameUrl = normalizeUrl(courseHomeUrl, frame.attr("src")) ?: continue
+            val frameHtml = runCatching { fetchHtml(frameUrl, courseHomeUrl) }.getOrNull() ?: continue
+            val frameDoc = Jsoup.parse(frameHtml, frameUrl)
+            candidates.addAll(TheolParser.discoverResourceEntryUrls(frameDoc, frameUrl))
+        }
+
+        candidates += "$MEOL_BASE/meol/common/script/listview.jsp?lid=$encodedLid"
+        candidates += "$MEOL_BASE/meol/common/script/listview.jsp?courseId=$encodedLid"
+
+        var firstValidPage: TheolResourcePage? = null
+        for (candidateUrl in candidates.take(6)) {
+            val parsed = runCatching {
+                fetchResourcePageWithUnwrap(
+                    startUrl = candidateUrl,
+                    referer = courseHomeUrl,
+                    lid = cleanLid,
+                    courseName = courseName,
+                    fallbackFolderTitle = folderTitle
+                )
+            }.getOrElse { err ->
+                if (err is SessionExpiredSignal) throw err
+                null
+            } ?: continue
+            if (firstValidPage == null) firstValidPage = parsed
+            if (parsed.items.isNotEmpty()) return parsed
+        }
+        return firstValidPage ?: TheolResourcePage(
+            lid = cleanLid,
+            courseName = courseName,
+            currentUrl = courseHomeUrl,
+            folderTitle = folderTitle?.takeIf { it.isNotBlank() } ?: courseName.ifBlank { "课程资料" },
+            items = emptyList()
+        )
+    }
+
+    private fun fetchResourcePageWithUnwrap(
+        startUrl: String,
+        referer: String,
+        lid: String,
+        courseName: String,
+        fallbackFolderTitle: String? = null
+    ): TheolResourcePage? {
+        var currentUrl = startUrl
+        var currentReferer = referer
+        val visited = mutableSetOf(startUrl)
+        var lastPage: TheolResourcePage? = null
+
+        for (hop in 0..2) {
+            val html = fetchHtml(currentUrl, currentReferer)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) {
+                throw SessionExpiredSignal("课程会话已过期")
+            }
+            val parsed = TheolParser.parseResourceList(
+                html = html,
+                pageUrl = currentUrl,
+                lid = lid,
+                courseName = courseName,
+                fallbackFolderTitle = fallbackFolderTitle
+            )
+            lastPage = parsed
+            if (parsed.items.isNotEmpty()) {
+                return parsed
+            }
+            val doc = Jsoup.parse(html, currentUrl)
+            val nextUrl = TheolParser.extractResourceRedirectUrl(doc, currentUrl)
+            if (nextUrl.isNullOrBlank() || !visited.add(nextUrl)) {
+                break
+            }
+            currentReferer = currentUrl
+            currentUrl = nextUrl
+        }
+        return lastPage
     }
 
     private fun walkHomeworkPages(

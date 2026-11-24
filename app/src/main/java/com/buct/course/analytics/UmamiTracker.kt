@@ -15,6 +15,7 @@ import com.buct.course.MainActivity
 import com.buct.course.PortalActivity
 import com.buct.course.ScsActivity
 import com.buct.course.SjcxActivity
+import com.buct.course.TheolCourseActivity
 import com.buct.course.TheolSubmitWebViewActivity
 import com.buct.course.TyglActivity
 import com.buct.course.login.BuctTlsTrustManager
@@ -94,6 +95,7 @@ object UmamiTracker {
                     is EcardActivity -> trackPageVisit(activity, "/module/ecard", "校园一卡通")
                     is CampusNetActivity -> trackPageVisit(activity, "/module/campus_net", "校园网网费")
                     is ElectricityActivity -> trackPageVisit(activity, "/module/electricity", "宿舍电费")
+                    is TheolCourseActivity -> trackPageVisit(activity, "/module/theol_course", "北化在线")
                     is TheolSubmitWebViewActivity -> trackPageVisit(activity, "/module/theol_submit", "作业在线提交")
                     is WidgetConfigActivity -> trackPageVisit(activity, "/module/widget_config", "桌面小组件配置")
                 }

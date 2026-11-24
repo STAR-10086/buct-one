@@ -118,6 +118,7 @@ import com.buct.course.MailActivity
 import com.buct.course.PortalActivity
 import com.buct.course.ScsActivity
 import com.buct.course.SjcxActivity
+import com.buct.course.TheolCourseActivity
 import com.buct.course.TyglActivity
 import com.buct.course.portalBookDaysRemaining
 import com.buct.course.manager.BottomNavPreferences
@@ -218,8 +219,8 @@ private enum class DashboardModuleId(
 ) {
     THEOL(
         id = "theol",
-        title = "北化在线 · 待办与 DDL",
-        shortTitle = "北化在线",
+        title = "作业与 DDL",
+        shortTitle = "作业待办",
         icon = Icons.Outlined.Assignment,
         defaultSize = CardSize.LARGE,
         defaultCol = 0,
@@ -323,6 +324,15 @@ private enum class DashboardModuleId(
         defaultSize = CardSize.MEDIUM,
         defaultCol = 2,
         defaultRow = 12
+    ),
+    THEOL_COURSE(
+        id = "theol_course",
+        title = "北化在线 · 课程与资源",
+        shortTitle = "北化在线",
+        icon = Icons.Outlined.MenuBook,
+        defaultSize = CardSize.MEDIUM,
+        defaultCol = 0,
+        defaultRow = 14
     );
 
     val supportedSizes: List<CardSize>
@@ -2020,6 +2030,15 @@ private fun buildCompactSummary(
             CampusNetActivity.launch(context)
         }
     }
+
+    DashboardModuleId.THEOL_COURSE -> {
+        val courseCount = theolSlice.data?.courses?.size ?: 0
+        val valText = if (courseCount > 0) "$courseCount 门课程" else "待同步"
+        val sub = "单元学习 · 课程资源"
+        ModuleCompactSummary("北化在线", valText, sub, if (courseCount > 0) "${courseCount}门课" else "北化在线") {
+            TheolCourseActivity.launch(context)
+        }
+    }
 }
 
 private data class LibraryUrgentInfo(
@@ -2783,6 +2802,33 @@ private fun RenderMediumModuleCard(
                         }
                     }
                 }
+            }
+        }
+
+        DashboardModuleId.THEOL_COURSE -> {
+            val courseCount = theolSlice.data?.courses?.size ?: 0
+            MediumGlassCardFrame(
+                title = "北化在线",
+                icon = module.icon,
+                heightDp = slotHeightDp,
+                isEditing = isEditing,
+                onClick = { TheolCourseActivity.launch(context) }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = if (courseCount > 0) "$courseCount 门在读" else "点击浏览",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "单元学习 · 课程资源 · 课件",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                MediumBottomActionPill(text = "进入课程资料 ›")
             }
         }
 
@@ -3946,6 +3992,48 @@ private fun RenderLargeModuleCard(
                             ElectricityActivity.launch(context)
                         }
                     }
+                }
+            }
+        }
+
+        DashboardModuleId.THEOL_COURSE -> {
+            val courses = theolSlice.data?.courses.orEmpty()
+            val badge = when {
+                courses.isNotEmpty() -> "${courses.size} 门在读"
+                theolSlice.provenance.refreshState == RefreshState.NEVER -> "未同步"
+                else -> "可浏览"
+            }
+            DashboardGlassCard(
+                title = "北化在线 · 课程与资源",
+                badge = badge,
+                badgeColor = if (courses.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                heightDp = slotHeightDp,
+                onClick = if (isEditing) null else ({ TheolCourseActivity.launch(context) })
+            ) {
+                if (courses.isEmpty()) {
+                    Text(
+                        text = "搜索在读课程，进入「单元学习」与「课程资源」，支持端内在线预览课件/视频与原生下载打开。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        text = courses.take(3).joinToString(" · ") { it.courseName.ifBlank { "课程 #${it.lid}" } },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                QuickActionTile(
+                    label = "进入北化在线课程",
+                    icon = Icons.Outlined.MenuBook,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isEditing
+                ) {
+                    TheolCourseActivity.launch(context)
                 }
             }
         }

@@ -7,10 +7,13 @@ import com.buct.one.data.model.DomainSlice
 import com.buct.one.data.model.ImportedTaskDraft
 import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.TheolCourseInfo
+import com.buct.one.data.model.TheolCourseUnit
 import com.buct.one.data.model.TheolDownloadedFile
 import com.buct.one.data.model.TheolFilterPrefs
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
+import com.buct.one.data.model.TheolResourceItem
+import com.buct.one.data.model.TheolResourcePage
 import com.buct.one.data.model.TheolSnapshot
 import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
@@ -52,6 +55,8 @@ class TheolSyncService private constructor(
     private val syncGeneration = AtomicLong(0L)
     private val detailCache = ConcurrentHashMap<String, TheolHomeworkDetail>()
     private val testDetailCache = ConcurrentHashMap<String, TheolTestDetail>()
+    private val resourceCache = ConcurrentHashMap<String, TheolResourcePage>()
+    private val unitCache = ConcurrentHashMap<String, List<TheolCourseUnit>>()
     @Volatile
     private var lastRestoredPair: Pair<String, String>? = null
 
@@ -323,7 +328,8 @@ class TheolSyncService private constructor(
         val nextSnapshot = TheolSnapshot(
             homeworks = client.sortHomeworks(hwMap.values.toList()),
             tests = client.sortTests(testMap.values.toList()),
-            failedCourseCount = cur.failedCourseCount
+            failedCourseCount = cur.failedCourseCount,
+            courses = cur.courses
         )
         _theolState.value = currentSlice.copy(data = nextSnapshot)
     }
@@ -454,6 +460,144 @@ class TheolSyncService private constructor(
             }
         }
     }
+
+    suspend fun fetchCourseUnits(
+        lid: String,
+        forceRefresh: Boolean = false
+    ): Result<List<TheolCourseUnit>> {
+        val cleanLid = lid.trim()
+        if (!forceRefresh) {
+            unitCache[cleanLid]?.let { return Result.success(it) }
+        }
+        return withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                if (!forceRefresh) {
+                    unitCache[cleanLid]?.let { return@withLock Result.success(it) }
+                }
+                try {
+                    restoreEncryptedSession()
+                    if (!ensureSessionActiveWithAutoRelogin(bypassCooldown = true)) {
+                        return@withLock Result.failure(
+                            IllegalStateException("请先登录教务统一身份认证（sidportal）")
+                        )
+                    }
+                    val units = try {
+                        client.fetchCourseUnits(cleanLid)
+                    } catch (e: Exception) {
+                        if (SsoSilentRelogin.isAuthFailure(e) &&
+                            ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = true)
+                        ) {
+                            client.fetchCourseUnits(cleanLid)
+                        } else {
+                            throw e
+                        }
+                    }
+                    persistEncryptedSession()
+                    unitCache[cleanLid] = units
+                    Result.success(units)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+        }
+    }
+
+    suspend fun fetchUnitResources(
+        lid: String,
+        courseName: String,
+        unit: TheolCourseUnit,
+        forceRefresh: Boolean = false
+    ): Result<TheolResourcePage> {
+        val cleanLid = lid.trim()
+        val cacheKey = "unit:$cleanLid:${unit.columnId}"
+        if (!forceRefresh) {
+            resourceCache[cacheKey]?.let { return Result.success(it) }
+        }
+        return withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                if (!forceRefresh) {
+                    resourceCache[cacheKey]?.let { return@withLock Result.success(it) }
+                }
+                try {
+                    restoreEncryptedSession()
+                    if (!ensureSessionActiveWithAutoRelogin(bypassCooldown = true)) {
+                        return@withLock Result.failure(
+                            IllegalStateException("请先登录教务统一身份认证（sidportal）")
+                        )
+                    }
+                    val page = try {
+                        client.fetchUnitResources(cleanLid, courseName, unit)
+                    } catch (e: Exception) {
+                        if (SsoSilentRelogin.isAuthFailure(e) &&
+                            ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = true)
+                        ) {
+                            client.fetchUnitResources(cleanLid, courseName, unit)
+                        } else {
+                            throw e
+                        }
+                    }
+                    persistEncryptedSession()
+                    resourceCache[cacheKey] = page
+                    Result.success(page)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+        }
+    }
+
+    suspend fun fetchCourseResources(
+        lid: String,
+        courseName: String,
+        folderUrl: String? = null,
+        folderTitle: String? = null,
+        forceRefresh: Boolean = false
+    ): Result<TheolResourcePage> {
+        val cacheKey = "${lid.trim()}:${folderUrl.orEmpty().trim()}"
+        if (!forceRefresh) {
+            resourceCache[cacheKey]?.let { return Result.success(it) }
+        }
+        return withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                if (!forceRefresh) {
+                    resourceCache[cacheKey]?.let { return@withLock Result.success(it) }
+                }
+                try {
+                    restoreEncryptedSession()
+                    if (!ensureSessionActiveWithAutoRelogin(bypassCooldown = true)) {
+                        return@withLock Result.failure(
+                            IllegalStateException("请先登录教务统一身份认证（sidportal）")
+                        )
+                    }
+                    val page = try {
+                        client.fetchCourseResources(lid, courseName, folderUrl, folderTitle)
+                    } catch (e: Exception) {
+                        if (SsoSilentRelogin.isAuthFailure(e) &&
+                            ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = true)
+                        ) {
+                            client.fetchCourseResources(lid, courseName, folderUrl, folderTitle)
+                        } else {
+                            throw e
+                        }
+                    }
+                    persistEncryptedSession()
+                    resourceCache[cacheKey] = page
+                    Result.success(page)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+        }
+    }
+
+    suspend fun downloadResourceFile(
+        lid: String,
+        resource: TheolResourceItem
+    ): Result<TheolDownloadedFile> = downloadAttachment(
+        url = resource.url,
+        suggestedName = resource.name,
+        courseLid = lid
+    )
 
     /**
      * 使用已认证的北化在线会话原生下载课程作业或网页附件到应用私有缓存目录。
@@ -695,6 +839,8 @@ class TheolSyncService private constructor(
             client.importCookies("course.buct.edu.cn", meolCookies)
         }
         client.invalidateSessionCache()
+        resourceCache.clear()
+        unitCache.clear()
         lastRestoredPair = currentPair
     }
 

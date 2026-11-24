@@ -1,9 +1,12 @@
 package com.buct.one.data.source.theol
 
 import com.buct.one.data.model.TheolCourseInfo
+import com.buct.one.data.model.TheolCourseUnit
 import com.buct.one.data.model.TheolHomeworkAttachment
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
+import com.buct.one.data.model.TheolResourceItem
+import com.buct.one.data.model.TheolResourcePage
 import com.buct.one.data.model.TheolTestDetail
 import com.buct.one.data.model.TheolTestItem
 import org.jsoup.Jsoup
@@ -23,7 +26,7 @@ import java.util.TimeZone
  * 改动解析逻辑时必须将 PARSER_VERSION + 1。
  */
 object TheolParser {
-    const val PARSER_VERSION = 6
+    const val PARSER_VERSION = 7
     const val BASE_URL = "https://course.buct.edu.cn"
     private const val COURSE_HOME_PATH = "/meol/jpk/course/layout/newpage/index.jsp"
     private val COURSE_ONCLICK_ID_REGEX = Regex("""(?:courseId|lid)\s*=\s*(\d+)""")
@@ -685,6 +688,393 @@ object TheolParser {
         } else {
             url
         }
+
+    private val RESOURCE_QUOTED_URL_REGEX = Regex("""['"]([^'"]+)['"]""")
+    private val RESOURCE_LOCATION_REGEX = Regex(
+        """(?:window\.)?location(?:\.href)?\s*=\s*['"]([^'"]+)['"]|(?:window\.)?location\.replace\s*\(\s*['"]([^'"]+)['"]"""
+    )
+    private val RESOURCE_REFRESH_REGEX = Regex("""(?i)url\s*=\s*(.+)""")
+
+    private val MENU_URL_PARENT_REGEX = Regex("""menuUrl\s*\(\s*['"]1['"]\s*,\s*['"](\d+)['"]""")
+
+    /** 从课程首页（newpage/index.jsp）预渲染的 #menu.wrap-menu 中解析「单元学习」目录列表 */
+    fun parseCourseUnits(courseHomeHtml: String, courseHomeUrl: String): List<TheolCourseUnit> {
+        val doc = Jsoup.parse(courseHomeHtml, courseHomeUrl)
+        val unitLinks = doc.select("#menu ul#ul_advance li a[href]").ifEmpty {
+            val parentId = doc.select("a[onclick]").firstNotNullOfOrNull { a ->
+                val text = a.text().trim()
+                if (!text.contains("单元学习")) return@firstNotNullOfOrNull null
+                MENU_URL_PARENT_REGEX.find(a.attr("onclick"))?.groupValues?.getOrNull(1)
+            }
+            if (!parentId.isNullOrBlank()) {
+                doc.select("#menu ul.ul_$parentId li a[href]")
+            } else {
+                org.jsoup.select.Elements()
+            }
+        }
+
+        val seenIds = mutableSetOf<String>()
+        val result = mutableListOf<TheolCourseUnit>()
+        for (a in unitLinks) {
+            val resolved = resolveHttpUrl(a.attr("href"), courseHomeUrl)
+            if (resolved.isEmpty()) continue
+            val columnId = extractPositiveIdParam(resolved, "columnId")
+            val title = a.text().trim()
+            if (columnId.isEmpty() || title.isEmpty()) continue
+            if (seenIds.add(columnId)) {
+                result.add(
+                    TheolCourseUnit(
+                        columnId = columnId,
+                        title = title,
+                        url = resolved
+                    )
+                )
+            }
+        }
+        return result
+    }
+
+    /** 从课程首页 / 菜单 frame 中发现教学资源与课件栏目入口链接 */
+    fun discoverResourceEntryUrls(doc: Document, baseUrl: String = BASE_URL): List<String> {
+        val urls = linkedSetOf<String>()
+        val textKeywords = listOf("教学资源", "课程资源", "教学课件", "课件", "课程资料", "教学资料", "教学材料", "参考资料")
+        val urlKeywords = listOf("resourcelist", "courseware", "listview.jsp", "lessondoc", "resource")
+
+        for (a in doc.select("a[href], a[onclick]")) {
+            val text = a.text().trim()
+            val textMatched = textKeywords.any { text.contains(it) }
+            val resolvedHref = resolveHttpUrl(a.attr("href"), baseUrl)
+            if (resolvedHref.isNotEmpty()) {
+                val lower = resolvedHref.lowercase(Locale.ROOT)
+                if (textMatched || urlKeywords.any { lower.contains(it) }) {
+                    urls.add(resolvedHref)
+                }
+            }
+            val onclick = a.attr("onclick")
+            if (onclick.isNotBlank()) {
+                for (m in RESOURCE_QUOTED_URL_REGEX.findAll(onclick)) {
+                    val candidate = m.groupValues[1]
+                    val candidateLower = candidate.lowercase(Locale.ROOT)
+                    if (candidateLower.contains("course_column_preview_transfer.jsp") ||
+                        candidateLower.contains("colurlstuview.do") ||
+                        candidateLower.contains("listview.jsp") ||
+                        candidateLower.contains("resourcelist") ||
+                        textMatched
+                    ) {
+                        val resolvedOnclick = resolveHttpUrl(candidate, baseUrl)
+                        if (resolvedOnclick.isNotEmpty()) {
+                            urls.add(resolvedOnclick)
+                        }
+                    }
+                }
+            }
+        }
+        return urls.toList()
+    }
+
+    /** 提取 MEOL 栏目中间跳转页（transfer / iframe / JS location）内的真实目标地址（限定 course.buct.edu.cn） */
+    fun extractResourceRedirectUrl(doc: Document, baseUrl: String): String? {
+        fun acceptCourseUrl(raw: String): String? {
+            val resolved = resolveHttpUrl(raw, baseUrl)
+            if (resolved.isEmpty() || resolved == baseUrl) return null
+            val host = runCatching { URI(resolved).host }.getOrNull()?.lowercase(Locale.ROOT).orEmpty()
+            return if (host == "course.buct.edu.cn") resolved else null
+        }
+
+        val frames = doc.select("iframe[src], frame[src]")
+        var fallbackFrameUrl: String? = null
+        for (frame in frames) {
+            val resolved = acceptCourseUrl(frame.attr("src")) ?: continue
+            val lower = resolved.lowercase(Locale.ROOT)
+            val nameOrId = (frame.attr("name") + " " + frame.attr("id")).lowercase(Locale.ROOT)
+            if (lower.contains("left.jsp") || nameOrId.contains("leftframe")) continue
+            if (lower.contains("listview.jsp") || lower.contains("resourcelist") || nameOrId.contains("mainframe")) {
+                return resolved
+            }
+            if (fallbackFrameUrl == null) fallbackFrameUrl = resolved
+        }
+        if (fallbackFrameUrl != null) return fallbackFrameUrl
+
+        for (meta in doc.select("meta[http-equiv]")) {
+            if (meta.attr("http-equiv").equals("refresh", ignoreCase = true)) {
+                val target = RESOURCE_REFRESH_REGEX.find(meta.attr("content"))
+                    ?.groupValues?.getOrNull(1)?.trim(' ', '"', '\'').orEmpty()
+                if (target.isNotEmpty()) {
+                    acceptCourseUrl(target)?.let { return it }
+                }
+            }
+        }
+        for (script in doc.select("script:not([src])")) {
+            for (m in RESOURCE_LOCATION_REGEX.findAll(script.data())) {
+                val target = m.groupValues[1].ifEmpty { m.groupValues[2] }
+                if (target.isNotEmpty()) {
+                    acceptCourseUrl(target)?.let { return it }
+                }
+            }
+        }
+        return null
+    }
+
+    /** 从 download_preview.jsp 等预览页 HTML 中提取真实文件下载直链（限定 *.buct.edu.cn） */
+    fun extractDirectDownloadUrl(html: String, pageUrl: String): String? {
+        val doc = Jsoup.parse(html, pageUrl)
+        fun isDirectDownloadCandidate(raw: String): String? {
+            val resolved = resolveHttpUrl(raw, pageUrl)
+            if (resolved.isEmpty() || resolved == pageUrl) return null
+            val uri = runCatching { URI(resolved) }.getOrNull() ?: return null
+            val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
+            val isTrusted = host == "buct.edu.cn" || host.endsWith(".buct.edu.cn")
+            if (!isTrusted) return null
+            val lower = resolved.lowercase(Locale.ROOT)
+            if (lower.contains("download_preview.jsp")) return null
+            val looksDirect = lower.contains("download.jsp") ||
+                lower.contains("download_file") ||
+                lower.contains("file_download") ||
+                lower.contains("attach")
+            return if (looksDirect) resolved else null
+        }
+
+        doc.selectFirst("a.lv-download[href]")?.let { a ->
+            isDirectDownloadCandidate(a.attr("href"))?.let { return it }
+        }
+        for (el in doc.select("a[href], iframe[src], frame[src]")) {
+            val attr = if (el.hasAttr("href")) el.attr("href") else el.attr("src")
+            isDirectDownloadCandidate(attr)?.let { return it }
+        }
+        for (script in doc.select("script:not([src])")) {
+            for (m in RESOURCE_LOCATION_REGEX.findAll(script.data())) {
+                val target = m.groupValues[1].ifEmpty { m.groupValues[2] }
+                if (target.isNotEmpty()) {
+                    isDirectDownloadCandidate(target)?.let { return it }
+                }
+            }
+        }
+        return null
+    }
+
+    /** 解析北化在线课程资源目录页（文件夹与可下载课件列表） */
+    fun parseResourceList(
+        html: String,
+        pageUrl: String,
+        lid: String,
+        courseName: String,
+        fallbackFolderTitle: String? = null
+    ): TheolResourcePage {
+        val doc = Jsoup.parse(html, pageUrl)
+        val items = linkedMapOf<String, TheolResourceItem>()
+        val knownExts = setOf(
+            "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx",
+            "zip", "rar", "7z", "txt", "md", "csv", "mp4", "mp3", "png", "jpg", "jpeg"
+        )
+        val ignoredTexts = setOf(
+            "返回", "上一级", "返回上一级目录", "上一页", "下一页", "首页", "尾页",
+            "下载", "预览", "排序", "刷新", "全部", "查询"
+        )
+
+        val valueListTable = doc.selectFirst("table.valuelist")
+        val rows = if (valueListTable != null) {
+            valueListTable.select("tr")
+        } else {
+            doc.select("table.infotable tr, table tr")
+        }
+
+        for (row in rows) {
+            val links = row.select("a[href]")
+            if (links.isEmpty()) continue
+            val directDownloadUrl = links.firstNotNullOfOrNull { a ->
+                val resolved = resolveHttpUrl(a.attr("href"), pageUrl)
+                val lower = resolved.lowercase(Locale.ROOT)
+                if (resolved.isNotEmpty() &&
+                    !lower.contains("download_preview.jsp") &&
+                    (lower.contains("download.jsp") || lower.contains("download_file") || lower.contains("file_download"))
+                ) resolved else null
+            }
+            val primaryLink = links.firstOrNull { a ->
+                val text = a.text().trim()
+                text.isNotEmpty() && text !in ignoredTexts && !text.startsWith("返回上一级")
+            } ?: links.first()
+            val item = parseResourceElement(
+                link = primaryLink,
+                row = row,
+                pageUrl = pageUrl,
+                knownExts = knownExts,
+                ignoredTexts = ignoredTexts,
+                preferredFileUrl = directDownloadUrl
+            ) ?: continue
+            items.putIfAbsent(item.url, item)
+        }
+
+        if (valueListTable == null && items.isEmpty()) {
+            val previewRoot = doc.selectFirst("#dowload-preview")
+            val downloadAnchor = previewRoot?.selectFirst("a.lv-download[href]")
+            if (previewRoot != null && downloadAnchor != null) {
+                val rawDownloadUrl = resolveHttpUrl(downloadAnchor.attr("href"), pageUrl)
+                if (rawDownloadUrl.isNotEmpty()) {
+                    val downloadUrl = if (lid.isNotBlank() && !rawDownloadUrl.contains("lid=", ignoreCase = true)) {
+                        val sep = if ('?' in rawDownloadUrl) '&' else '?'
+                        "$rawDownloadUrl${sep}lid=${URLEncoder.encode(lid, "UTF-8")}"
+                    } else {
+                        rawDownloadUrl
+                    }
+                    val h2Text = previewRoot.selectFirst("h2")?.text().orEmpty()
+                    val sizeMatch = Regex("""\(([^)]+)\)""").find(h2Text)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                    val parsedFileName = h2Text
+                        .substringAfter("文件名:", "")
+                        .substringBefore("(")
+                        .replace("下载", "")
+                        .trim()
+                        .ifEmpty {
+                            previewRoot.selectFirst("h1")?.text()?.trim().orEmpty()
+                        }
+                        .ifEmpty {
+                            fallbackFolderTitle?.trim().orEmpty().ifEmpty { "课程资料" }
+                        }
+                    val ext = if ('.' in parsedFileName) {
+                        parsedFileName.substringAfterLast('.', "").lowercase(Locale.ROOT).takeIf { it.length in 1..6 }.orEmpty()
+                    } else {
+                        ""
+                    }
+                    items[downloadUrl] = TheolResourceItem(
+                        id = downloadUrl,
+                        name = parsedFileName,
+                        isFolder = false,
+                        url = downloadUrl,
+                        sizeText = sizeMatch,
+                        updatedAt = "",
+                        fileExt = ext,
+                        previewUrl = pageUrl
+                    )
+                }
+            } else {
+                for (link in doc.select("a[href]")) {
+                    val item = parseResourceElement(link, null, pageUrl, knownExts, ignoredTexts, null) ?: continue
+                    items.putIfAbsent(item.url, item)
+                }
+            }
+        }
+
+        val cleanFallbackTitle = fallbackFolderTitle?.trim()?.takeIf { it.isNotBlank() }
+        val domTitle = doc.selectFirst(".subtitle > span:first-child, h2, h3, .title, .pos, .position")
+            ?.text()?.trim()?.takeIf { it.isNotBlank() && it.length <= 40 }
+        val folderTitle = cleanFallbackTitle ?: domTitle ?: courseName.ifBlank { "课程资料" }
+
+        val sortedItems = items.values.toList().sortedBy { !it.isFolder }
+
+        return TheolResourcePage(
+            lid = lid,
+            courseName = courseName,
+            currentUrl = pageUrl,
+            folderTitle = folderTitle,
+            items = sortedItems
+        )
+    }
+
+    private fun parseResourceElement(
+        link: Element,
+        row: Element?,
+        pageUrl: String,
+        knownExts: Set<String>,
+        ignoredTexts: Set<String>,
+        preferredFileUrl: String?
+    ): TheolResourceItem? {
+        val resolved = resolveHttpUrl(link.attr("href"), pageUrl)
+        if (resolved.isEmpty() || resolved == pageUrl) return null
+        val name = link.text().trim()
+        if (name.isEmpty() || name in ignoredTexts || name.startsWith("返回上一级")) return null
+
+        val lower = resolved.lowercase(Locale.ROOT)
+        val isFile = lower.contains("download_preview.jsp") ||
+            lower.contains("download.jsp") ||
+            lower.contains("download_file") ||
+            lower.contains("file_download") ||
+            lower.contains("fileid=") ||
+            lower.contains("resid=") ||
+            knownExts.any { name.lowercase(Locale.ROOT).endsWith(".$it") }
+        val isFolder = !isFile && (
+            lower.contains("folderid=") ||
+                lower.contains("dirid=") ||
+                lower.contains("parentid=") ||
+                lower.contains("listview.jsp") ||
+                lower.contains("resourcelist") ||
+                lower.contains("lessondoc") ||
+                row?.selectFirst("img[src*=folder], img[src*=dir], .folder") != null
+            )
+        if (!isFile && !isFolder) return null
+
+        val finalUrl = if (isFile) {
+            when {
+                !preferredFileUrl.isNullOrBlank() -> preferredFileUrl
+                else -> rewritePreviewToDirectDownload(resolved)
+            }
+        } else {
+            resolved
+        }
+
+        val cells = row?.select("td").orEmpty().map { it.text().trim() }
+        val rawSize = cells.firstOrNull {
+            it.matches(Regex("""\d+(\.\d+)?\s*(B|KB|MB|GB|字节)""", RegexOption.IGNORE_CASE))
+        }.orEmpty()
+        val typeLabel = if (rawSize.isEmpty() && cells.size >= 4) {
+            cells[3].takeIf { it.isNotBlank() && it.length <= 8 && !it.all(Char::isDigit) }.orEmpty()
+        } else {
+            ""
+        }
+        val sizeText = rawSize.ifEmpty { typeLabel }
+        val updatedAt = cells.firstOrNull {
+            it.matches(Regex("""\d{4}[-/]\d{1,2}[-/]\d{1,2}.*"""))
+        }.orEmpty()
+        val nameExt = if (!isFolder && '.' in name) {
+            name.substringAfterLast('.', "").lowercase(Locale.ROOT).takeIf { it.length in 1..6 }.orEmpty()
+        } else {
+            ""
+        }
+        val ext = if (!isFolder) {
+            nameExt.ifEmpty { inferExtFromIcon(row) }
+        } else {
+            ""
+        }
+
+        return TheolResourceItem(
+            id = finalUrl,
+            name = name,
+            isFolder = isFolder,
+            url = finalUrl,
+            sizeText = sizeText,
+            updatedAt = updatedAt,
+            fileExt = ext,
+            previewUrl = if (isFile) resolved else ""
+        )
+    }
+
+    private fun rewritePreviewToDirectDownload(url: String): String {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return url
+        val path = uri.path.orEmpty()
+        if (!path.endsWith("/preview/download_preview.jsp", ignoreCase = true)) return url
+        val query = uri.rawQuery.orEmpty()
+        if (!query.contains("fileid=", ignoreCase = true) && !query.contains("resid=", ignoreCase = true)) {
+            return url
+        }
+        val newPath = path.substringBeforeLast("/preview/download_preview.jsp") + "/download.jsp"
+        return runCatching {
+            URI(uri.scheme, uri.authority, newPath, uri.query, null).toString()
+        }.getOrDefault(url)
+    }
+
+    private fun inferExtFromIcon(row: Element?): String {
+        val src = row?.selectFirst("img[src*=/icons/], img[src*=icon]")
+            ?.attr("src")?.lowercase(Locale.ROOT).orEmpty()
+        if (src.isEmpty()) return ""
+        return when {
+            src.contains("pdf") -> "pdf"
+            src.contains("powerpoint") || src.contains("ppt") -> "ppt"
+            src.contains("word") || src.contains("doc") -> "doc"
+            src.contains("excel") || src.contains("xls") -> "xls"
+            src.contains("video") || src.contains("mp4") -> "mp4"
+            src.contains("audio") || src.contains("mp3") -> "mp3"
+            src.contains("zip") || src.contains("rar") -> "zip"
+            else -> ""
+        }
+    }
 
     private fun extractHwtid(href: String): String = extractPositiveIdParam(href, "hwtid")
 

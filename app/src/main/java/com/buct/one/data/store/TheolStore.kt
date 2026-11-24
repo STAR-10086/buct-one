@@ -7,6 +7,7 @@ import com.buct.one.data.model.LocalTodoItem
 import com.buct.one.data.model.Provenance
 import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.TheolFilterPrefs
+import com.buct.one.data.model.TheolCourseInfo
 import com.buct.one.data.model.TheolHomeworkAttachment
 import com.buct.one.data.model.TheolHomeworkDetail
 import com.buct.one.data.model.TheolHomeworkItem
@@ -317,6 +318,21 @@ class TheolStore(private val rootDir: File) {
                 }
             }
         )
+        put(
+            "courses",
+            JSONArray().apply {
+                for (c in snapshot.courses) {
+                    put(
+                        JSONObject().apply {
+                            put("lid", c.lid)
+                            put("courseName", c.courseName)
+                            put("type", c.type)
+                            put("url", c.url)
+                        }
+                    )
+                }
+            }
+        )
     }
 
     private fun decodeSnapshot(obj: JSONObject): TheolSnapshot {
@@ -369,10 +385,28 @@ class TheolStore(private val rootDir: File) {
                 )
             }
         }
+        val coursesArr = obj.optJSONArray("courses") ?: JSONArray()
+        val courses = buildList(coursesArr.length()) {
+            for (i in 0 until coursesArr.length()) {
+                val o = coursesArr.optJSONObject(i) ?: continue
+                val lid = o.optString("lid", "")
+                if (lid.isNotBlank()) {
+                    add(
+                        TheolCourseInfo(
+                            lid = lid,
+                            courseName = o.optString("courseName", ""),
+                            type = o.optString("type", "course"),
+                            url = o.optString("url", "")
+                        )
+                    )
+                }
+            }
+        }
         return TheolSnapshot(
             homeworks = homeworks,
             tests = tests,
-            failedCourseCount = obj.optInt("failedCourseCount", 0)
+            failedCourseCount = obj.optInt("failedCourseCount", 0),
+            courses = courses
         )
     }
 

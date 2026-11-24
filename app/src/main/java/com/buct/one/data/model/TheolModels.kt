@@ -81,10 +81,36 @@ data class TheolTestDetail(
     val fetchedAt: Long = 0L
 )
 
+data class TheolResourceItem(
+    val id: String,
+    val name: String,
+    val isFolder: Boolean,
+    val url: String,
+    val sizeText: String = "",
+    val updatedAt: String = "",
+    val fileExt: String = "",
+    val previewUrl: String = ""
+)
+
+data class TheolCourseUnit(
+    val columnId: String,
+    val title: String,
+    val url: String
+)
+
+data class TheolResourcePage(
+    val lid: String,
+    val courseName: String,
+    val currentUrl: String,
+    val folderTitle: String,
+    val items: List<TheolResourceItem>
+)
+
 data class TheolSnapshot(
     val homeworks: List<TheolHomeworkItem> = emptyList(),
     val tests: List<TheolTestItem> = emptyList(),
-    val failedCourseCount: Int = 0
+    val failedCourseCount: Int = 0,
+    val courses: List<TheolCourseInfo> = emptyList()
 )
 
 /** 被用户拉黑的北化在线课程（例如已退课但系统仍残留在待办列表中） */
