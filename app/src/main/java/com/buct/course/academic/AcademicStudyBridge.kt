@@ -1,6 +1,7 @@
 package com.buct.course.academic
 
 import com.buct.course.manager.UserManager
+import com.buct.course.model.BuctGpaScale
 import com.buct.course.model.SchoolConfig
 import com.buct.course.ui.screen.ExamItemUi
 import com.buct.course.ui.screen.GradeItemUi
@@ -32,8 +33,11 @@ object AcademicStudyBridge {
 
     fun stats(report: AcademicGradeReport): OverallStatsUi {
         val graded = report.grades.mapNotNull { item ->
-            val credit = item.credits.toDoubleOrNull() ?: return@mapNotNull null
-            val point = item.gradePoint.toDoubleOrNull() ?: return@mapNotNull null
+            if (BuctGpaScale.isPassFailGrade(item.score)) return@mapNotNull null
+            val credit = item.credits.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: return@mapNotNull null
+            val point = item.gradePoint.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }
+                ?: BuctGpaScale.gradePointFromScore(item.score)
+                ?: return@mapNotNull null
             credit to point
         }
         val weightedCredits = graded.sumOf { it.first }
@@ -41,7 +45,8 @@ object AcademicStudyBridge {
             if (weightedCredits > 0) String.format(Locale.ROOT, "%.2f", graded.sumOf { it.first * it.second } / weightedCredits) else "--"
         }
         val credits = report.totalCredits.ifBlank {
-            val passed = report.grades.filter { (score(it.score) ?: -1.0) >= 60.0 }.mapNotNull { it.credits.toDoubleOrNull() }
+            val passed = report.grades.filter { BuctGpaScale.isCreditEarned(it.score) }
+                .mapNotNull { it.credits.toDoubleOrNull()?.takeIf { c -> c.isFinite() && c > 0.0 } }
             if (passed.isEmpty()) "--" else String.format(Locale.ROOT, "%.1f", passed.sum())
         }
         val scores = report.grades.mapNotNull { score(it.score) }
@@ -52,9 +57,17 @@ object AcademicStudyBridge {
             notGradedCount, scores.count { it < 60 })
     }
 
-    internal fun score(value: String): Double? = value.trim().toDoubleOrNull() ?: when (value.trim()) {
-        "优秀", "优" -> 95.0; "良好", "良" -> 85.0; "中等", "中" -> 75.0
-        "及格", "合格", "通过" -> 60.0; "不及格", "不合格", "未通过" -> 0.0; else -> null
+    internal fun score(value: String): Double? {
+        val trimmed = value.trim()
+        trimmed.toDoubleOrNull()?.let { return it }
+        return when (trimmed.uppercase(Locale.ROOT)) {
+            "优秀", "优", "A+", "A", "A-" -> 95.0
+            "良好", "良", "B+", "B", "B-" -> 85.0
+            "中等", "中", "C+", "C", "C-" -> 75.0
+            "及格", "合格", "通过", "D+", "D", "P", "PASS" -> 60.0
+            "不及格", "不合格", "未通过", "不通过", "F", "E", "U", "UNPASS" -> 0.0
+            else -> null
+        }
     }
 
     fun scheduleJson(courses: List<AcademicScheduleEntry>): String = JSONObject().put("kbList", JSONArray().apply {

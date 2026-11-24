@@ -477,7 +477,7 @@ fun GradesRoute() {
             val local = loadOverallLocal(context)
             overallGrades = local ?: emptyList()
             if (local == null) com.buct.course.ui.system.GlassToaster.show("在线同步未开启，暂无本地成绩，请到设置页开启「在线同步」")
-            overallStats = com.buct.course.ui.route.GradesLogic.calculateStats(overallGrades, "0", 0.0, 0)
+            overallStats = com.buct.course.ui.route.GradesLogic.calculateStats(overallGrades, "", 0.0, 0)
             overallLoaded = true
             overallIsLoading = false
             val localCurr = loadCurriculumLocal(context)
@@ -1532,10 +1532,12 @@ private object GradesLogic {
             }
         }
 
+        val earnedTotalCredits = com.buct.course.ui.screen.earnedCredits(grades)
+
         val displayGPA = if (baseGPA.isNotEmpty()) baseGPA else {
             if (totalCredits > 0) String.format("%.2f", weightedGPA / totalCredits) else "0.00"
         }
-        val displayCredits = if (totalCredits > 0) String.format("%.1f", totalCredits) else String.format("%.1f", baseCredits)
+        val displayCredits = if (earnedTotalCredits > 0) String.format("%.1f", earnedTotalCredits) else String.format("%.1f", baseCredits)
         val displayCount = if (grades.isNotEmpty()) grades.size else baseCount
 
         return OverallStatsUi(displayGPA, displayCredits, displayCount, excellent, good, medium, pass, notGraded, fail)

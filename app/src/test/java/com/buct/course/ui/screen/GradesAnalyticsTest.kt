@@ -71,6 +71,10 @@ class GradesAnalyticsTest {
         assertFalse(feasible.alreadyReached)
         assertEquals(3.8, feasible.requiredGpa, 0.001)
 
+        val feasible433 = estimateTargetGpa(grades, officialGpa = "3.00", targetGpa = 3.6, plannedCredits = 10.0)
+        assertTrue(feasible433.achievable)
+        assertEquals(4.2, feasible433.requiredGpa, 0.001)
+
         val impossible = estimateTargetGpa(grades, officialGpa = "3.00", targetGpa = 3.9, plannedCredits = 10.0)
         assertFalse(impossible.achievable)
     }

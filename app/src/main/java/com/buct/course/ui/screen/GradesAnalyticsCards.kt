@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.buct.course.model.BuctGpaScale
 import com.buct.course.ui.system.glassBorderColor
 import com.buct.course.ui.system.glassSurfaceColor
 import java.util.Locale
@@ -142,7 +143,7 @@ internal fun estimateTargetGpa(
         currentGpa = currentGpa,
         currentCredits = totalCredits,
         requiredGpa = required,
-        achievable = required <= 4.0001,
+        achievable = required <= BuctGpaScale.MAX_GPA + 1e-4,
         alreadyReached = currentGpa >= targetGpa - 1e-6 && totalCredits > 0.0
     )
 }
@@ -341,7 +342,7 @@ internal fun GpaTrendCard(grades: List<GradeItemUi>) {
             }
 
             val minVal = (points.minOf { it.gpa } - 0.35).coerceAtLeast(0.0)
-            val maxVal = (points.maxOf { it.gpa } + 0.25).coerceAtMost(4.0)
+            val maxVal = (points.maxOf { it.gpa } + 0.25).coerceAtMost(BuctGpaScale.MAX_GPA)
             val span = (maxVal - minVal).coerceAtLeast(0.4)
 
             Canvas(
@@ -516,9 +517,9 @@ internal fun TargetGpaSimulatorCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(3.0f, 3.3f, 3.5f, 3.8f, 4.0f).forEach { preset ->
+                    listOf(3.0f, 3.3f, 3.5f, 3.8f, 4.0f, 4.33f).forEach { preset ->
                         GlassFilterChip(
-                            label = String.format(Locale.US, "%.1f", preset),
+                            label = if (preset > 4.0f) String.format(Locale.US, "%.2f", preset) else String.format(Locale.US, "%.1f", preset),
                             selected = abs(targetGpa - preset) < 0.01f,
                             onClick = { targetGpa = preset },
                             compact = true
@@ -527,8 +528,11 @@ internal fun TargetGpaSimulatorCard(
                 }
                 Slider(
                     value = targetGpa,
-                    onValueChange = { targetGpa = ((it * 20).roundToInt() / 20f).coerceIn(2.0f, 4.0f) },
-                    valueRange = 2.0f..4.0f,
+                    onValueChange = {
+                        targetGpa = if (it >= 4.31f) 4.33f
+                        else ((it * 20).roundToInt() / 20f).coerceIn(2.0f, 4.33f)
+                    },
+                    valueRange = 2.0f..4.33f,
                     colors = SliderDefaults.colors(thumbColor = primary, activeTrackColor = primary)
                 )
 
@@ -576,7 +580,7 @@ internal fun TargetGpaSimulatorCard(
                     )
                     else -> String.format(
                         Locale.US,
-                        "需要均绩 %.2f（已超出 4.00 上限），建议增加后续修读学分或适当调低目标。",
+                        "需要均绩 %.2f（已超出 4.33 上限），建议增加后续修读学分或适当调低目标。",
                         estimate.requiredGpa
                     )
                 }

@@ -1,5 +1,6 @@
 package com.buct.course.ui.screen
 
+import com.buct.course.model.BuctGpaScale
 import com.buct.course.ui.theme.moduleEntrance
 import com.buct.course.ui.theme.ModuleMotion
 
@@ -209,13 +210,8 @@ internal fun isGpaExcludedGrade(grade: GradeItemUi): Boolean {
     if (grade.courseType.contains("素质教育")) return true
     // 2. 体育课程（课程名含"体育"；注意 PHE 前缀还包含 军事技能/军事理论，这两门计入 GPA，不能按 PHE 排除）
     if (grade.courseName.contains("体育")) return true
-    // 3. 两级制计分课程（成绩只记 合格/不合格/P/U/Pass，无绩点）
-    val g = grade.grade.trim()
-    if (g == "合格" || g == "不合格" ||
-        g.equals("P", ignoreCase = true) || g.equals("U", ignoreCase = true) ||
-        g.equals("Pass", ignoreCase = true) || g.equals("Unpass", ignoreCase = true) ||
-        g.equals("通过", ignoreCase = true) || g.equals("不通过", ignoreCase = true)
-    ) return true
+    // 3. 两级制计分课程（成绩只记 合格/不合格/P/U/Pass，不计入 GPA）
+    if (BuctGpaScale.isPassFailGrade(grade.grade)) return true
     return false
 }
 
@@ -229,20 +225,19 @@ internal fun gradeCourseDedupKey(g: GradeItemUi): String {
     return "name:$normName"
 }
 
-private fun isPassingGradeText(raw: String): Boolean {
-    val t = raw.trim()
-    val num = t.toDoubleOrNull()
-    if (num != null) return num >= 60.0
-    val upper = t.uppercase()
-    return upper.startsWith("A") || upper.startsWith("B") || upper.startsWith("C") || upper.startsWith("D")
-}
-
 internal fun effectiveGpaPoint(g: GradeItemUi): Double? {
+    if (isGpaExcludedGrade(g)) return null
     val parsed = g.gpa.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }
     if (parsed != null) return parsed
-    if (g.examNature.contains("补考") && isPassingGradeText(g.grade)) return 1.0
-    return null
+    if (g.examNature.contains("补考") && BuctGpaScale.isCreditEarned(g.grade)) return 1.0
+    return BuctGpaScale.gradePointFromScore(g.grade)
 }
+
+/** 统计已取得学分：合格(P)/通过/60+/A+~D 均取得学分；不合格(U)/F/空白未出分不取得学分，同一门课只计一次。 */
+internal fun earnedCredits(grades: List<GradeItemUi>): Double =
+    deduplicateBestAttempts(grades)
+        .filter { BuctGpaScale.isCreditEarned(it.grade) }
+        .sumOf { it.credits.toDoubleOrNull()?.takeIf { c -> c.isFinite() && c > 0.0 } ?: 0.0 }
 
 internal fun isGradedForGpa(g: GradeItemUi): Boolean {
     if (isGpaExcludedGrade(g)) return false
@@ -761,11 +756,7 @@ private fun SemesterGradesContent(
     topInset: Dp,
     bottomInset: Dp
 ) {
-    val totalCredits = remember(grades) {
-        deduplicateBestAttempts(grades)
-            .filterNot { isGpaExcludedGrade(it) }
-            .sumOf { it.credits.toDoubleOrNull() ?: 0.0 }
-    }
+    val totalCredits = remember(grades) { earnedCredits(grades) }
     val averageGpa = remember(grades, currentSemester, officialOverallGpa) {
         // 学期「全部」直接展示官方绩点（N105515 GPA），避免合并接口绩点字段口径差异
         if (currentSemester == "全部" && officialOverallGpa.isNotBlank()

@@ -1,5 +1,6 @@
 package com.buct.course.academic
 
+import com.buct.course.model.BuctGpaScale
 import com.buct.course.model.SchoolConfig
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
@@ -134,38 +135,9 @@ internal class SouthsoftStudyReader(
         )
     }
 
-    /** 研究生成绩常用 A/B+/B/C+ 两级或字母制；按学校常见 4.3 制换算，仅用于列表汇总。 */
-    private fun gradePoint(grade: String, numeric: String): String {
-        val letter = grade.trim().uppercase()
-        val mapped = when (letter) {
-            "A+", "A" -> 4.0
-            "A-" -> 3.7
-            "B+" -> 3.3
-            "B" -> 3.0
-            "B-" -> 2.7
-            "C+" -> 2.3
-            "C" -> 2.0
-            "C-" -> 1.7
-            "D+" -> 1.3
-            "D" -> 1.0
-            "F", "E" -> 0.0
-            else -> null
-        }
-        if (mapped != null) return String.format(java.util.Locale.ROOT, "%.1f", mapped)
-        val score = numeric.toDoubleOrNull() ?: grade.toDoubleOrNull() ?: return ""
-        return when {
-            score >= 90 -> "4.0"
-            score >= 85 -> "3.7"
-            score >= 82 -> "3.3"
-            score >= 78 -> "3.0"
-            score >= 75 -> "2.7"
-            score >= 72 -> "2.3"
-            score >= 68 -> "2.0"
-            score >= 64 -> "1.7"
-            score >= 60 -> "1.0"
-            else -> "0.0"
-        }
-    }
+    /** 按北化 4.33 制换算单科绩点；P/U/合格/不合格及空白成绩不计入 GPA（返回空串）。 */
+    private fun gradePoint(grade: String, numeric: String): String =
+        BuctGpaScale.gradePointFromScore(grade, numeric)?.let(BuctGpaScale::formatGradePoint).orEmpty()
 
     /** 研究生系统暂未提供已验证的考试查询接口，返回空列表而不是伪造数据。 */
     override suspend fun exams(term: AcademicTerm): List<AcademicExam> = emptyList()
