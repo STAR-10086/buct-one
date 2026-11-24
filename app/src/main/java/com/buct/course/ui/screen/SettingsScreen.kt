@@ -87,6 +87,7 @@ fun SettingsScreen(
     onCredits: () -> Unit,
     onCheckUpdate: () -> Unit = {},
     isCheckingUpdate: Boolean = false,
+    onOpenNotices: () -> Unit = {},
     startupPageName: String = "课程",
     onStartupPageSelect: () -> Unit = {},
     onLogout: () -> Unit,
@@ -340,6 +341,13 @@ fun SettingsScreen(
                             )
                         }
                     }
+                )
+                SettingsRow(
+                    icon = Icons.Outlined.Notifications,
+                    iconTint = Color(0xFFFF9500),
+                    title = "官方公告",
+                    subtitle = "查看开发动态、维护通知与版本公告",
+                    onClick = onOpenNotices
                 )
                 SettingsRow(
                     icon = Icons.Outlined.FavoriteBorder,

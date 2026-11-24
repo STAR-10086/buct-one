@@ -204,6 +204,10 @@ fun SettingsRoute(
 
     val updateState = rememberUpdateState(context)
     var isCheckingUpdate by remember { mutableStateOf(false) }
+    val noticeManager = remember { com.buct.course.update.AppNoticeManager.getInstance(context) }
+    var showNoticeListDialog by remember { mutableStateOf(false) }
+    var noticeList by remember { mutableStateOf<List<com.buct.course.update.AppNotice>>(emptyList()) }
+    var selectedNoticeDetail by remember { mutableStateOf<com.buct.course.update.AppNotice?>(null) }
 
     fun checkUpdates() {
         if (isCheckingUpdate) return
@@ -345,6 +349,13 @@ fun SettingsRoute(
         onCredits = { showCreditsDialog = true },
         onCheckUpdate = { checkUpdates() },
         isCheckingUpdate = isCheckingUpdate,
+        onOpenNotices = {
+            noticeList = noticeManager.getCachedNotices()
+            showNoticeListDialog = true
+            noticeManager.fetchNotices { res ->
+                res.onSuccess { noticeList = it }
+            }
+        },
         startupPageName = startupPage.label,
         onStartupPageSelect = { showStartupPageDialog = true },
         onLogout = { showLogoutDialog = true },
@@ -398,6 +409,27 @@ fun SettingsRoute(
         avatarUpdatedAt = userProfile.avatarUpdatedAt,
         onEditProfileClick = { showProfileDialog = true }
     )
+
+    if (showNoticeListDialog) {
+        com.buct.course.update.AppNoticeListDialog(
+            notices = noticeList,
+            onSelectNotice = {
+                showNoticeListDialog = false
+                selectedNoticeDetail = it
+            },
+            onDismiss = { showNoticeListDialog = false }
+        )
+    }
+
+    selectedNoticeDetail?.let { detail ->
+        com.buct.course.update.AppNoticeDialog(
+            notice = detail,
+            onDismiss = {
+                selectedNoticeDetail = null
+                noticeManager.markDismissed(detail.id)
+            }
+        )
+    }
 
     if (showProfileDialog) {
         ProfileEditDialog(

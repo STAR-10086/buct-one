@@ -253,12 +253,19 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
     var showStarDialog by rememberSaveable { mutableStateOf(false) }
     var startupOverlaysReady by remember { mutableStateOf(false) }
     val startupUpdateState = com.buct.course.update.rememberUpdateState(context)
+    val noticeManager = remember(context) { com.buct.course.update.AppNoticeManager.getInstance(context) }
+    var startupNotice by remember { mutableStateOf<com.buct.course.update.AppNotice?>(null) }
 
     LaunchedEffect(startupOverlaysReady, isDemoMode) {
         if (startupOverlaysReady && !isDemoMode && !hasCheckedStartupUpdate) {
             hasCheckedStartupUpdate = true
             kotlinx.coroutines.delay(2500L)
             startupUpdateState.checkForUpdate()
+            noticeManager.fetchNotices { res ->
+                res.onSuccess { list ->
+                    startupNotice = list.firstOrNull { it.popup && !noticeManager.isDismissed(it.id) }
+                }
+            }
         }
     }
 
@@ -710,14 +717,28 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
             }
 
             val startupAvailableUpdate = startupUpdateState.updateInfo()
-            if (!session.expired && startupUpdateState.showDialog() && startupAvailableUpdate != null) {
+            val showingStartupUpdate = !session.expired && startupUpdateState.showDialog() && startupAvailableUpdate != null
+            if (showingStartupUpdate) {
                 com.buct.course.update.UpdateDialog(
-                    updateInfo = startupAvailableUpdate,
+                    updateInfo = startupAvailableUpdate!!,
                     currentVersion = startupUpdateState.getCurrentVersion(),
                     onDismiss = { startupUpdateState.dismiss() },
                     onUpdate = { url -> startupUpdateState.startDownload(url) },
                     downloadProgress = startupUpdateState.downloadProgress(),
                     isDownloading = startupUpdateState.isDownloading()
+                )
+            }
+
+            val activeStartupNotice = startupNotice
+            if (!session.expired && !showingStartupUpdate && activeStartupNotice != null) {
+                com.buct.course.update.AppNoticeDialog(
+                    notice = activeStartupNotice,
+                    onDismiss = {
+                        startupNotice = null
+                        if (activeStartupNotice.dismissible) {
+                            noticeManager.markDismissed(activeStartupNotice.id)
+                        }
+                    }
                 )
             }
 
