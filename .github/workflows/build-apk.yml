@@ -689,11 +689,10 @@ jobs:
               f.write("\n")
           PY
               cp CHANGELOG.md /tmp/buct-one-web/src/data/changelog-fallback.md
-              cp CHANGELOG.md /tmp/buct-one-web/src/data/changelog-cache.md
               cd /tmp/buct-one-web
               git config user.name "github-actions[bot]"
               git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git add src/data/release-snapshot.json src/data/changelog-fallback.md src/data/changelog-cache.md
+              git add src/data/release-snapshot.json src/data/changelog-fallback.md
               if ! git diff --cached --quiet; then
                 git commit -m "chore: 自动同步 ${TAG} 发版快照与更新日志"
               else
