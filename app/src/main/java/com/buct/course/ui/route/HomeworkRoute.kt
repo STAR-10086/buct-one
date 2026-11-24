@@ -651,7 +651,7 @@ fun HomeworkRoute() {
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                 )
             },
-            confirmButton = {},
+            confirmButton = null,
             dismissButton = {
                 SystemSecondaryButton(
                     text = "取消",
@@ -696,7 +696,7 @@ fun HomeworkRoute() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
                         .clickable {
                             showAddMenuDialog = false
                             TaskImportActivity.launch(context)

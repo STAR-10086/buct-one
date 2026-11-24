@@ -1,5 +1,6 @@
 package com.buct.course.ui.screen
 
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,10 +44,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.buct.course.TheolAttachmentOpener
+import com.buct.course.TheolCourseDetailActivity
 import com.buct.course.TheolSubmitWebViewActivity
 import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassPageScaffold
-import com.buct.course.ui.system.GlassSubpage
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.InsetGroupedRow
@@ -59,15 +60,13 @@ import com.buct.one.data.model.TheolCourseUnit
 import com.buct.one.data.model.TheolResourceItem
 import com.buct.one.data.model.TheolResourcePage
 import com.buct.one.data.sync.TheolSyncService
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 
 /**
- * 北化在线（THEOL / MEOL）独立模块主界面：
- * 一级页：在读课程列表 + 搜索栏（原生跨 Activity 预测性返回）；
- * 二级页（GlassSubpage 承载，原生跟手预测性返回）：课程学习中心（单元学习 / 课程资源）；
- * 三级页（GlassSubpage 逐层承载，原生跟手预测性返回）：单元详情 / 课程资源子目录；
- * 文件交互：点击文件行直接在线预览（方案 A），点击右侧下载图标原生下载打开。
+ * 北化在线（THEOL / MEOL）一级页：在读课程列表 + 搜索栏。
+ * 点击具体课程后启动独立 [TheolCourseDetailActivity]，享受系统级跨 Activity 预测性返回手势。
  */
 @Composable
 fun TheolCourseScreen(
@@ -112,8 +111,6 @@ fun TheolCourseScreen(
             }
         }
     }
-
-    var selectedCourse by remember { mutableStateOf<TheolCourseInfo?>(null) }
 
     LaunchedEffect(Unit) {
         if (courses.size <= 25 && service.canAutoSync()) {
@@ -200,7 +197,13 @@ fun TheolCourseScreen(
                             title = course.courseName.ifBlank { "课程 #${course.lid}" },
                             subtitle = "课程编号 ${course.lid}",
                             showDivider = index != filteredCourses.lastIndex,
-                            onClick = { selectedCourse = course },
+                            onClick = {
+                                TheolCourseDetailActivity.launchCourse(
+                                    context = context,
+                                    lid = course.lid,
+                                    courseName = course.courseName
+                                )
+                            },
                             trailing = {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -215,20 +218,13 @@ fun TheolCourseScreen(
             Spacer(Modifier.height(12.dp))
         }
     }
-
-    selectedCourse?.let { activeCourse ->
-        GlassSubpage(onDismiss = { selectedCourse = null }) { closeCourseSubpage ->
-            CourseLearningCenterSubpage(
-                course = activeCourse,
-                service = service,
-                onBack = closeCourseSubpage
-            )
-        }
-    }
 }
 
+/**
+ * 北化在线二级页（由独立 [TheolCourseDetailActivity] 承载）：课程学习中心（单元学习 / 课程资源）。
+ */
 @Composable
-private fun CourseLearningCenterSubpage(
+fun CourseLearningCenterScreen(
     course: TheolCourseInfo,
     service: TheolSyncService,
     onBack: () -> Unit
@@ -238,9 +234,7 @@ private fun CourseLearningCenterSubpage(
 
     var courseTab by rememberSaveable(course.lid) { mutableIntStateOf(0) } // 0=单元学习 1=课程资源
     var units by remember(course.lid) { mutableStateOf<List<TheolCourseUnit>>(emptyList()) }
-    var selectedUnit by remember(course.lid) { mutableStateOf<TheolCourseUnit?>(null) }
-    var unitResourcePage by remember(course.lid) { mutableStateOf<TheolResourcePage?>(null) }
-    var folderStack by remember(course.lid) { mutableStateOf<List<TheolResourcePage>>(emptyList()) }
+    var rootResourceFolder by remember(course.lid) { mutableStateOf<TheolResourcePage?>(null) }
 
     var loading by remember(course.lid) { mutableStateOf(false) }
     var downloadingUrl by remember { mutableStateOf<String?>(null) }
@@ -264,88 +258,25 @@ private fun CourseLearningCenterSubpage(
         }
     }
 
-    fun openUnit(unit: TheolCourseUnit, forceRefresh: Boolean = false) {
+    fun loadRootResources(forceRefresh: Boolean = false) {
         if (loading) return
         scope.launch {
             loading = true
             errorMsg = null
-            retryAction = { openUnit(unit, forceRefresh = true) }
-            val res = service.fetchUnitResources(
-                lid = course.lid,
-                courseName = course.courseName,
-                unit = unit,
-                forceRefresh = forceRefresh
-            )
-            loading = false
-            res.onSuccess { page ->
-                selectedUnit = unit
-                unitResourcePage = page
-                retryAction = null
-            }.onFailure { err ->
-                errorMsg = err.message ?: "读取单元内容失败"
-            }
-        }
-    }
-
-    fun openResourceFolder(
-        folderUrl: String?,
-        folderTitle: String? = null,
-        replaceTop: Boolean = false,
-        forceRefresh: Boolean = false
-    ) {
-        if (loading) return
-        scope.launch {
-            loading = true
-            errorMsg = null
-            retryAction = { openResourceFolder(folderUrl, folderTitle, replaceTop, forceRefresh = true) }
+            retryAction = { loadRootResources(forceRefresh = true) }
             val res = service.fetchCourseResources(
                 lid = course.lid,
                 courseName = course.courseName,
-                folderUrl = folderUrl,
-                folderTitle = folderTitle,
+                folderUrl = null,
+                folderTitle = null,
                 forceRefresh = forceRefresh
             )
             loading = false
             res.onSuccess { page ->
+                rootResourceFolder = page
                 retryAction = null
-                folderStack = if (replaceTop && folderStack.isNotEmpty()) {
-                    folderStack.dropLast(1) + page
-                } else {
-                    folderStack + page
-                }
             }.onFailure { err ->
                 errorMsg = err.message ?: "读取课程资源失败"
-            }
-        }
-    }
-
-    fun openOnlinePreview(item: TheolResourceItem) {
-        val targetUrl = item.previewUrl.ifBlank { item.url }
-        TheolSubmitWebViewActivity.launch(
-            context = context,
-            url = targetUrl,
-            title = item.name,
-            courseName = course.courseName,
-            courseLid = course.lid
-        )
-    }
-
-    fun downloadAndOpen(item: TheolResourceItem) {
-        scope.launch {
-            downloadingUrl = item.url
-            GlassToaster.show("正在下载 ${item.name}…")
-            val res = service.downloadResourceFile(course.lid, item)
-            downloadingUrl = null
-            res.onSuccess { file ->
-                if (file.isHtmlPage) {
-                    GlassToaster.show("该资源暂不支持直接下载，请点击条目在线预览")
-                } else {
-                    val sizeHint = TheolAttachmentOpener.formatFileSize(file.sizeBytes)
-                    GlassToaster.show("已下载 ${file.fileName}（$sizeHint）")
-                    TheolAttachmentOpener.open(context, file)
-                }
-            }.onFailure { err ->
-                GlassToaster.show(err.message ?: "下载课件失败")
             }
         }
     }
@@ -353,8 +284,6 @@ private fun CourseLearningCenterSubpage(
     LaunchedEffect(course.lid) {
         loadUnits()
     }
-
-    val rootResourceFolder = folderStack.firstOrNull()
 
     GlassPageScaffold(
         title = course.courseName.ifBlank { "北化在线" },
@@ -383,16 +312,8 @@ private fun CourseLearningCenterSubpage(
                     contentDescription = "刷新",
                     tint = MaterialTheme.colorScheme.primary,
                     onClick = {
-                        if (courseTab == 0) {
-                            loadUnits(forceRefresh = true)
-                        } else {
-                            openResourceFolder(
-                                folderUrl = null,
-                                folderTitle = rootResourceFolder?.folderTitle,
-                                replaceTop = folderStack.isNotEmpty(),
-                                forceRefresh = true
-                            )
-                        }
+                        if (courseTab == 0) loadUnits(forceRefresh = true)
+                        else loadRootResources(forceRefresh = true)
                     }
                 )
             }
@@ -418,8 +339,8 @@ private fun CourseLearningCenterSubpage(
                             retryAction = null
                             if (idx == 0 && units.isEmpty()) {
                                 loadUnits()
-                            } else if (idx == 1 && folderStack.isEmpty()) {
-                                openResourceFolder(null)
+                            } else if (idx == 1 && rootResourceFolder == null) {
+                                loadRootResources()
                             }
                         }
                     }
@@ -436,27 +357,10 @@ private fun CourseLearningCenterSubpage(
                     }
                 }
                 errorMsg != null -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = errorMsg.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                            textAlign = TextAlign.Center
-                        )
-                        retryAction?.let { retry ->
-                            Spacer(Modifier.height(16.dp))
-                            SystemSecondaryButton(
-                                text = "重试",
-                                onClick = retry
-                            )
-                        }
-                    }
+                    ResourceErrorState(
+                        errorMsg = errorMsg.orEmpty(),
+                        onRetry = retryAction
+                    )
                 }
                 courseTab == 0 -> {
                     Column(
@@ -488,7 +392,14 @@ private fun CourseLearningCenterSubpage(
                                         title = unit.title,
                                         subtitle = "单元栏目 #${unit.columnId}",
                                         showDivider = index != units.lastIndex,
-                                        onClick = { openUnit(unit) },
+                                        onClick = {
+                                            TheolCourseDetailActivity.launchUnit(
+                                                context = context,
+                                                lid = course.lid,
+                                                courseName = course.courseName,
+                                                unit = unit
+                                            )
+                                        },
                                         trailing = {
                                             Icon(
                                                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -504,7 +415,8 @@ private fun CourseLearningCenterSubpage(
                     }
                 }
                 else -> {
-                    if (rootResourceFolder == null) {
+                    val page = rootResourceFolder
+                    if (page == null) {
                         InsetGroupedSection(
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             header = "课程资源"
@@ -519,155 +431,266 @@ private fun CourseLearningCenterSubpage(
                         }
                     } else {
                         ResourcePageContent(
-                            page = rootResourceFolder,
+                            page = page,
                             emptyText = "当前目录下暂无公开课件或教学资源。",
                             downloadingUrl = downloadingUrl,
                             onOpenFolder = { folder ->
-                                openResourceFolder(folder.url, folder.name)
+                                TheolCourseDetailActivity.launchFolder(
+                                    context = context,
+                                    lid = course.lid,
+                                    courseName = course.courseName,
+                                    folderUrl = folder.url,
+                                    folderTitle = folder.name
+                                )
                             },
-                            onPreviewFile = ::openOnlinePreview,
-                            onDownloadFile = ::downloadAndOpen
+                            onPreviewFile = { item -> openTheolResourcePreview(context, course.lid, course.courseName, item) },
+                            onDownloadFile = { item ->
+                                downloadTheolResourceFile(
+                                    context = context,
+                                    scope = scope,
+                                    service = service,
+                                    lid = course.lid,
+                                    item = item,
+                                    onBusyChange = { downloadingUrl = it }
+                                )
+                            }
                         )
                     }
                 }
             }
         }
     }
+}
 
-    val activeUnitPage = unitResourcePage
-    val activeUnit = selectedUnit
-    if (activeUnitPage != null && activeUnit != null) {
-        GlassSubpage(
-            onDismiss = {
-                unitResourcePage = null
-                selectedUnit = null
+/**
+ * 北化在线单元详情页（由独立 [TheolCourseDetailActivity] 承载）。
+ */
+@Composable
+fun TheolUnitResourcesScreen(
+    lid: String,
+    courseName: String,
+    unit: TheolCourseUnit,
+    service: TheolSyncService,
+    onBack: () -> Unit
+) {
+    ResourceDetailScaffold(
+        lid = lid,
+        courseName = courseName,
+        initialTitle = unit.title,
+        subtitle = "${courseName.ifBlank { "北化在线" }} · 单元学习",
+        emptyText = "该单元下暂无公开课件或学习资料。",
+        service = service,
+        onBack = onBack,
+        fetcher = { forceRefresh ->
+            service.fetchUnitResources(
+                lid = lid,
+                courseName = courseName,
+                unit = unit,
+                forceRefresh = forceRefresh
+            )
+        }
+    )
+}
+
+/**
+ * 北化在线课程资源子目录页（由独立 [TheolCourseDetailActivity] 承载）。
+ */
+@Composable
+fun TheolFolderResourcesScreen(
+    lid: String,
+    courseName: String,
+    folderUrl: String,
+    folderTitle: String,
+    service: TheolSyncService,
+    onBack: () -> Unit
+) {
+    ResourceDetailScaffold(
+        lid = lid,
+        courseName = courseName,
+        initialTitle = folderTitle.ifBlank { "课程资源" },
+        subtitle = "${courseName.ifBlank { "北化在线" }} · 课程资源",
+        emptyText = "当前目录下暂无公开课件或教学资源。",
+        service = service,
+        onBack = onBack,
+        fetcher = { forceRefresh ->
+            service.fetchCourseResources(
+                lid = lid,
+                courseName = courseName,
+                folderUrl = folderUrl,
+                folderTitle = folderTitle,
+                forceRefresh = forceRefresh
+            )
+        }
+    )
+}
+
+@Composable
+private fun ResourceDetailScaffold(
+    lid: String,
+    courseName: String,
+    initialTitle: String,
+    subtitle: String,
+    emptyText: String,
+    service: TheolSyncService,
+    onBack: () -> Unit,
+    fetcher: suspend (forceRefresh: Boolean) -> Result<TheolResourcePage>
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var page by remember { mutableStateOf<TheolResourcePage?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var downloadingUrl by remember { mutableStateOf<String?>(null) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    fun load(forceRefresh: Boolean) {
+        if (loading) return
+        scope.launch {
+            loading = true
+            errorMsg = null
+            val res = fetcher(forceRefresh)
+            loading = false
+            res.onSuccess { page = it }
+                .onFailure { errorMsg = it.message ?: "读取课程资料失败" }
+        }
+    }
+
+    LaunchedEffect(lid, initialTitle) {
+        load(forceRefresh = false)
+    }
+
+    GlassPageScaffold(
+        title = page?.folderTitle?.ifBlank { initialTitle } ?: initialTitle,
+        subtitle = subtitle,
+        onBack = onBack,
+        actions = {
+            if (loading) {
+                GlassLoadingIndicator(size = 38.dp)
+            } else {
+                SystemIconButton(
+                    icon = Icons.Outlined.Refresh,
+                    contentDescription = "刷新",
+                    tint = MaterialTheme.colorScheme.primary,
+                    onClick = { load(forceRefresh = true) }
+                )
             }
-        ) { closeUnitSubpage ->
-            GlassPageScaffold(
-                title = activeUnitPage.folderTitle.ifBlank { activeUnit.title },
-                subtitle = "${course.courseName} · 单元学习",
-                onBack = closeUnitSubpage,
-                actions = {
-                    if (loading) {
-                        GlassLoadingIndicator(size = 38.dp)
-                    } else {
-                        SystemIconButton(
-                            icon = Icons.Outlined.Refresh,
-                            contentDescription = "刷新单元",
-                            tint = MaterialTheme.colorScheme.primary,
-                            onClick = { openUnit(activeUnit, forceRefresh = true) }
-                        )
+        }
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            when {
+                loading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        GlassLoadingIndicator(size = 44.dp)
                     }
                 }
-            ) { subPadding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(subPadding)
-                ) {
+                errorMsg != null -> {
+                    ResourceErrorState(
+                        errorMsg = errorMsg.orEmpty(),
+                        onRetry = { load(forceRefresh = true) }
+                    )
+                }
+                page != null -> {
                     ResourcePageContent(
-                        page = activeUnitPage,
-                        emptyText = "该单元下暂无公开课件或学习资料。",
+                        page = page!!,
+                        emptyText = emptyText,
                         downloadingUrl = downloadingUrl,
                         onOpenFolder = { folder ->
-                            unitResourcePage = null
-                            selectedUnit = null
-                            courseTab = 1
-                            openResourceFolder(folder.url, folder.name)
+                            TheolCourseDetailActivity.launchFolder(
+                                context = context,
+                                lid = lid,
+                                courseName = courseName,
+                                folderUrl = folder.url,
+                                folderTitle = folder.name
+                            )
                         },
-                        onPreviewFile = ::openOnlinePreview,
-                        onDownloadFile = ::downloadAndOpen
+                        onPreviewFile = { item -> openTheolResourcePreview(context, lid, courseName, item) },
+                        onDownloadFile = { item ->
+                            downloadTheolResourceFile(
+                                context = context,
+                                scope = scope,
+                                service = service,
+                                lid = lid,
+                                item = item,
+                                onBusyChange = { downloadingUrl = it }
+                            )
+                        }
                     )
                 }
             }
         }
-    }
-
-    if (folderStack.size > 1) {
-        ResourceSubfolderStack(
-            courseName = course.courseName,
-            subfolders = folderStack.drop(1),
-            loading = loading,
-            downloadingUrl = downloadingUrl,
-            onDismissDepth = { depthIndex ->
-                folderStack = folderStack.take(depthIndex + 1)
-            },
-            onRefreshAt = { folder ->
-                openResourceFolder(
-                    folderUrl = folder.currentUrl,
-                    folderTitle = folder.folderTitle,
-                    replaceTop = true,
-                    forceRefresh = true
-                )
-            },
-            onOpenFolder = { folder ->
-                openResourceFolder(folder.url, folder.name)
-            },
-            onPreviewFile = ::openOnlinePreview,
-            onDownloadFile = ::downloadAndOpen
-        )
     }
 }
 
 @Composable
-private fun ResourceSubfolderStack(
-    courseName: String,
-    subfolders: List<TheolResourcePage>,
-    loading: Boolean,
-    downloadingUrl: String?,
-    onDismissDepth: (Int) -> Unit,
-    onRefreshAt: (TheolResourcePage) -> Unit,
-    onOpenFolder: (TheolResourceItem) -> Unit,
-    onPreviewFile: (TheolResourceItem) -> Unit,
-    onDownloadFile: (TheolResourceItem) -> Unit
+private fun ResourceErrorState(
+    errorMsg: String,
+    onRetry: (() -> Unit)?
 ) {
-    if (subfolders.isEmpty()) return
-    val current = subfolders.first()
-    GlassSubpage(onDismiss = { onDismissDepth(0) }) { closeSubfolder ->
-        GlassPageScaffold(
-            title = current.folderTitle.ifBlank { "课程资源" },
-            subtitle = "$courseName · 课程资源",
-            onBack = closeSubfolder,
-            actions = {
-                if (loading) {
-                    GlassLoadingIndicator(size = 38.dp)
-                } else {
-                    SystemIconButton(
-                        icon = Icons.Outlined.Refresh,
-                        contentDescription = "刷新目录",
-                        tint = MaterialTheme.colorScheme.primary,
-                        onClick = { onRefreshAt(current) }
-                    )
-                }
-            }
-        ) { padding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                ResourcePageContent(
-                    page = current,
-                    emptyText = "当前目录下暂无公开课件或教学资源。",
-                    downloadingUrl = downloadingUrl,
-                    onOpenFolder = onOpenFolder,
-                    onPreviewFile = onPreviewFile,
-                    onDownloadFile = onDownloadFile
-                )
-            }
-        }
-        if (subfolders.size > 1) {
-            ResourceSubfolderStack(
-                courseName = courseName,
-                subfolders = subfolders.drop(1),
-                loading = loading,
-                downloadingUrl = downloadingUrl,
-                onDismissDepth = { childIdx -> onDismissDepth(childIdx + 1) },
-                onRefreshAt = onRefreshAt,
-                onOpenFolder = onOpenFolder,
-                onPreviewFile = onPreviewFile,
-                onDownloadFile = onDownloadFile
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = errorMsg,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            textAlign = TextAlign.Center
+        )
+        if (onRetry != null) {
+            Spacer(Modifier.height(16.dp))
+            SystemSecondaryButton(
+                text = "重试",
+                onClick = onRetry
             )
+        }
+    }
+}
+
+private fun openTheolResourcePreview(
+    context: Context,
+    lid: String,
+    courseName: String,
+    item: TheolResourceItem
+) {
+    val targetUrl = item.previewUrl.ifBlank { item.url }
+    TheolSubmitWebViewActivity.launch(
+        context = context,
+        url = targetUrl,
+        title = item.name,
+        courseName = courseName,
+        courseLid = lid
+    )
+}
+
+private fun downloadTheolResourceFile(
+    context: Context,
+    scope: CoroutineScope,
+    service: TheolSyncService,
+    lid: String,
+    item: TheolResourceItem,
+    onBusyChange: (String?) -> Unit
+) {
+    scope.launch {
+        onBusyChange(item.url)
+        GlassToaster.show("正在下载 ${item.name}…")
+        val res = service.downloadResourceFile(lid, item)
+        onBusyChange(null)
+        res.onSuccess { file ->
+            if (file.isHtmlPage) {
+                GlassToaster.show("该资源暂不支持直接下载，请点击条目在线预览")
+            } else {
+                val sizeHint = TheolAttachmentOpener.formatFileSize(file.sizeBytes)
+                GlassToaster.show("已下载 ${file.fileName}（$sizeHint）")
+                TheolAttachmentOpener.open(context, file)
+            }
+        }.onFailure { err ->
+            GlassToaster.show(err.message ?: "下载课件失败")
         }
     }
 }
