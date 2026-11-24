@@ -590,14 +590,70 @@ class TheolSyncService private constructor(
         }
     }
 
+    suspend fun refreshFullCourseCatalog(userInitiated: Boolean = false): Result<List<TheolCourseInfo>> =
+        withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                _syncing.value = true
+                try {
+                    restoreEncryptedSession()
+                    if (!ensureSessionActiveWithAutoRelogin(bypassCooldown = userInitiated)) {
+                        return@withLock Result.failure(
+                            IllegalStateException("请先登录教务统一身份认证（sidportal）")
+                        )
+                    }
+                    val fullCourses = try {
+                        client.fetchFullLessonCatalog()
+                    } catch (e: Exception) {
+                        if (SsoSilentRelogin.isAuthFailure(e) &&
+                            ensureSessionActiveWithAutoRelogin(forceSso = true, bypassCooldown = userInitiated)
+                        ) {
+                            client.fetchFullLessonCatalog()
+                        } else {
+                            throw e
+                        }
+                    }
+                    persistEncryptedSession()
+                    if (fullCourses.isNotEmpty()) {
+                        val cur = _theolState.value.data
+                        val mergedMap = LinkedHashMap<String, TheolCourseInfo>()
+                        for (c in fullCourses) mergedMap.putIfAbsent(c.lid, c)
+                        cur?.courses.orEmpty().forEach { c -> mergedMap.putIfAbsent(c.lid, c) }
+                        val mergedList = mergedMap.values.toList()
+                        val nextSnapshot = (cur ?: TheolSnapshot()).copy(courses = mergedList)
+                        val complete = nextSnapshot.failedCourseCount == 0
+                        val reason = if (complete) null else "${nextSnapshot.failedCourseCount} 门课程抓取失败"
+                        val committed = store.commitSuccess(
+                            snapshot = nextSnapshot,
+                            parserVersion = TheolParser.PARSER_VERSION,
+                            nowMillis = System.currentTimeMillis(),
+                            complete = complete,
+                            incompleteReason = reason
+                        )
+                        _theolState.value = committed
+                    }
+                    Result.success(fullCourses)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                } finally {
+                    _syncing.value = false
+                }
+            }
+        }
+
     suspend fun downloadResourceFile(
         lid: String,
         resource: TheolResourceItem
-    ): Result<TheolDownloadedFile> = downloadAttachment(
-        url = resource.url,
-        suggestedName = resource.name,
-        courseLid = lid
-    )
+    ): Result<TheolDownloadedFile> {
+        val referer = resource.previewUrl.ifBlank {
+            "${TheolClient.MEOL_BASE}/meol/common/script/listview.jsp?groupid=4&lid=${lid.trim()}&folderid=0"
+        }
+        return downloadAttachment(
+            url = resource.url,
+            suggestedName = resource.name,
+            courseLid = lid,
+            referer = referer
+        )
+    }
 
     /**
      * 使用已认证的北化在线会话原生下载课程作业或网页附件到应用私有缓存目录。
@@ -605,7 +661,8 @@ class TheolSyncService private constructor(
     suspend fun downloadAttachment(
         url: String,
         suggestedName: String,
-        courseLid: String
+        courseLid: String,
+        referer: String? = null
     ): Result<TheolDownloadedFile> = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             try {
@@ -620,7 +677,8 @@ class TheolSyncService private constructor(
                         url = url,
                         suggestedName = suggestedName,
                         courseLid = courseLid,
-                        cacheRootDir = appContext.cacheDir
+                        cacheRootDir = appContext.cacheDir,
+                        referer = referer
                     )
                 } catch (e: Exception) {
                     if (SsoSilentRelogin.isAuthFailure(e) &&
@@ -630,7 +688,8 @@ class TheolSyncService private constructor(
                             url = url,
                             suggestedName = suggestedName,
                             courseLid = courseLid,
-                            cacheRootDir = appContext.cacheDir
+                            cacheRootDir = appContext.cacheDir,
+                            referer = referer
                         )
                     } else {
                         throw e

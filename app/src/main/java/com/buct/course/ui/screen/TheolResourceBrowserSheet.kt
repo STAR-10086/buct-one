@@ -98,7 +98,7 @@ fun TheolCourseScreen(
                 map.putIfAbsent(t.lid, TheolCourseInfo(t.lid, t.courseName, "course", ""))
             }
         }
-        map.values.toList().sortedBy { it.courseName }
+        map.values.toList()
     }
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -126,8 +126,8 @@ fun TheolCourseScreen(
     var retryAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     LaunchedEffect(Unit) {
-        if (courses.isEmpty() && slice.provenance.refreshState == RefreshState.NEVER && service.canAutoSync()) {
-            service.refreshIfSessionValid(userInitiated = false)
+        if (courses.size <= 25 && service.canAutoSync()) {
+            service.refreshFullCourseCatalog(userInitiated = false)
         }
     }
 
@@ -229,13 +229,16 @@ fun TheolCourseScreen(
     fun downloadAndOpen(course: TheolCourseInfo, item: TheolResourceItem) {
         scope.launch {
             downloadingUrl = item.url
+            GlassToaster.show("正在下载 ${item.name}…")
             val res = service.downloadResourceFile(course.lid, item)
             downloadingUrl = null
             res.onSuccess { file ->
                 if (file.isHtmlPage) {
-                    openOnlinePreview(course, item)
-                } else if (!TheolAttachmentOpener.open(context, file)) {
-                    GlassToaster.show("已下载 ${file.fileName}，请安装对应应用打开")
+                    GlassToaster.show("该资源暂不支持直接下载，请点击条目在线预览")
+                } else {
+                    val sizeHint = TheolAttachmentOpener.formatFileSize(file.sizeBytes)
+                    GlassToaster.show("已下载 ${file.fileName}（$sizeHint）")
+                    TheolAttachmentOpener.open(context, file)
                 }
             }.onFailure { err ->
                 GlassToaster.show(err.message ?: "下载课件失败")
@@ -315,9 +318,13 @@ fun TheolCourseScreen(
                     onClick = {
                         if (activeCourse == null) {
                             scope.launch {
-                                service.refreshIfSessionValid(userInitiated = true).onFailure { err ->
-                                    GlassToaster.show(err.message ?: "刷新课程目录失败")
-                                }
+                                service.refreshFullCourseCatalog(userInitiated = true)
+                                    .onSuccess { list ->
+                                        GlassToaster.show("已同步 ${list.size} 门在读课程")
+                                    }
+                                    .onFailure { err ->
+                                        GlassToaster.show(err.message ?: "刷新课程目录失败")
+                                    }
                             }
                         } else if (courseTab == 0) {
                             val unit = selectedUnit
@@ -634,6 +641,7 @@ private fun ResourcePageContent(
                                         icon = Icons.Outlined.Download,
                                         contentDescription = "原生下载",
                                         tint = MaterialTheme.colorScheme.primary,
+                                        chip = false,
                                         onClick = {
                                             if (downloadingUrl == null) {
                                                 onDownloadFile(item)

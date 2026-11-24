@@ -514,7 +514,8 @@ class TheolClient {
         suggestedName: String,
         courseLid: String,
         cacheRootDir: File,
-        allowHtmlDirectRetry: Boolean = true
+        allowHtmlDirectRetry: Boolean = true,
+        referer: String? = null
     ): TheolDownloadedFile {
         val secureUrl = normalizeSecureCourseUrl(url.trim())
         val parsed = secureUrl.toHttpUrlOrNull() ?: throw IOException("附件链接无效")
@@ -522,7 +523,8 @@ class TheolClient {
             throw IOException("仅允许通过北化校园域名下载附件")
         }
 
-        val hwReferer = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
+        val effectiveReferer = referer?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
         val baseAttachmentDir = File(cacheRootDir, "theol_attachments")
         if (!baseAttachmentDir.exists()) baseAttachmentDir.mkdirs()
 
@@ -531,7 +533,7 @@ class TheolClient {
             var needsReauth = false
             var htmlDirectRetryUrl: String? = null
             val downloaded: TheolDownloadedFile? = try {
-                followAttachmentRedirects(secureUrl, hwReferer).use { resp ->
+                followAttachmentRedirects(secureUrl, effectiveReferer).use { resp ->
                     if (resp.code == 401 || resp.code == 403 || isMeolLoginUrl(resp.request.url)) {
                         needsReauth = true
                         return@use null
@@ -552,6 +554,9 @@ class TheolClient {
                         if (TheolParser.isPermissionDeniedOrExpired(html)) {
                             needsReauth = true
                             return@use null
+                        }
+                        extractJsAlertMessage(html)?.let { alertMsg ->
+                            throw IOException(alertMsg)
                         }
                         if (allowHtmlDirectRetry) {
                             val directUrl = TheolParser.extractDirectDownloadUrl(html, resp.request.url.toString())
@@ -586,6 +591,9 @@ class TheolClient {
                             if (TheolParser.isPermissionDeniedOrExpired(fullHtml)) {
                                 needsReauth = true
                                 return@use null
+                            }
+                            extractJsAlertMessage(fullHtml)?.let { alertMsg ->
+                                throw IOException(alertMsg)
                             }
                             if (allowHtmlDirectRetry) {
                                 val directUrl = TheolParser.extractDirectDownloadUrl(fullHtml, resp.request.url.toString())
@@ -669,7 +677,8 @@ class TheolClient {
                     suggestedName = suggestedName,
                     courseLid = courseLid,
                     cacheRootDir = cacheRootDir,
-                    allowHtmlDirectRetry = false
+                    allowHtmlDirectRetry = false,
+                    referer = effectiveReferer
                 )
             }
             if (needsReauth) {
@@ -722,6 +731,29 @@ class TheolClient {
     }
 
     /**
+     * 拉取学生全部在修/历史课程目录（优先 /meol/lesson/blen.student.lesson.list.jsp 全量无分页列表，
+     * 若为空再依次回退 course_list.jsp 与旧版首页）。
+     */
+    fun fetchFullLessonCatalog(): List<TheolCourseInfo> {
+        val fullList = runCatching {
+            val html = fetchHtml(MEOL_LESSON_LIST_URL, MEOL_WELCOME_HOME)
+            if (TheolParser.isPermissionDeniedOrExpired(html)) emptyList()
+            else TheolParser.parseCatalogCourses(html, MEOL_LESSON_LIST_URL)
+        }.getOrDefault(emptyList())
+        if (fullList.isNotEmpty()) return fullList
+
+        return fetchAllCatalogCourses()
+    }
+
+    private fun extractJsAlertMessage(html: String): String? =
+        Regex("""alert\s*\(\s*['"]([^'"]+)['"]\s*\)""")
+            .find(html)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+
+    /**
      * 第一阶段（前台秒出）：仅抓取 reminder 页中「待办作业/测验」所属课程，同时拿到待补齐的其余在修课程目录。
      */
     fun fetchPendingPhaseSnapshot(
@@ -739,6 +771,10 @@ class TheolClient {
 
         val (pendingHwCourses, pendingTestCourses) = TheolParser.parsePendingCourses(reminderHtml, MEOL_BASE)
         val catalogCourses = fetchAllCatalogCourses()
+        val fullCourseMap = LinkedHashMap<String, TheolCourseInfo>()
+        for (c in fetchFullLessonCatalog()) fullCourseMap.putIfAbsent(c.lid, c)
+        for (c in catalogCourses) fullCourseMap.putIfAbsent(c.lid, c)
+        val allCourses = fullCourseMap.values.toList()
 
         val allHomeworks = mutableListOf<TheolHomeworkItem>()
         val seenHwIds = mutableSetOf<String>()
@@ -823,7 +859,7 @@ class TheolClient {
                 homeworks = sortHomeworks(allHomeworks),
                 tests = sortTests(allTests),
                 failedCourseCount = failedCourses,
-                courses = catalogCourses
+                courses = allCourses
             ),
             remainingHwCourses = remainingHwCourses,
             remainingTestCourses = remainingTestCourses
