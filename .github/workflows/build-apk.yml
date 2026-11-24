@@ -484,6 +484,7 @@ jobs:
                       props[k.strip()] = v.strip()
           version_code = int(props.get("VERSION_CODE", "1"))
           version_name = props.get("VERSION_NAME", version)
+          force_update = props.get("FORCE_UPDATE", "false").strip().lower() in ("true", "1", "yes")
 
           gradle_txt = open("app/build.gradle", encoding="utf-8").read()
           min_m = re.search(r"\bminSdk\s+(\d+)", gradle_txt)
@@ -547,7 +548,7 @@ jobs:
               "versionName": version_name,
               "version": version,
               "tag": tag,
-              "forceUpdate": False,
+              "forceUpdate": force_update,
               "minSdk": min_sdk,
               "targetSdk": target_sdk,
               "publishedAt": now_iso,
@@ -570,7 +571,7 @@ jobs:
               json.dump(latest_manifest, f, ensure_ascii=False, indent=2)
           with open("r2-dist/update.json", "w", encoding="utf-8") as f:
               json.dump(update_manifest, f, ensure_ascii=False, indent=2)
-          print(f"Generated R2 manifests for {tag} (channel={channel}, versionCode={version_code})")
+          print(f"Generated R2 manifests for {tag} (channel={channel}, versionCode={version_code}, forceUpdate={force_update})")
           PY
 
       - name: Publish to Release

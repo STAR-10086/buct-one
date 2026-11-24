@@ -13,6 +13,7 @@
 [![Code Check](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/check.yml?style=flat-square&label=code-check)](https://github.com/STAR-10086/buct-one/actions/workflows/check.yml)
 [![Build APK](https://img.shields.io/github/actions/workflow/status/STAR-10086/buct-one/build-apk.yml?style=flat-square&label=build-apk)](https://github.com/STAR-10086/buct-one/actions/workflows/build-apk.yml)
 [![爱发电](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E8%B5%9E%E5%8A%A9%E6%94%AF%E6%8C%81-946CE6?style=flat-square)](https://afdian.com/a/STAR10086QAQ)
+![QQ交流群](https://img.shields.io/badge/QQ%E4%BA%A4%E6%B5%81%E7%BE%A4-1053622526-12B7F5?style=flat-square)
 
 [官网下载 (buct.one)](https://buct.one) · [GitHub Releases](https://github.com/STAR-10086/buct-one/releases) · [更新日志 (CHANGELOG)](CHANGELOG.md) · [上游声明 (NOTICE)](NOTICE) · [路线规划](docs/规划.md) · [签名接入](docs/签名接入.md) · [爱发电赞助](https://afdian.com/a/STAR10086QAQ)
 
@@ -194,6 +195,7 @@ LICENSE               GNU General Public License v3.0
 
 ## 反馈、联系与赞助
 
+- **QQ 交流群**：`1053622526`（欢迎进群反馈 Bug、提建议、交流使用体验，或蹲 iOS 版内测动态）
 - **问题反馈与交流**：使用过程中遇到任何 Bug、适配问题或有新功能建议，欢迎在 [GitHub Issues](https://github.com/STAR-10086/buct-one/issues) 提出，也可以直接在**企业微信**上联系我沟通。
 - **支持项目**：如果 BUCT One 对你的校园生活有所帮助，欢迎通过 [爱发电 · STAR10086QAQ](https://afdian.com/a/STAR10086QAQ) 请我喝杯咖啡，支持项目持续维护与服务器/域名开销。
 
