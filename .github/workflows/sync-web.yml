@@ -1,0 +1,72 @@
+name: sync-web
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "提交说明"
+        required: false
+        default: "chore: 手动触发官网更新日志同步与重建"
+        type: string
+
+jobs:
+  sync:
+    name: Sync buct-one-web
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout buct-one
+        uses: actions/checkout@v4
+
+      - name: Clone, sync changelog & push to buct-one-web
+        env:
+          COMMIT_MSG: ${{ inputs.message }}
+          WEB_REPO_DEPLOY_KEY: ${{ secrets.WEB_REPO_DEPLOY_KEY }}
+          PAGES_DEPLOY_HOOK: ${{ secrets.PAGES_DEPLOY_HOOK }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEB_REPO_DEPLOY_KEY:-}" ]; then
+            echo "::error::缺少 WEB_REPO_DEPLOY_KEY secret"
+            exit 1
+          fi
+
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          KEY_FILE="$HOME/.ssh/web_deploy_key"
+          python3 - "$KEY_FILE" << 'PY'
+          import base64, os, sys
+          dst = sys.argv[1]
+          raw = os.environ.get("WEB_REPO_DEPLOY_KEY", "").replace("\r\n", "\n").replace("\r", "\n").strip()
+          if "BEGIN " not in raw:
+              try:
+                  decoded = base64.b64decode(raw, validate=True).decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").strip()
+                  if "BEGIN " in decoded:
+                      raw = decoded
+              except Exception:
+                  pass
+          with open(dst, "w", encoding="utf-8", newline="\n") as f:
+              f.write(raw + "\n")
+          PY
+          chmod 600 "$KEY_FILE"
+          ssh-keygen -lf "$KEY_FILE"
+          ssh-keyscan -t ed25519,rsa,ecdsa -H github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+          export GIT_SSH_COMMAND="ssh -i '$KEY_FILE' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+          git clone --depth 1 git@github.com:STAR-10086/buct-one-web.git /tmp/buct-one-web
+          cp CHANGELOG.md /tmp/buct-one-web/src/data/changelog-fallback.md
+          cp CHANGELOG.md /tmp/buct-one-web/src/data/changelog-cache.md
+          cd /tmp/buct-one-web
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/data/changelog-fallback.md src/data/changelog-cache.md
+          if ! git diff --cached --quiet; then
+            git commit -m "${COMMIT_MSG}"
+          else
+            git commit --allow-empty -m "${COMMIT_MSG}"
+          fi
+          git push origin main
+          rm -rf "$KEY_FILE" /tmp/buct-one-web
+
+          if [ -n "${PAGES_DEPLOY_HOOK:-}" ]; then
+            curl -fsS -X POST "${PAGES_DEPLOY_HOOK}"
+          fi
