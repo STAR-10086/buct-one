@@ -137,6 +137,7 @@ fun HomeworkRoute() {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) } // 0=待交 1=全部 2=测验 3=实验 4=待办
     var showLoginDialog by rememberSaveable { mutableStateOf(false) }
     var showAddTodoDialog by rememberSaveable { mutableStateOf(false) }
+    var showAddMenuDialog by rememberSaveable { mutableStateOf(false) }
     var showFilterManageDialog by rememberSaveable { mutableStateOf(false) }
     var pendingBlacklistCourse by remember { mutableStateOf<Pair<String, String>?>(null) }
     var selectedHomeworkForDetail by remember { mutableStateOf<TheolHomeworkItem?>(null) }
@@ -276,14 +277,9 @@ fun HomeworkRoute() {
                     onClick = { showFilterManageDialog = true }
                 )
                 SystemIconButton(
-                    icon = Icons.Outlined.UploadFile,
-                    contentDescription = "从表格导入任务",
-                    onClick = { TaskImportActivity.launch(context) }
-                )
-                SystemIconButton(
                     icon = Icons.Outlined.Add,
-                    contentDescription = "新建本地待办",
-                    onClick = { showAddTodoDialog = true }
+                    contentDescription = "添加或导入任务",
+                    onClick = { showAddMenuDialog = true }
                 )
                 SystemIconButton(
                     icon = Icons.Outlined.Login,
@@ -644,6 +640,91 @@ fun HomeworkRoute() {
                 )
             }
         )
+    }
+
+    if (showAddMenuDialog) {
+        SystemDialog(
+            onDismissRequest = { showAddMenuDialog = false },
+            title = {
+                Text(
+                    text = "添加任务",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            confirmButton = {},
+            dismissButton = {
+                SystemSecondaryButton(
+                    text = "取消",
+                    onClick = { showAddMenuDialog = false },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                        .clickable {
+                            showAddMenuDialog = false
+                            showAddTodoDialog = true
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "新建本地待办",
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "手动添加作业、测验或 DDL 提醒",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                        .clickable {
+                            showAddMenuDialog = false
+                            TaskImportActivity.launch(context)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.UploadFile,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "从表格批量导入",
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "支持 Excel (.xlsx) / CSV 批量审核导入",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
     }
 
     pendingBlacklistCourse?.let { (lid, courseName) ->

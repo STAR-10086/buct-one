@@ -9,12 +9,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,9 +30,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.DateRange
@@ -1627,6 +1633,124 @@ fun getGradeColor(grade: String): Color {
     }
 }
 
+internal data class CurriculumTreeEntry(
+    val node: CurriculumNodeUi,
+    val depth: Int,
+    val childCount: Int,
+    val hasCourses: Boolean,
+    val isExpandable: Boolean,
+    val isExpanded: Boolean,
+    val isLastChild: Boolean,
+    val ancestorHasNext: List<Boolean>
+)
+
+private fun isMeaningfulCurriculumNode(
+    node: CurriculumNodeUi,
+    rawChildrenByParent: Map<String, List<CurriculumNodeUi>>,
+    visited: MutableSet<String> = mutableSetOf()
+): Boolean {
+    if (node.isLeaf || node.courses.isNotEmpty() || node.requiredCredits > 0.0) return true
+    if (!visited.add(node.id)) return false
+    return rawChildrenByParent[node.id].orEmpty().any {
+        isMeaningfulCurriculumNode(it, rawChildrenByParent, visited)
+    }
+}
+
+internal fun collectExpandableCurriculumIds(nodes: List<CurriculumNodeUi>): Set<String> {
+    if (nodes.isEmpty()) return emptySet()
+    val rawChildrenByParent = nodes.filter { it.parentId.isNotBlank() }.groupBy { it.parentId }
+    val meaningfulIds = nodes.filter { isMeaningfulCurriculumNode(it, rawChildrenByParent) }.mapTo(HashSet()) { it.id }
+    val rootId = nodes.firstOrNull { it.parentId.isBlank() }?.id
+    return nodes.filter { node ->
+        node.id in meaningfulIds &&
+            node.id != rootId &&
+            (node.courses.isNotEmpty() || rawChildrenByParent[node.id].orEmpty().any { it.id in meaningfulIds })
+    }.mapTo(LinkedHashSet()) { it.id }
+}
+
+internal fun defaultExpandedCurriculumIds(nodes: List<CurriculumNodeUi>): Set<String> {
+    if (nodes.isEmpty()) return emptySet()
+    val rawChildrenByParent = nodes.filter { it.parentId.isNotBlank() }.groupBy { it.parentId }
+    val meaningfulIds = nodes.filter { isMeaningfulCurriculumNode(it, rawChildrenByParent) }.mapTo(HashSet()) { it.id }
+    val rootId = nodes.firstOrNull { it.parentId.isBlank() }?.id
+    val topLevelNodes = if (rootId != null) {
+        rawChildrenByParent[rootId].orEmpty().filter { it.id in meaningfulIds }
+    } else {
+        nodes.filter { it.parentId.isBlank() && it.id in meaningfulIds }
+    }
+    return topLevelNodes.filter { top ->
+        rawChildrenByParent[top.id].orEmpty().any { it.id in meaningfulIds }
+    }.mapTo(LinkedHashSet()) { it.id }
+}
+
+internal fun buildVisibleCurriculumTree(
+    nodes: List<CurriculumNodeUi>,
+    expandedIds: Set<String>
+): List<CurriculumTreeEntry> {
+    if (nodes.isEmpty()) return emptyList()
+    val rawChildrenByParent = nodes.filter { it.parentId.isNotBlank() }.groupBy { it.parentId }
+    val meaningfulIds = nodes.filter { isMeaningfulCurriculumNode(it, rawChildrenByParent) }.mapTo(HashSet()) { it.id }
+    val childrenByParent = rawChildrenByParent.mapValues { (_, list) ->
+        list.filter { it.id in meaningfulIds }
+    }
+
+    val rootNode = nodes.firstOrNull { it.parentId.isBlank() }
+    val nodeIds = nodes.mapTo(HashSet()) { it.id }
+    val topNodes = when {
+        rootNode != null -> childrenByParent[rootNode.id].orEmpty()
+        else -> nodes.filter { it.id in meaningfulIds && (it.parentId.isBlank() || it.parentId !in nodeIds) }
+    }
+
+    val result = mutableListOf<CurriculumTreeEntry>()
+    val visited = mutableSetOf<String>()
+
+    fun dfs(
+        node: CurriculumNodeUi,
+        depth: Int,
+        isLastChild: Boolean,
+        ancestorHasNext: List<Boolean>
+    ) {
+        if (!visited.add(node.id)) return
+        val children = childrenByParent[node.id].orEmpty()
+        val hasCourses = node.courses.isNotEmpty()
+        val isExpandable = children.isNotEmpty() || hasCourses
+        val isExpanded = isExpandable && node.id in expandedIds
+        result.add(
+            CurriculumTreeEntry(
+                node = node,
+                depth = depth,
+                childCount = children.size,
+                hasCourses = hasCourses,
+                isExpandable = isExpandable,
+                isExpanded = isExpanded,
+                isLastChild = isLastChild,
+                ancestorHasNext = ancestorHasNext
+            )
+        )
+        if (isExpanded && children.isNotEmpty()) {
+            val childAncestors = if (depth == 0) emptyList() else ancestorHasNext + !isLastChild
+            children.forEachIndexed { idx, child ->
+                dfs(
+                    node = child,
+                    depth = depth + 1,
+                    isLastChild = idx == children.lastIndex,
+                    ancestorHasNext = childAncestors
+                )
+            }
+        }
+    }
+
+    topNodes.forEachIndexed { idx, top ->
+        dfs(
+            node = top,
+            depth = 0,
+            isLastChild = idx == topNodes.lastIndex,
+            ancestorHasNext = emptyList()
+        )
+    }
+    return result
+}
+
 @Composable
 private fun CurriculumPlanContent(
     nodes: List<CurriculumNodeUi>,
@@ -1639,10 +1763,13 @@ private fun CurriculumPlanContent(
     // 0 = 未修/未通过/在修, 1 = 已修通过, 2 = 全部课程
     var courseFilterMode by rememberSaveable { mutableStateOf(0) }
     val rootNode = remember(nodes) { nodes.firstOrNull { it.parentId.isBlank() } }
-    val childNodes = remember(nodes) {
+    val leafOrCreditNodes = remember(nodes) {
         nodes.filter { it.parentId.isNotBlank() && (it.isLeaf || it.courses.isNotEmpty() || it.requiredCredits > 0.0) }
     }
-    val parentNameMap = remember(nodes) { nodes.associate { it.id to it.name } }
+    val allExpandableIds = remember(nodes) { collectExpandableCurriculumIds(nodes) }
+    var expandedIds by remember(nodes) { mutableStateOf(defaultExpandedCurriculumIds(nodes)) }
+    val visibleEntries = remember(nodes, expandedIds) { buildVisibleCurriculumTree(nodes, expandedIds) }
+    val allExpanded = allExpandableIds.isNotEmpty() && allExpandableIds.all { it in expandedIds }
 
     when {
         isLoading && nodes.isEmpty() -> {
@@ -1676,18 +1803,18 @@ private fun CurriculumPlanContent(
                     top = topInset,
                     bottom = bottomInset
                 ),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
-                    Column(Modifier.moduleEntrance(1), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(Modifier.moduleEntrance(1), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         GradeRefreshStatus(isLoading, error)
 
                         val totalEarned = rootNode?.earnedCredits
-                            ?: childNodes.filter { it.isLeaf }.sumOf { it.earnedCredits }
+                            ?: leafOrCreditNodes.filter { it.isLeaf }.sumOf { it.earnedCredits }
                         val totalRequired = rootNode?.requiredCredits
-                            ?: childNodes.filter { it.isLeaf }.sumOf { it.requiredCredits }
+                            ?: leafOrCreditNodes.filter { it.isLeaf }.sumOf { it.requiredCredits }
                         val totalRemaining = (totalRequired - totalEarned).coerceAtLeast(0.0)
-                        val unmetModuleCount = childNodes.count { !it.passed && it.remainingCredits > 0.0 }
+                        val unmetModuleCount = leafOrCreditNodes.count { it.isLeaf && !it.passed && it.remainingCredits > 0.0 }
 
                         SystemStatStrip(
                             items = listOf(
@@ -1715,7 +1842,7 @@ private fun CurriculumPlanContent(
                                         text = if (unmetModuleCount == 0 && totalRemaining <= 0.0) {
                                             "所有模块学分已修满"
                                         } else {
-                                            "还有 $unmetModuleCount 个模块未修满，共差 ${String.format(java.util.Locale.ROOT, "%.1f", totalRemaining)} 学分"
+                                            "还有 $unmetModuleCount 个末端模块未修满，共差 ${String.format(java.util.Locale.ROOT, "%.1f", totalRemaining)} 学分"
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1788,20 +1915,42 @@ private fun CurriculumPlanContent(
                                 }
                             }
                         }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "树状结构 · 共 ${leafOrCreditNodes.size} 个模块",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (allExpandableIds.isNotEmpty()) {
+                                Text(
+                                    text = if (allExpanded) "全部收起" else "全部展开",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            expandedIds = if (allExpanded) emptySet() else allExpandableIds
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
-                items(childNodes, key = { it.id }) { node ->
-                    val parentName = parentNameMap[node.parentId].orEmpty()
-                    val displayTitle = if (parentName.isNotBlank() && parentName != rootNode?.name) {
-                        "$parentName · ${node.name}"
-                    } else {
-                        node.name
-                    }
-                    CurriculumNodeCard(
-                        node = node,
-                        displayTitle = displayTitle,
-                        courseFilterMode = courseFilterMode
+                items(visibleEntries, key = { it.node.id }) { entry ->
+                    CurriculumTreeNodeRow(
+                        entry = entry,
+                        courseFilterMode = courseFilterMode,
+                        onToggleExpand = {
+                            val id = entry.node.id
+                            expandedIds = if (id in expandedIds) expandedIds - id else expandedIds + id
+                        }
                     )
                 }
             }
@@ -1810,13 +1959,13 @@ private fun CurriculumPlanContent(
 }
 
 @Composable
-private fun CurriculumNodeCard(
-    node: CurriculumNodeUi,
-    displayTitle: String,
-    courseFilterMode: Int
+private fun CurriculumTreeNodeRow(
+    entry: CurriculumTreeEntry,
+    courseFilterMode: Int,
+    onToggleExpand: () -> Unit
 ) {
+    val node = entry.node
     val isMet = node.passed || (node.requiredCredits > 0.0 && node.earnedCredits >= node.requiredCredits)
-    var expanded by rememberSaveable(node.id) { mutableStateOf(!isMet) }
     val filteredCourses = remember(node.courses, courseFilterMode) {
         when (courseFilterMode) {
             0 -> node.courses.filter { !it.isPassed }
@@ -1827,135 +1976,220 @@ private fun CurriculumNodeCard(
     val studyingCount = remember(node.courses) { node.courses.count { it.isStudying } }
     val unstudiedCount = remember(node.courses) { node.courses.count { it.studyStatus == "3" } }
     val failedCount = remember(node.courses) { node.courses.count { it.isFailed } }
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (entry.isExpanded) 90f else 0f,
+        animationSpec = spring(stiffness = 700f, dampingRatio = 0.85f),
+        label = "curriculumArrow"
+    )
+    val lineColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)
 
-    SystemCard(
-        modifier = Modifier.fillMaxWidth().moduleEntrance(2),
-        onClick = if (node.courses.isNotEmpty()) ({ expanded = !expanded }) else null
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = displayTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.height(4.dp))
-                val subText = buildString {
-                    append("已修 ${String.format(java.util.Locale.ROOT, "%.1f", node.earnedCredits)} / 要求 ${String.format(java.util.Locale.ROOT, "%.1f", node.requiredCredits)} 学分")
-                    if (node.remainingCredits > 0.0 && !isMet) {
-                        append(" · 还差 ${String.format(java.util.Locale.ROOT, "%.1f", node.remainingCredits)} 学分")
+        if (entry.depth > 0) {
+            val slotWidth = 14.dp
+            Canvas(
+                modifier = Modifier
+                    .width(slotWidth * entry.depth)
+                    .fillMaxHeight()
+            ) {
+                val stroke = 1.2.dp.toPx()
+                val slotPx = slotWidth.toPx()
+                val midY = 26.dp.toPx().coerceAtMost(size.height * 0.5f)
+                for (level in 0 until entry.depth - 1) {
+                    if (entry.ancestorHasNext.getOrElse(level) { false }) {
+                        val x = slotPx * level + slotPx * 0.5f
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(x, 0f),
+                            end = Offset(x, size.height),
+                            strokeWidth = stroke
+                        )
                     }
                 }
-                Text(
-                    text = subText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (!isMet && node.remainingCredits > 0.0) SemanticWarning else MaterialTheme.colorScheme.onSurfaceVariant
+                val curX = slotPx * (entry.depth - 1) + slotPx * 0.5f
+                drawLine(
+                    color = lineColor,
+                    start = Offset(curX, 0f),
+                    end = Offset(curX, if (entry.isLastChild) midY else size.height),
+                    strokeWidth = stroke
                 )
-                if (node.courses.isNotEmpty()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = buildString {
-                            append("共 ${node.courses.size} 门")
-                            if (studyingCount > 0) append(" · 在修 $studyingCount 门")
-                            if (unstudiedCount > 0) append(" · 未修 $unstudiedCount 门")
-                            if (failedCount > 0) append(" · 未过 $failedCount 门")
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                drawLine(
+                    color = lineColor,
+                    start = Offset(curX, midY),
+                    end = Offset(size.width - 2.dp.toPx(), midY),
+                    strokeWidth = stroke
+                )
+            }
+        }
+
+        SystemCard(
+            modifier = Modifier.weight(1f),
+            onClick = if (entry.isExpandable) onToggleExpand else null
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Box(
+                        modifier = Modifier.padding(top = 2.dp, end = 6.dp).size(20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (entry.isExpandable) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = if (entry.isExpanded) "收起" else "展开",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp).rotate(arrowRotation)
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.outlineVariant)
+                            )
+                        }
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = node.name,
+                            style = if (entry.depth == 0) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        val subText = buildString {
+                            append("已修 ${String.format(java.util.Locale.ROOT, "%.1f", node.earnedCredits)} / 要求 ${String.format(java.util.Locale.ROOT, "%.1f", node.requiredCredits)} 学分")
+                            if (node.remainingCredits > 0.0 && !isMet) {
+                                append(" · 还差 ${String.format(java.util.Locale.ROOT, "%.1f", node.remainingCredits)} 学分")
+                            }
+                        }
+                        Text(
+                            text = subText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (!isMet && node.remainingCredits > 0.0) SemanticWarning else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        val hintText = buildString {
+                            if (entry.childCount > 0) {
+                                append("含 ${entry.childCount} 个子模块")
+                            }
+                            if (node.courses.isNotEmpty()) {
+                                if (isNotEmpty()) append(" · ")
+                                append("共 ${node.courses.size} 门")
+                                if (studyingCount > 0) append(" · 在修 $studyingCount 门")
+                                if (unstudiedCount > 0) append(" · 未修 $unstudiedCount 门")
+                                if (failedCount > 0) append(" · 未过 $failedCount 门")
+                            } else if (!entry.isExpandable) {
+                                if (isNotEmpty()) append(" · ")
+                                append("无下级明细")
+                            }
+                        }
+                        if (hintText.isNotEmpty()) {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = hintText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                SystemStatusBadge(
+                    text = if (isMet) "已修满" else "差 ${String.format(java.util.Locale.ROOT, "%.1f", node.remainingCredits)}分",
+                    tone = if (isMet) SystemTone.Success else SystemTone.Warning
+                )
+            }
+
+            if (node.requiredCredits > 0.0) {
+                Spacer(Modifier.height(8.dp))
+                val ratio = (node.earnedCredits / node.requiredCredits).toFloat().coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(7.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(ratio)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isMet) SemanticSuccess else SemanticWarning)
                     )
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            SystemStatusBadge(
-                text = if (isMet) "已修满" else "差 ${String.format(java.util.Locale.ROOT, "%.1f", node.remainingCredits)}分",
-                tone = if (isMet) SystemTone.Success else SystemTone.Warning
-            )
-        }
 
-        if (node.requiredCredits > 0.0) {
-            Spacer(Modifier.height(8.dp))
-            val ratio = (node.earnedCredits / node.requiredCredits).toFloat().coerceIn(0f, 1f)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(7.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(ratio)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(if (isMet) SemanticSuccess else SemanticWarning)
-                )
-            }
-        }
-
-        AnimatedVisibility(visible = expanded && node.courses.isNotEmpty()) {
-            Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SystemDivider(alpha = 0.5f)
-                if (filteredCourses.isEmpty()) {
-                    Text(
-                        text = when (courseFilterMode) {
-                            0 -> "该模块下没有未修或未通过的计划课程"
-                            1 -> "该模块下暂无已修通过的课程"
-                            else -> "暂无课程明细"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                } else {
-                    filteredCourses.forEach { course ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = course.courseName,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                val meta = buildString {
-                                    if (course.courseCode.isNotBlank()) append(course.courseCode)
-                                    if (course.credits.isNotBlank()) {
-                                        if (isNotEmpty()) append(" · ")
-                                        append("${course.credits}学分")
-                                    }
-                                    if (course.suggestedYear.isNotBlank()) {
-                                        if (isNotEmpty()) append(" · ")
-                                        append("建议 ${course.suggestedYear}")
-                                        if (course.suggestedTerm.isNotBlank()) append("-${course.suggestedTerm}")
-                                    }
-                                }
-                                if (meta.isNotBlank()) {
+            AnimatedVisibility(visible = entry.isExpanded && entry.hasCourses) {
+                Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SystemDivider(alpha = 0.5f)
+                    if (filteredCourses.isEmpty()) {
+                        Text(
+                            text = when (courseFilterMode) {
+                                0 -> "该模块下没有未修或未通过的计划课程"
+                                1 -> "该模块下暂无已修通过的课程"
+                                else -> "暂无课程明细"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    } else {
+                        filteredCourses.forEach { course ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = meta,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = course.courseName,
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
+                                    val meta = buildString {
+                                        if (course.courseCode.isNotBlank()) append(course.courseCode)
+                                        if (course.credits.isNotBlank()) {
+                                            if (isNotEmpty()) append(" · ")
+                                            append("${course.credits}学分")
+                                        }
+                                        if (course.suggestedYear.isNotBlank()) {
+                                            if (isNotEmpty()) append(" · ")
+                                            append("建议 ${course.suggestedYear}")
+                                            if (course.suggestedTerm.isNotBlank()) append("-${course.suggestedTerm}")
+                                        }
+                                    }
+                                    if (meta.isNotBlank()) {
+                                        Text(
+                                            text = meta,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
+                                Spacer(Modifier.width(8.dp))
+                                val (badgeLabel, badgeTone) = when (course.studyStatus) {
+                                    "4" -> (course.grade.ifBlank { "已通过" }) to SystemTone.Success
+                                    "1" -> "在修" to SystemTone.Info
+                                    "2" -> (if (course.grade.isNotBlank()) "未过(${course.grade})" else "未通过") to SystemTone.Danger
+                                    else -> "未修" to SystemTone.Neutral
+                                }
+                                SystemStatusBadge(text = badgeLabel, tone = badgeTone)
                             }
-                            Spacer(Modifier.width(8.dp))
-                            val (badgeLabel, badgeTone) = when (course.studyStatus) {
-                                "4" -> (course.grade.ifBlank { "已通过" }) to SystemTone.Success
-                                "1" -> "在修" to SystemTone.Info
-                                "2" -> (if (course.grade.isNotBlank()) "未过(${course.grade})" else "未通过") to SystemTone.Danger
-                                else -> "未修" to SystemTone.Neutral
-                            }
-                            SystemStatusBadge(text = badgeLabel, tone = badgeTone)
                         }
                     }
                 }
