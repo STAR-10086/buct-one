@@ -160,12 +160,8 @@ fun CookieWebViewScreen(
         onDispose { webView?.apply { stopLoading(); destroy() }; webView = null }
     }
 
-    BackHandler {
-        if (canGoBack) {
-            webView?.goBack()
-        } else {
-            onBack()
-        }
+    BackHandler(enabled = canGoBack) {
+        webView?.goBack()
     }
 
     // Cookie extraction function - improved to get all cookies

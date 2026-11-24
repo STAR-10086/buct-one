@@ -414,6 +414,8 @@ object TheolParser {
             html.contains("登录时间超时") ||
             html.contains("请重新登录") ||
             html.contains("用户身份错误") ||
+            html.contains("您尚未登录") ||
+            html.contains("只有注册用户才可以提交错误报告") ||
             lower.contains("type=\"password\"") ||
             html.contains("login-page-flowkey")
     }

@@ -63,6 +63,7 @@ class AcademicWebViewActivity : ComponentActivity() {
     }
 
     private var webView: WebView? = null
+    private var canGoBack by mutableStateOf(false)
     private var startUrl = ""
     private var cookieUrl = ""
     private var searchUrl = ""
@@ -98,7 +99,7 @@ class AcademicWebViewActivity : ComponentActivity() {
         webView = browser
         setContent {
             CourseSelectorTheme {
-                BackHandler { navigateBack() }
+                BackHandler(enabled = canGoBack) { webView?.goBack() }
                 GlassPageScaffold(
                     title = "教务网页登录",
                     subtitle = Uri.parse(currentUrl).host,
@@ -174,10 +175,12 @@ class AcademicWebViewActivity : ComponentActivity() {
                 pageError = null
                 currentUrl = url
                 loadingProgress = 0f
+                canGoBack = view.canGoBack()
             }
             override fun onPageFinished(view: WebView, url: String) {
                 loadingProgress = 1f
                 currentUrl = url
+                canGoBack = view.canGoBack()
             }
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame) {

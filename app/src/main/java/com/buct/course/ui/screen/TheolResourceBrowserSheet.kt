@@ -1,6 +1,5 @@
 package com.buct.course.ui.screen
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +46,7 @@ import com.buct.course.TheolAttachmentOpener
 import com.buct.course.TheolSubmitWebViewActivity
 import com.buct.course.ui.system.GlassLoadingIndicator
 import com.buct.course.ui.system.GlassPageScaffold
+import com.buct.course.ui.system.GlassSubpage
 import com.buct.course.ui.system.GlassTextField
 import com.buct.course.ui.system.GlassToaster
 import com.buct.course.ui.system.InsetGroupedRow
@@ -54,7 +54,6 @@ import com.buct.course.ui.system.InsetGroupedSection
 import com.buct.course.ui.system.SystemCompactSegmentedControl
 import com.buct.course.ui.system.SystemIconButton
 import com.buct.course.ui.system.SystemSecondaryButton
-import com.buct.one.data.model.RefreshState
 import com.buct.one.data.model.TheolCourseInfo
 import com.buct.one.data.model.TheolCourseUnit
 import com.buct.one.data.model.TheolResourceItem
@@ -65,9 +64,10 @@ import java.net.URLEncoder
 
 /**
  * 北化在线（THEOL / MEOL）独立模块主界面：
- * 一级页：在读课程列表 + 搜索栏；
- * 二级页：课程学习中心（单元学习 / 课程资源 分段切换 + 目录展开）；
- * 三级交互：点击文件行直接在线预览（方案 A），点击右侧下载图标原生下载打开。
+ * 一级页：在读课程列表 + 搜索栏（原生跨 Activity 预测性返回）；
+ * 二级页（GlassSubpage 承载，原生跟手预测性返回）：课程学习中心（单元学习 / 课程资源）；
+ * 三级页（GlassSubpage 逐层承载，原生跟手预测性返回）：单元详情 / 课程资源子目录；
+ * 文件交互：点击文件行直接在线预览（方案 A），点击右侧下载图标原生下载打开。
  */
 @Composable
 fun TheolCourseScreen(
@@ -114,16 +114,6 @@ fun TheolCourseScreen(
     }
 
     var selectedCourse by remember { mutableStateOf<TheolCourseInfo?>(null) }
-    var courseTab by rememberSaveable { mutableIntStateOf(0) } // 0=单元学习 1=课程资源
-    var units by remember { mutableStateOf<List<TheolCourseUnit>>(emptyList()) }
-    var selectedUnit by remember { mutableStateOf<TheolCourseUnit?>(null) }
-    var unitResourcePage by remember { mutableStateOf<TheolResourcePage?>(null) }
-    var folderStack by remember { mutableStateOf<List<TheolResourcePage>>(emptyList()) }
-
-    var loading by remember { mutableStateOf(false) }
-    var downloadingUrl by remember { mutableStateOf<String?>(null) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
-    var retryAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     LaunchedEffect(Unit) {
         if (courses.size <= 25 && service.canAutoSync()) {
@@ -131,12 +121,138 @@ fun TheolCourseScreen(
         }
     }
 
-    fun loadUnits(course: TheolCourseInfo, forceRefresh: Boolean = false) {
+    GlassPageScaffold(
+        title = "北化在线",
+        subtitle = "在读课程 · 单元学习与课程资源",
+        onBack = onBack,
+        actions = {
+            if (syncing) {
+                GlassLoadingIndicator(size = 38.dp)
+            } else {
+                SystemIconButton(
+                    icon = Icons.Outlined.Refresh,
+                    contentDescription = "刷新在读课程",
+                    tint = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        scope.launch {
+                            service.refreshFullCourseCatalog(userInitiated = true)
+                                .onSuccess { list ->
+                                    GlassToaster.show("已同步 ${list.size} 门在读课程")
+                                }
+                                .onFailure { err ->
+                                    GlassToaster.show(err.message ?: "刷新课程目录失败")
+                                }
+                        }
+                    }
+                )
+            }
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            GlassTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = "搜索在读课程名称或编号",
+                leadingIcon = Icons.Outlined.Search,
+                trailing = if (searchQuery.isNotEmpty()) {
+                    {
+                        SystemIconButton(
+                            icon = Icons.Outlined.Close,
+                            contentDescription = "清除搜索",
+                            onClick = { searchQuery = "" }
+                        )
+                    }
+                } else {
+                    null
+                }
+            )
+
+            if (filteredCourses.isEmpty()) {
+                InsetGroupedSection(header = "在读课程") {
+                    Box(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (courses.isEmpty()) {
+                                "暂未同步到北化在线在读课程，请点击右上角刷新或先完成统一身份认证登录。"
+                            } else {
+                                "未找到匹配「$searchQuery」的课程。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                InsetGroupedSection(
+                    header = "在读课程（${filteredCourses.size} 门）",
+                    footer = "选择课程后可浏览「单元学习」与「课程资源」，点击文件即可在线预览。"
+                ) {
+                    filteredCourses.forEachIndexed { index, course ->
+                        InsetGroupedRow(
+                            icon = Icons.Outlined.MenuBook,
+                            iconTint = Color(0xFF0A84FF),
+                            title = course.courseName.ifBlank { "课程 #${course.lid}" },
+                            subtitle = "课程编号 ${course.lid}",
+                            showDivider = index != filteredCourses.lastIndex,
+                            onClick = { selectedCourse = course },
+                            trailing = {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+
+    selectedCourse?.let { activeCourse ->
+        GlassSubpage(onDismiss = { selectedCourse = null }) { closeCourseSubpage ->
+            CourseLearningCenterSubpage(
+                course = activeCourse,
+                service = service,
+                onBack = closeCourseSubpage
+            )
+        }
+    }
+}
+
+@Composable
+private fun CourseLearningCenterSubpage(
+    course: TheolCourseInfo,
+    service: TheolSyncService,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var courseTab by rememberSaveable(course.lid) { mutableIntStateOf(0) } // 0=单元学习 1=课程资源
+    var units by remember(course.lid) { mutableStateOf<List<TheolCourseUnit>>(emptyList()) }
+    var selectedUnit by remember(course.lid) { mutableStateOf<TheolCourseUnit?>(null) }
+    var unitResourcePage by remember(course.lid) { mutableStateOf<TheolResourcePage?>(null) }
+    var folderStack by remember(course.lid) { mutableStateOf<List<TheolResourcePage>>(emptyList()) }
+
+    var loading by remember(course.lid) { mutableStateOf(false) }
+    var downloadingUrl by remember { mutableStateOf<String?>(null) }
+    var errorMsg by remember(course.lid) { mutableStateOf<String?>(null) }
+    var retryAction by remember(course.lid) { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun loadUnits(forceRefresh: Boolean = false) {
         if (loading) return
         scope.launch {
             loading = true
             errorMsg = null
-            retryAction = { loadUnits(course, forceRefresh = true) }
+            retryAction = { loadUnits(forceRefresh = true) }
             val res = service.fetchCourseUnits(course.lid, forceRefresh = forceRefresh)
             loading = false
             res.onSuccess { list ->
@@ -148,12 +264,12 @@ fun TheolCourseScreen(
         }
     }
 
-    fun openUnit(course: TheolCourseInfo, unit: TheolCourseUnit, forceRefresh: Boolean = false) {
+    fun openUnit(unit: TheolCourseUnit, forceRefresh: Boolean = false) {
         if (loading) return
         scope.launch {
             loading = true
             errorMsg = null
-            retryAction = { openUnit(course, unit, forceRefresh = true) }
+            retryAction = { openUnit(unit, forceRefresh = true) }
             val res = service.fetchUnitResources(
                 lid = course.lid,
                 courseName = course.courseName,
@@ -172,7 +288,6 @@ fun TheolCourseScreen(
     }
 
     fun openResourceFolder(
-        course: TheolCourseInfo,
         folderUrl: String?,
         folderTitle: String? = null,
         replaceTop: Boolean = false,
@@ -182,7 +297,7 @@ fun TheolCourseScreen(
         scope.launch {
             loading = true
             errorMsg = null
-            retryAction = { openResourceFolder(course, folderUrl, folderTitle, replaceTop, forceRefresh = true) }
+            retryAction = { openResourceFolder(folderUrl, folderTitle, replaceTop, forceRefresh = true) }
             val res = service.fetchCourseResources(
                 lid = course.lid,
                 courseName = course.courseName,
@@ -204,18 +319,7 @@ fun TheolCourseScreen(
         }
     }
 
-    fun selectCourse(course: TheolCourseInfo) {
-        selectedCourse = course
-        courseTab = 0
-        units = emptyList()
-        selectedUnit = null
-        unitResourcePage = null
-        folderStack = emptyList()
-        errorMsg = null
-        loadUnits(course)
-    }
-
-    fun openOnlinePreview(course: TheolCourseInfo, item: TheolResourceItem) {
+    fun openOnlinePreview(item: TheolResourceItem) {
         val targetUrl = item.previewUrl.ifBlank { item.url }
         TheolSubmitWebViewActivity.launch(
             context = context,
@@ -226,7 +330,7 @@ fun TheolCourseScreen(
         )
     }
 
-    fun downloadAndOpen(course: TheolCourseInfo, item: TheolResourceItem) {
+    fun downloadAndOpen(item: TheolResourceItem) {
         scope.launch {
             downloadingUrl = item.url
             GlassToaster.show("正在下载 ${item.name}…")
@@ -246,69 +350,32 @@ fun TheolCourseScreen(
         }
     }
 
-    fun navigateBackInside(): Boolean {
-        val course = selectedCourse ?: return false
-        errorMsg = null
-        retryAction = null
-        when {
-            courseTab == 0 && unitResourcePage != null -> {
-                unitResourcePage = null
-                selectedUnit = null
-            }
-            courseTab == 1 && folderStack.size > 1 -> {
-                folderStack = folderStack.dropLast(1)
-            }
-            else -> {
-                selectedCourse = null
-                units = emptyList()
-                selectedUnit = null
-                unitResourcePage = null
-                folderStack = emptyList()
-            }
-        }
-        return true
+    LaunchedEffect(course.lid) {
+        loadUnits()
     }
 
-    BackHandler(enabled = selectedCourse != null) {
-        navigateBackInside()
-    }
-
-    val activeCourse = selectedCourse
-    val currentResourceFolder = folderStack.lastOrNull()
-    val subtitle = when {
-        activeCourse == null -> "在读课程 · 单元学习与课程资源"
-        courseTab == 0 && unitResourcePage != null -> "单元学习 / ${unitResourcePage?.folderTitle.orEmpty()}".take(48)
-        courseTab == 0 -> "单元学习（${units.size} 个单元）"
-        folderStack.isNotEmpty() -> folderStack.joinToString(" / ") { it.folderTitle.ifBlank { "课程资源" } }.take(48)
-        else -> "课程资源"
-    }
+    val rootResourceFolder = folderStack.firstOrNull()
 
     GlassPageScaffold(
-        title = activeCourse?.courseName?.ifBlank { "北化在线" } ?: "北化在线",
-        subtitle = subtitle,
-        onBack = {
-            if (!navigateBackInside()) {
-                onBack()
-            }
-        },
+        title = course.courseName.ifBlank { "北化在线" },
+        subtitle = if (courseTab == 0) "单元学习（${units.size} 个单元）" else "课程资源",
+        onBack = onBack,
         actions = {
-            if (activeCourse != null) {
-                SystemIconButton(
-                    icon = Icons.Outlined.OpenInNew,
-                    contentDescription = "网页打开课程",
-                    onClick = {
-                        val courseUrl = "https://course.buct.edu.cn/meol/jpk/course/layout/newpage/index.jsp?courseId=${URLEncoder.encode(activeCourse.lid, "UTF-8")}"
-                        TheolSubmitWebViewActivity.launch(
-                            context = context,
-                            url = courseUrl,
-                            title = activeCourse.courseName.ifBlank { "课程主页" },
-                            courseName = activeCourse.courseName,
-                            courseLid = activeCourse.lid
-                        )
-                    }
-                )
-            }
-            if (loading || (activeCourse == null && syncing)) {
+            SystemIconButton(
+                icon = Icons.Outlined.OpenInNew,
+                contentDescription = "网页打开课程",
+                onClick = {
+                    val courseUrl = "https://course.buct.edu.cn/meol/jpk/course/layout/newpage/index.jsp?courseId=${URLEncoder.encode(course.lid, "UTF-8")}"
+                    TheolSubmitWebViewActivity.launch(
+                        context = context,
+                        url = courseUrl,
+                        title = course.courseName.ifBlank { "课程主页" },
+                        courseName = course.courseName,
+                        courseLid = course.lid
+                    )
+                }
+            )
+            if (loading) {
                 GlassLoadingIndicator(size = 38.dp)
             } else {
                 SystemIconButton(
@@ -316,261 +383,291 @@ fun TheolCourseScreen(
                     contentDescription = "刷新",
                     tint = MaterialTheme.colorScheme.primary,
                     onClick = {
-                        if (activeCourse == null) {
-                            scope.launch {
-                                service.refreshFullCourseCatalog(userInitiated = true)
-                                    .onSuccess { list ->
-                                        GlassToaster.show("已同步 ${list.size} 门在读课程")
-                                    }
-                                    .onFailure { err ->
-                                        GlassToaster.show(err.message ?: "刷新课程目录失败")
-                                    }
-                            }
-                        } else if (courseTab == 0) {
-                            val unit = selectedUnit
-                            if (unitResourcePage != null && unit != null) {
-                                openUnit(activeCourse, unit, forceRefresh = true)
-                            } else {
-                                loadUnits(activeCourse, forceRefresh = true)
-                            }
+                        if (courseTab == 0) {
+                            loadUnits(forceRefresh = true)
                         } else {
-                            val folder = currentResourceFolder
-                            if (folder != null) {
-                                val targetUrl = if (folderStack.size <= 1) null else folder.currentUrl
-                                openResourceFolder(
-                                    course = activeCourse,
-                                    folderUrl = targetUrl,
-                                    folderTitle = folder.folderTitle,
-                                    replaceTop = true,
-                                    forceRefresh = true
-                                )
-                            } else {
-                                openResourceFolder(activeCourse, null, forceRefresh = true)
-                            }
+                            openResourceFolder(
+                                folderUrl = null,
+                                folderTitle = rootResourceFolder?.folderTitle,
+                                replaceTop = folderStack.isNotEmpty(),
+                                forceRefresh = true
+                            )
                         }
                     }
                 )
             }
         }
     ) { padding ->
-        if (activeCourse == null) {
-            Column(
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(padding)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                GlassTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = "搜索在读课程名称或编号",
-                    leadingIcon = Icons.Outlined.Search,
-                    trailing = if (searchQuery.isNotEmpty()) {
-                        {
-                            SystemIconButton(
-                                icon = Icons.Outlined.Close,
-                                contentDescription = "清除搜索",
-                                onClick = { searchQuery = "" }
-                            )
+                SystemCompactSegmentedControl(
+                    options = listOf("单元学习", "课程资源"),
+                    selectedIndex = courseTab,
+                    onSelect = { idx ->
+                        if (courseTab != idx) {
+                            courseTab = idx
+                            errorMsg = null
+                            retryAction = null
+                            if (idx == 0 && units.isEmpty()) {
+                                loadUnits()
+                            } else if (idx == 1 && folderStack.isEmpty()) {
+                                openResourceFolder(null)
+                            }
                         }
-                    } else {
-                        null
                     }
                 )
-
-                if (filteredCourses.isEmpty()) {
-                    InsetGroupedSection(header = "在读课程") {
-                        Box(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = if (courses.isEmpty()) {
-                                    "暂未同步到北化在线在读课程，请点击右上角刷新或先完成统一身份认证登录。"
-                                } else {
-                                    "未找到匹配「$searchQuery」的课程。"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                } else {
-                    InsetGroupedSection(
-                        header = "在读课程（${filteredCourses.size} 门）",
-                        footer = "选择课程后可浏览「单元学习」与「课程资源」，点击文件即可在线预览。"
-                    ) {
-                        filteredCourses.forEachIndexed { index, course ->
-                            InsetGroupedRow(
-                                icon = Icons.Outlined.MenuBook,
-                                iconTint = Color(0xFF0A84FF),
-                                title = course.courseName.ifBlank { "课程 #${course.lid}" },
-                                subtitle = "课程编号 ${course.lid}",
-                                showDivider = index != filteredCourses.lastIndex,
-                                onClick = { selectCourse(course) },
-                                trailing = {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
             }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    SystemCompactSegmentedControl(
-                        options = listOf("单元学习", "课程资源"),
-                        selectedIndex = courseTab,
-                        onSelect = { idx ->
-                            if (courseTab != idx) {
-                                courseTab = idx
-                                errorMsg = null
-                                retryAction = null
-                                if (idx == 0 && units.isEmpty()) {
-                                    loadUnits(activeCourse)
-                                } else if (idx == 1 && folderStack.isEmpty()) {
-                                    openResourceFolder(activeCourse, null)
-                                }
-                            }
-                        }
-                    )
-                }
 
-                when {
-                    loading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            GlassLoadingIndicator(size = 44.dp)
-                        }
+            when {
+                loading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        GlassLoadingIndicator(size = 44.dp)
                     }
-                    errorMsg != null -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = errorMsg.orEmpty(),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error,
-                                textAlign = TextAlign.Center
+                }
+                errorMsg != null -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = errorMsg.orEmpty(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                        retryAction?.let { retry ->
+                            Spacer(Modifier.height(16.dp))
+                            SystemSecondaryButton(
+                                text = "重试",
+                                onClick = retry
                             )
-                            retryAction?.let { retry ->
-                                Spacer(Modifier.height(16.dp))
-                                SystemSecondaryButton(
-                                    text = "重试",
-                                    onClick = retry
-                                )
-                            }
                         }
                     }
-                    courseTab == 0 -> {
-                        val activeUnitPage = unitResourcePage
-                        if (activeUnitPage != null) {
-                            ResourcePageContent(
-                                page = activeUnitPage,
-                                emptyText = "该单元下暂无公开课件或学习资料。",
-                                downloadingUrl = downloadingUrl,
-                                onOpenFolder = { folder ->
-                                    openResourceFolder(activeCourse, folder.url, folder.name)
-                                    courseTab = 1
-                                },
-                                onPreviewFile = { item -> openOnlinePreview(activeCourse, item) },
-                                onDownloadFile = { item -> downloadAndOpen(activeCourse, item) }
-                            )
-                        } else {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                if (units.isEmpty()) {
-                                    InsetGroupedSection(header = "单元学习") {
-                                        Box(modifier = Modifier.padding(16.dp)) {
-                                            Text(
-                                                text = "该课程暂未发布「单元学习」目录，可切换至「课程资源」查看课件。",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    InsetGroupedSection(
-                                        header = "课程单元（${units.size} 节）",
-                                        footer = "点击单元查看对应课件、视频与学习资料。"
-                                    ) {
-                                        units.forEachIndexed { index, unit ->
-                                            InsetGroupedRow(
-                                                icon = Icons.Outlined.ViewAgenda,
-                                                iconTint = Color(0xFF5E5CE6),
-                                                title = unit.title,
-                                                subtitle = "单元栏目 #${unit.columnId}",
-                                                showDivider = index != units.lastIndex,
-                                                onClick = { openUnit(activeCourse, unit) },
-                                                trailing = {
-                                                    Icon(
-                                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(Modifier.height(12.dp))
-                            }
-                        }
-                    }
-                    else -> {
-                        val page = currentResourceFolder
-                        if (page == null) {
-                            InsetGroupedSection(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                header = "课程资源"
-                            ) {
+                }
+                courseTab == 0 -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (units.isEmpty()) {
+                            InsetGroupedSection(header = "单元学习") {
                                 Box(modifier = Modifier.padding(16.dp)) {
                                     Text(
-                                        text = "暂无课程资源目录，请点击右上角刷新。",
+                                        text = "该课程暂未发布「单元学习」目录，可切换至「课程资源」查看课件。",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
                         } else {
-                            ResourcePageContent(
-                                page = page,
-                                emptyText = "当前目录下暂无公开课件或教学资源。",
-                                downloadingUrl = downloadingUrl,
-                                onOpenFolder = { folder ->
-                                    openResourceFolder(activeCourse, folder.url, folder.name)
-                                },
-                                onPreviewFile = { item -> openOnlinePreview(activeCourse, item) },
-                                onDownloadFile = { item -> downloadAndOpen(activeCourse, item) }
-                            )
+                            InsetGroupedSection(
+                                header = "课程单元（${units.size} 节）",
+                                footer = "点击单元查看对应课件、视频与学习资料。"
+                            ) {
+                                units.forEachIndexed { index, unit ->
+                                    InsetGroupedRow(
+                                        icon = Icons.Outlined.ViewAgenda,
+                                        iconTint = Color(0xFF5E5CE6),
+                                        title = unit.title,
+                                        subtitle = "单元栏目 #${unit.columnId}",
+                                        showDivider = index != units.lastIndex,
+                                        onClick = { openUnit(unit) },
+                                        trailing = {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    )
+                                }
+                            }
                         }
+                        Spacer(Modifier.height(12.dp))
+                    }
+                }
+                else -> {
+                    if (rootResourceFolder == null) {
+                        InsetGroupedSection(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            header = "课程资源"
+                        ) {
+                            Box(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "暂无课程资源目录，请点击右上角刷新。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else {
+                        ResourcePageContent(
+                            page = rootResourceFolder,
+                            emptyText = "当前目录下暂无公开课件或教学资源。",
+                            downloadingUrl = downloadingUrl,
+                            onOpenFolder = { folder ->
+                                openResourceFolder(folder.url, folder.name)
+                            },
+                            onPreviewFile = ::openOnlinePreview,
+                            onDownloadFile = ::downloadAndOpen
+                        )
                     }
                 }
             }
+        }
+    }
+
+    val activeUnitPage = unitResourcePage
+    val activeUnit = selectedUnit
+    if (activeUnitPage != null && activeUnit != null) {
+        GlassSubpage(
+            onDismiss = {
+                unitResourcePage = null
+                selectedUnit = null
+            }
+        ) { closeUnitSubpage ->
+            GlassPageScaffold(
+                title = activeUnitPage.folderTitle.ifBlank { activeUnit.title },
+                subtitle = "${course.courseName} · 单元学习",
+                onBack = closeUnitSubpage,
+                actions = {
+                    if (loading) {
+                        GlassLoadingIndicator(size = 38.dp)
+                    } else {
+                        SystemIconButton(
+                            icon = Icons.Outlined.Refresh,
+                            contentDescription = "刷新单元",
+                            tint = MaterialTheme.colorScheme.primary,
+                            onClick = { openUnit(activeUnit, forceRefresh = true) }
+                        )
+                    }
+                }
+            ) { subPadding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(subPadding)
+                ) {
+                    ResourcePageContent(
+                        page = activeUnitPage,
+                        emptyText = "该单元下暂无公开课件或学习资料。",
+                        downloadingUrl = downloadingUrl,
+                        onOpenFolder = { folder ->
+                            unitResourcePage = null
+                            selectedUnit = null
+                            courseTab = 1
+                            openResourceFolder(folder.url, folder.name)
+                        },
+                        onPreviewFile = ::openOnlinePreview,
+                        onDownloadFile = ::downloadAndOpen
+                    )
+                }
+            }
+        }
+    }
+
+    if (folderStack.size > 1) {
+        ResourceSubfolderStack(
+            courseName = course.courseName,
+            subfolders = folderStack.drop(1),
+            loading = loading,
+            downloadingUrl = downloadingUrl,
+            onDismissDepth = { depthIndex ->
+                folderStack = folderStack.take(depthIndex + 1)
+            },
+            onRefreshAt = { folder ->
+                openResourceFolder(
+                    folderUrl = folder.currentUrl,
+                    folderTitle = folder.folderTitle,
+                    replaceTop = true,
+                    forceRefresh = true
+                )
+            },
+            onOpenFolder = { folder ->
+                openResourceFolder(folder.url, folder.name)
+            },
+            onPreviewFile = ::openOnlinePreview,
+            onDownloadFile = ::downloadAndOpen
+        )
+    }
+}
+
+@Composable
+private fun ResourceSubfolderStack(
+    courseName: String,
+    subfolders: List<TheolResourcePage>,
+    loading: Boolean,
+    downloadingUrl: String?,
+    onDismissDepth: (Int) -> Unit,
+    onRefreshAt: (TheolResourcePage) -> Unit,
+    onOpenFolder: (TheolResourceItem) -> Unit,
+    onPreviewFile: (TheolResourceItem) -> Unit,
+    onDownloadFile: (TheolResourceItem) -> Unit
+) {
+    if (subfolders.isEmpty()) return
+    val current = subfolders.first()
+    GlassSubpage(onDismiss = { onDismissDepth(0) }) { closeSubfolder ->
+        GlassPageScaffold(
+            title = current.folderTitle.ifBlank { "课程资源" },
+            subtitle = "$courseName · 课程资源",
+            onBack = closeSubfolder,
+            actions = {
+                if (loading) {
+                    GlassLoadingIndicator(size = 38.dp)
+                } else {
+                    SystemIconButton(
+                        icon = Icons.Outlined.Refresh,
+                        contentDescription = "刷新目录",
+                        tint = MaterialTheme.colorScheme.primary,
+                        onClick = { onRefreshAt(current) }
+                    )
+                }
+            }
+        ) { padding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                ResourcePageContent(
+                    page = current,
+                    emptyText = "当前目录下暂无公开课件或教学资源。",
+                    downloadingUrl = downloadingUrl,
+                    onOpenFolder = onOpenFolder,
+                    onPreviewFile = onPreviewFile,
+                    onDownloadFile = onDownloadFile
+                )
+            }
+        }
+        if (subfolders.size > 1) {
+            ResourceSubfolderStack(
+                courseName = courseName,
+                subfolders = subfolders.drop(1),
+                loading = loading,
+                downloadingUrl = downloadingUrl,
+                onDismissDepth = { childIdx -> onDismissDepth(childIdx + 1) },
+                onRefreshAt = onRefreshAt,
+                onOpenFolder = onOpenFolder,
+                onPreviewFile = onPreviewFile,
+                onDownloadFile = onDownloadFile
+            )
         }
     }
 }

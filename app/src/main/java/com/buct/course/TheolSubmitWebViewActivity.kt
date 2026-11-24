@@ -222,7 +222,7 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                         }
                     }
 
-                    BackHandler {
+                    BackHandler(enabled = downloadedFile != null || canGoBack) {
                         if (downloadedFile != null) {
                             downloadedFile = null
                             return@BackHandler
@@ -231,8 +231,7 @@ class TheolSubmitWebViewActivity : ComponentActivity() {
                         if (view != null && view.canGoBack()) {
                             pageError = null
                             view.goBack()
-                        } else {
-                            finish()
+                            canGoBack = view.canGoBack()
                         }
                     }
 

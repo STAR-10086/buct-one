@@ -420,7 +420,11 @@ class TheolClient {
     private class SessionExpiredSignal(message: String) : IOException(message)
 
     /** 在服务端 Tomcat HttpSession 中激活当前课程上下文，防止直达作业详情/提交页报 Permission Denied */
-    fun enterCourseContext(courseLid: String, force: Boolean = false): Boolean {
+    fun enterCourseContext(
+        courseLid: String,
+        force: Boolean = false,
+        touchHomework: Boolean = true
+    ): Boolean {
         val lid = courseLid.trim()
         if (lid.isEmpty()) return true
         if (!force && isCourseContextFresh(lid)) return true
@@ -432,16 +436,18 @@ class TheolClient {
             activeCourseActivatedAt = 0L
             return false
         }
-        // 部分课程使用自定义栏目，默认 hwtask.jsp 失败时仍可继续读取单条详情，因此忽略此步错误
-        val hwEntry = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
-        runCatching {
-            val req = Request.Builder()
-                .url(hwEntry)
-                .header("User-Agent", UA)
-                .header("Referer", courseHome)
-                .get()
-                .build()
-            meolClient.newCall(req).execute().use { /* 同步激活作业栏目上下文 */ }
+        if (touchHomework) {
+            // 部分课程使用自定义栏目，默认 hwtask.jsp 失败时仍可继续读取单条详情，因此忽略此步错误
+            val hwEntry = "$MEOL_BASE/meol/common/hw/student/hwtask.jsp?tagbug=client&strStyle=new03"
+            runCatching {
+                val req = Request.Builder()
+                    .url(hwEntry)
+                    .header("User-Agent", UA)
+                    .header("Referer", courseHome)
+                    .get()
+                    .build()
+                meolClient.newCall(req).execute().use { /* 同步激活作业栏目上下文 */ }
+            }
         }
         activeCourseLid = lid
         activeCourseActivatedAt = System.currentTimeMillis()
@@ -528,10 +534,23 @@ class TheolClient {
         val baseAttachmentDir = File(cacheRootDir, "theol_attachments")
         if (!baseAttachmentDir.exists()) baseAttachmentDir.mkdirs()
 
+        val isPreviewReferer = effectiveReferer.contains("download_preview.jsp", ignoreCase = true)
         for (attempt in 0..1) {
-            enterCourseContext(courseLid, force = attempt > 0)
+            enterCourseContext(courseLid, force = attempt > 0, touchHomework = !isPreviewReferer)
             var needsReauth = false
             var htmlDirectRetryUrl: String? = null
+            if (isPreviewReferer && allowHtmlDirectRetry) {
+                val previewHtml = runCatching {
+                    val courseHome = "$MEOL_BASE/meol/jpk/course/layout/newpage/index.jsp?courseId=${URLEncoder.encode(courseLid.trim(), "UTF-8")}"
+                    fetchHtml(effectiveReferer, courseHome)
+                }.getOrNull()
+                if (previewHtml != null && TheolParser.isPermissionDeniedOrExpired(previewHtml)) {
+                    if (attempt == 0 && ensureSessionActive(forceSso = true)) {
+                        continue
+                    }
+                    throw IOException("北化在线会话已过期，请刷新或重新登录后重试")
+                }
+            }
             val downloaded: TheolDownloadedFile? = try {
                 followAttachmentRedirects(secureUrl, effectiveReferer).use { resp ->
                     if (resp.code == 401 || resp.code == 403 || isMeolLoginUrl(resp.request.url)) {
@@ -745,13 +764,17 @@ class TheolClient {
         return fetchAllCatalogCourses()
     }
 
-    private fun extractJsAlertMessage(html: String): String? =
-        Regex("""alert\s*\(\s*['"]([^'"]+)['"]\s*\)""")
-            .find(html)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
+    private fun extractJsAlertMessage(html: String): String? {
+        val alertRegex = Regex("""alert\s*\(\s*['"]([^'"]+)['"]\s*\)""")
+        val doc = Jsoup.parse(html)
+        for (script in doc.select("script:not([src])")) {
+            val msg = alertRegex.find(script.data())?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            if (msg.isNotBlank() && !msg.contains("只有注册用户才可以提交错误报告")) {
+                return msg
+            }
+        }
+        return null
+    }
 
     /**
      * 第一阶段（前台秒出）：仅抓取 reminder 页中「待办作业/测验」所属课程，同时拿到待补齐的其余在修课程目录。
