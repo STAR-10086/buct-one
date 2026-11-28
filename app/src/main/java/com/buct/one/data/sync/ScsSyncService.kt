@@ -2,6 +2,9 @@ package com.buct.one.data.sync
 
 import android.content.Context
 import com.buct.one.data.model.DomainSlice
+import com.buct.one.data.model.ScsAuditHistoryItem
+import com.buct.one.data.model.ScsItemSelfEvalDetail
+import com.buct.one.data.model.ScsSelfEvalSubmitPayload
 import com.buct.one.data.model.ScsSnapshot
 import com.buct.one.data.session.SidPortalSessionVault
 import com.buct.one.data.source.scs.ScsClient
@@ -137,6 +140,104 @@ class ScsSyncService private constructor(
                 }
             }
         }
+
+    private suspend fun <T> executeAuthenticated(
+        userInitiated: Boolean = true,
+        block: () -> T
+    ): Result<T> = withContext(Dispatchers.IO) {
+        syncMutex.withLock {
+            try {
+                val sidBefore = SidPortalSessionVault.readCookies(appContext).first
+                restoreSidPortalCookies()
+                val value = try {
+                    block()
+                } catch (e: Exception) {
+                    if (!SsoSilentRelogin.isAuthFailure(e)) throw e
+                    val relogined = SsoSilentRelogin.attemptRelogin(
+                        context = appContext,
+                        sidSnapshotBefore = sidBefore,
+                        bypassCooldown = userInitiated
+                    ) { username, passwordChars ->
+                        val ok = client.loginWithSidCredentials(username, passwordChars).isSuccess
+                        if (ok) persistSidPortalCookies()
+                        ok
+                    }
+                    if (!relogined) throw e
+                    restoreSidPortalCookies()
+                    block()
+                }
+                persistSidPortalCookies()
+                Result.success(value)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    private fun requireStudentId(): String {
+        val id = _scsState.value.data?.studentId?.trim().orEmpty()
+        if (id.isBlank()) {
+            throw IllegalStateException("请先刷新同步第二课堂以获取学号信息")
+        }
+        return id
+    }
+
+    suspend fun loadItemSelfEvalDetail(
+        yearId: Int,
+        termId: Int,
+        itemId: Long
+    ): Result<ScsItemSelfEvalDetail> = executeAuthenticated {
+        val xh = requireStudentId()
+        client.fetchItemSelfEvalDetail(
+            yearId = yearId,
+            termId = termId,
+            studentId = xh,
+            itemId = itemId
+        )
+    }
+
+    suspend fun uploadProofImage(
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray
+    ): Result<String> = executeAuthenticated {
+        client.uploadCertificateImage(fileName = fileName, mimeType = mimeType, bytes = bytes)
+    }
+
+    suspend fun submitSelfEval(payload: ScsSelfEvalSubmitPayload): Result<Unit> {
+        val res = executeAuthenticated {
+            val xh = requireStudentId()
+            client.submitSelfEval(studentId = xh, payload = payload)
+        }
+        if (res.isSuccess) {
+            runCatching { refresh(userInitiated = false) }
+        }
+        return res
+    }
+
+    suspend fun revokeSelfEval(originDetailId: Long): Result<Unit> {
+        val res = executeAuthenticated {
+            client.revokeSelfEval(originDetailId = originDetailId)
+        }
+        if (res.isSuccess) {
+            runCatching { refresh(userInitiated = false) }
+        }
+        return res
+    }
+
+    suspend fun loadAuditHistories(
+        yearId: Int,
+        termId: Int,
+        typeId: Int? = null
+    ): Result<List<ScsAuditHistoryItem>> = executeAuthenticated {
+        val xh = requireStudentId()
+        client.fetchAuditHistories(
+            yearId = yearId,
+            termId = termId,
+            studentId = xh,
+            typeId = typeId
+        )
+    }
 
     companion object {
         @Volatile

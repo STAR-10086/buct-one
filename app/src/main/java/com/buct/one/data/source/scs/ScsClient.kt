@@ -8,6 +8,10 @@ import com.buct.course.login.BuctWebVpnAuthRequiredException
 import com.buct.course.login.BuctWebVpnInterceptor
 import com.buct.course.login.BuctWebVpnNetworkInterceptor
 import com.buct.course.login.MatchingMemoryCookieJar
+import com.buct.one.data.model.ScsAuditHistoryItem
+import com.buct.one.data.model.ScsCategoryDetail
+import com.buct.one.data.model.ScsItemSelfEvalDetail
+import com.buct.one.data.model.ScsSelfEvalSubmitPayload
 import com.buct.one.data.model.ScsSnapshot
 import com.buct.one.data.model.ScsTermScore
 import okhttp3.Cookie
@@ -15,9 +19,11 @@ import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.io.IOException
@@ -428,12 +434,60 @@ class ScsClient {
         }
     }
 
-    /** 拉取第二课堂完整快照（个人信息、自评窗口、五育维度满分、历年各学期明细、历史记录、校园二课活动） */
+    private fun executeApiMultipartUpload(path: String, fileName: String, mimeType: String, bytes: ByteArray): String {
+        ensureTokenReady()
+        return try {
+            doApiMultipartUpload(path, fileName, mimeType, bytes)
+        } catch (_: ScsTokenExpiredException) {
+            appToken = ""
+            if (!authenticateWithSso()) throw IOException("第二课堂会话已过期，请重新登录")
+            doApiMultipartUpload(path, fileName, mimeType, bytes)
+        }
+    }
+
+    private fun doApiMultipartUpload(path: String, fileName: String, mimeType: String, bytes: ByteArray): String {
+        val filePart = bytes.toRequestBody(mimeType.ifBlank { "image/jpeg" }.toMediaType())
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", fileName.ifBlank { "proof.jpg" }, filePart)
+            .build()
+        val req = Request.Builder()
+            .url("$SCS_API_BASE$path")
+            .header("User-Agent", UA)
+            .header("App-Token", appToken)
+            .header("App-source", APP_SOURCE)
+            .header("App-Version", APP_VERSION)
+            .header("Device-Id", DEVICE_ID)
+            .post(multipart)
+            .build()
+        return httpClient.newCall(req).execute().use { resp ->
+            val respBody = resp.body?.string().orEmpty()
+            if (resp.code == 401 || resp.code == 403) {
+                throw ScsTokenExpiredException("HTTP ${resp.code}")
+            }
+            if (!resp.isSuccessful) {
+                throw IOException("证明图片上传失败（HTTP ${resp.code}）")
+            }
+            val code = runCatching { JSONObject(respBody).optInt("code", 200) }.getOrDefault(200)
+            val msg = runCatching { JSONObject(respBody).optString("message", "") }.getOrDefault("")
+            if (ScsParser.isUnauthorized(code, msg)) {
+                throw ScsTokenExpiredException(msg.ifBlank { "认证失效" })
+            }
+            respBody
+        }
+    }
+
+    /** 拉取第二课堂完整快照（个人信息、自评窗口、五育维度满分、历年各学期明细、当前学期自评细则、校园二课活动） */
     fun fetchFullSnapshot(): ScsSnapshot = runCampusCall {
         val userJson = executeApiGet("/sysAccount/getLoginUserInfo")
         val userInfo = ScsParser.parseUserInfo(userJson)
 
-        val windowJson = runCatching { executeApiGet("/scSelfEvalTerm/getDefaultYearAndTerm") }.getOrDefault("")
+        val selfEvalTermJson = runCatching { executeApiGet("/scSelfEvalTerm/getSelfEvalTerm") }.getOrDefault("")
+        val windowJson = if (selfEvalTermJson.isNotBlank() && ScsParser.parseCurrentEvalWindow(selfEvalTermJson) != null) {
+            selfEvalTermJson
+        } else {
+            runCatching { executeApiGet("/scSelfEvalTerm/getDefaultYearAndTerm") }.getOrDefault("")
+        }
         val currentWindow = if (windowJson.isNotBlank()) ScsParser.parseCurrentEvalWindow(windowJson) else null
 
         val dimensionsJson = runCatching { executeApiGet("/scStudentEvaluationType/getEvaluationType") }.getOrDefault("")
@@ -442,28 +496,77 @@ class ScsClient {
         val allScoreJson = executeApiGet("/tStudent/getLoginStudentAllScore")
         var terms = ScsParser.parseAllTermsScores(allScoreJson)
 
-        // 若当前自评开放中且当前学期暂无五育明细，拉取当前学期的自评评定细则以便展示自评表结构
-        if (currentWindow != null) {
-            val idx = terms.indexOfFirst { it.termId == currentWindow.termId && it.yearId == currentWindow.yearId }
-            if (idx >= 0 && terms[idx].details.isEmpty()) {
+        // 拉取当前自评学期的五育最新细则（含 optional 分值档位、itemMaxScore、待审核标记与是否必传证明）
+        if (currentWindow != null && currentWindow.yearId > 0 && currentWindow.termId > 0) {
+            val liveDetails: List<ScsCategoryDetail> = if (userInfo.studentId.isNotBlank()) {
+                (1..5).mapNotNull { typeId ->
+                    val json = runCatching {
+                        executeApiPost(
+                            "/scStudentEvaluationItem/getStudentPassScore",
+                            JSONObject()
+                                .put("yearId", currentWindow.yearId)
+                                .put("termId", currentWindow.termId)
+                                .put("xh", userInfo.studentId)
+                                .put("typeId", typeId)
+                        )
+                    }.getOrDefault("")
+                    if (json.isNotBlank()) ScsParser.parseStudentPassScoreCategory(json, typeId) else null
+                }
+            } else {
+                emptyList()
+            }
+
+            val fallbackDetails = if (liveDetails.isEmpty()) {
                 val evalItemsJson = runCatching {
                     executeApiPost(
                         "/scStudentEvaluationItem/getAppointTermEvaluationItems",
                         JSONObject().put("yearId", currentWindow.yearId).put("termId", currentWindow.termId)
                     )
                 }.getOrDefault("")
-                if (evalItemsJson.isNotBlank()) {
-                    val parsedDetails = ScsParser.parseCurrentTermEvalDetails(evalItemsJson)
-                    if (parsedDetails.isNotEmpty()) {
-                        val mutable = terms.toMutableList()
-                        val old = mutable[idx]
-                        mutable[idx] = old.copy(
-                            isOpenSelfEva = currentWindow.isOpen || old.isOpenSelfEva,
-                            details = parsedDetails
+                if (evalItemsJson.isNotBlank()) ScsParser.parseCurrentTermEvalDetails(evalItemsJson) else emptyList()
+            } else {
+                liveDetails
+            }
+
+            if (fallbackDetails.isNotEmpty()) {
+                val mutable = terms.toMutableList()
+                val idx = mutable.indexOfFirst { it.termId == currentWindow.termId && it.yearId == currentWindow.yearId }
+                if (idx >= 0) {
+                    val old = mutable[idx]
+                    val byType = fallbackDetails.associateBy { it.typeId }
+                    mutable[idx] = old.copy(
+                        isOpenSelfEva = currentWindow.isOpen || old.isOpenSelfEva,
+                        moral = old.moral ?: byType[1]?.totalScore,
+                        academic = old.academic ?: byType[2]?.totalScore,
+                        physical = old.physical ?: byType[3]?.totalScore,
+                        aesthetics = old.aesthetics ?: byType[4]?.totalScore,
+                        labor = old.labor ?: byType[5]?.totalScore,
+                        details = fallbackDetails
+                    )
+                } else {
+                    val byType = fallbackDetails.associateBy { it.typeId }
+                    val sumKnown = fallbackDetails.mapNotNull { it.totalScore }.takeIf { it.isNotEmpty() }?.sum()
+                    mutable.add(
+                        0,
+                        ScsTermScore(
+                            termId = currentWindow.termId,
+                            yearId = currentWindow.yearId,
+                            yearName = currentWindow.yearName.ifBlank { "当前学年" },
+                            termName = currentWindow.termName.ifBlank { "当前学期" },
+                            isFullYear = false,
+                            status = 0,
+                            totalScore = sumKnown,
+                            moral = byType[1]?.totalScore,
+                            academic = byType[2]?.totalScore,
+                            physical = byType[3]?.totalScore,
+                            aesthetics = byType[4]?.totalScore,
+                            labor = byType[5]?.totalScore,
+                            isOpenSelfEva = currentWindow.isOpen,
+                            details = fallbackDetails
                         )
-                        terms = mutable
-                    }
+                    )
                 }
+                terms = mutable
             }
         }
 
@@ -495,5 +598,86 @@ class ScsClient {
             terms = terms,
             activities = activities
         )
+    }
+
+    /** 拉取单条细则的官方自评详情（待审核/已通过/已拒绝记录、劳育工时门槛与提交权限）。 */
+    fun fetchItemSelfEvalDetail(
+        yearId: Int,
+        termId: Int,
+        studentId: String,
+        itemId: Long
+    ): ScsItemSelfEvalDetail = runCampusCall {
+        val body = JSONObject()
+            .put("yearId", yearId)
+            .put("termId", termId)
+            .put("xh", studentId)
+            .put("id", itemId)
+        val resp = executeApiPost("/scOriginScoreDetail/student/getStudentWebItemDetail", body)
+        ScsParser.parseItemSelfEvalDetail(resp, yearId = yearId, termId = termId, itemId = itemId)
+    }
+
+    /** 上传自评证明图片（单张上限 4MB，返回服务端图片 URL）。 */
+    fun uploadCertificateImage(
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray
+    ): String = runCampusCall {
+        if (bytes.size > 4 * 1024 * 1024) {
+            throw IOException("单张证明图片不能超过 4 MB")
+        }
+        val resp = executeApiMultipartUpload("/image/uploadToFiles", fileName, mimeType, bytes)
+        ScsParser.parseUploadedImageUrl(resp)
+    }
+
+    /** 提交或修改官方学生自评记录。 */
+    fun submitSelfEval(studentId: String, payload: ScsSelfEvalSubmitPayload) = runCampusCall {
+        val certJson = JSONArray().apply {
+            payload.certificateUrls.filter { it.isNotBlank() }.forEach { put(it) }
+        }.toString()
+        val body = JSONObject()
+            .put("yearId", payload.yearId)
+            .put("termId", payload.termId)
+            .put("xh", studentId)
+            .put("itemId", payload.itemId)
+            .put("mark", payload.mark)
+            .put("certificate", certJson)
+            .put("source", "WEB_SELF_EVALUATION")
+        payload.score?.let { body.put("score", it) }
+        payload.laborHours?.let { body.put("laborHours", it) }
+        if (payload.journalName.isNotBlank()) {
+            body.put("journalName", payload.journalName)
+        }
+        payload.relateOriginDetailId?.let { body.put("relateOriginDetailId", it) }
+        payload.relateSubmitState?.takeIf { it.isNotBlank() }?.let { body.put("relateSubmitState", it) }
+
+        val resp = executeApiPost("/scOriginScoreDetail/student/updateOrCreateOriginDetail", body)
+        ScsParser.ensureActionSucceeded(resp, "提交自评失败")
+    }
+
+    /** 撤销待审核的学生自评记录。 */
+    fun revokeSelfEval(originDetailId: Long) = runCampusCall {
+        val body = JSONObject().put("relateOriginDetailId", originDetailId)
+        val resp = executeApiPost("/scOriginScoreDetail/student/revokeDeleteOriginDetail", body)
+        ScsParser.ensureActionSucceeded(resp, "撤销自评记录失败")
+    }
+
+    /** 拉取评定审核历史记录。 */
+    fun fetchAuditHistories(
+        yearId: Int,
+        termId: Int,
+        studentId: String,
+        typeId: Int? = null
+    ): List<ScsAuditHistoryItem> = runCampusCall {
+        val body = JSONObject()
+            .put("yearId", yearId)
+            .put("termId", termId)
+            .put("xh", studentId)
+            .put("currentPage", 1)
+            .put("pageSize", 50)
+        if (typeId != null && typeId in 1..5) {
+            body.put("typeId", typeId)
+        }
+        val resp = executeApiPost("/scAuditOriginHistory/listHistories", body)
+        ScsParser.parseAuditHistories(resp)
     }
 }

@@ -163,6 +163,7 @@ class ScsStore(context: Context) {
                     put("isOpen", w.isOpen)
                     put("startTime", w.startTime)
                     put("endTime", w.endTime)
+                    put("message", w.message)
                 }
             )
         }
@@ -229,6 +230,19 @@ class ScsStore(context: Context) {
                                                                     put("teacherComments", it.teacherComments)
                                                                     putNullableDouble(this, "laborHours", it.laborHours)
                                                                     put("stuAble", it.stuAble)
+                                                                    put("optionalScores", JSONArray().apply {
+                                                                        it.optionalScores.forEach { v -> put(v) }
+                                                                    })
+                                                                    putNullableDouble(this, "itemMaxScore", it.itemMaxScore)
+                                                                    put("reasonRequired", it.reasonRequired)
+                                                                    put("imageRequired", it.imageRequired)
+                                                                    put("journalNameRequired", it.journalNameRequired)
+                                                                    put("laborHoursItem", it.laborHoursItem)
+                                                                    put("laborHoursRule", it.laborHoursRule)
+                                                                    put("havePendApproval", it.havePendApproval)
+                                                                    put("lowScoreWarn", it.lowScoreWarn)
+                                                                    put("unSubmitReason", it.unSubmitReason)
+                                                                    put("problemNumber", it.problemNumber)
                                                                 }
                                                             )
                                                         }
@@ -275,7 +289,8 @@ class ScsStore(context: Context) {
                 termName = it.optString("termName", ""),
                 isOpen = it.optBoolean("isOpen", false),
                 startTime = it.optString("startTime", ""),
-                endTime = it.optString("endTime", "")
+                endTime = it.optString("endTime", ""),
+                message = it.optString("message", "")
             )
         }
         val dimArr = o.optJSONArray("dimensions") ?: JSONArray()
@@ -316,7 +331,26 @@ class ScsStore(context: Context) {
                                         mark = it.optString("mark", ""),
                                         teacherComments = it.optString("teacherComments", ""),
                                         laborHours = optNullableDouble(it, "laborHours"),
-                                        stuAble = it.optBoolean("stuAble", false)
+                                        stuAble = it.optBoolean("stuAble", false),
+                                        optionalScores = buildList {
+                                            val optArr = it.optJSONArray("optionalScores")
+                                            if (optArr != null) {
+                                                for (m in 0 until optArr.length()) {
+                                                    val v = optArr.optDouble(m, Double.NaN)
+                                                    if (!v.isNaN()) add(v)
+                                                }
+                                            }
+                                        },
+                                        itemMaxScore = optNullableDouble(it, "itemMaxScore"),
+                                        reasonRequired = it.optBoolean("reasonRequired", false),
+                                        imageRequired = it.optBoolean("imageRequired", false),
+                                        journalNameRequired = it.optBoolean("journalNameRequired", false),
+                                        laborHoursItem = it.optBoolean("laborHoursItem", false),
+                                        laborHoursRule = it.optString("laborHoursRule", ""),
+                                        havePendApproval = it.optBoolean("havePendApproval", false),
+                                        lowScoreWarn = it.optBoolean("lowScoreWarn", false),
+                                        unSubmitReason = it.optString("unSubmitReason", ""),
+                                        problemNumber = it.optInt("problemNumber", 0)
                                     )
                                 )
                             }
